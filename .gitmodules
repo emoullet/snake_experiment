@@ -1,3 +1,15 @@
-[submodule "cartesian_manager"]
-	path = cartesian_manager
+[submodule "dependencies/cartesian_manager"]
+	path = dependencies/cartesian_manager
 	url = https://github.com/ISIR-EXTENDER/cartesian_manager
+[submodule "dependencies/input_interfaces"]
+	path = dependencies/input_interfaces
+	url = https://github.com/ISIR-EXTENDER/input_interfaces
+[submodule "dependencies/tools"]
+	path = dependencies/tools
+	url = https://github.com/ISIR-EXTENDER/tools
+[submodule "dependencies/qontrol_controller"]
+	path = dependencies/qontrol_controller
+	url = https://github.com/ISIR-EXTENDER/qontrol_controller
+[submodule "dependencies/explorer_stack"]
+	path = dependencies/explorer_stack
+	url = https://github.com/ISIR-EXTENDER/explorer_stack
