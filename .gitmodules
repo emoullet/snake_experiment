@@ -1,0 +1,3 @@
+[submodule "cartesian_manager"]
+	path = cartesian_manager
+	url = https://github.com/ISIR-EXTENDER/cartesian_manager
