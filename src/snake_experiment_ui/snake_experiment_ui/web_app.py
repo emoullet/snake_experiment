@@ -65,6 +65,11 @@ def create_app(
         operator_action(lambda: mode_manager.activate(mode))
         return snapshot()
 
+    @app.post("/api/modes/{mode}/deactivate")
+    async def deactivate_mode(mode: str):
+        operator_action(lambda: mode_manager.deactivate(mode))
+        return snapshot()
+
     @app.post("/api/stack/{action}")
     async def control_stack(action: str):
         if action == "start":

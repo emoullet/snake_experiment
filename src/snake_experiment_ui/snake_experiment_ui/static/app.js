@@ -8,6 +8,19 @@ const POSES = [
   ["starting_point", "Starting point", "Record starting point"],
 ];
 
+const MODE_COPY = {
+  baseline: {
+    activate: "Activate baseline mode",
+    deactivate: "Deactivate baseline mode",
+    description: "Jaco geometric control",
+  },
+  snake: {
+    activate: "Activate snake mode",
+    deactivate: "Deactivate snake mode",
+    description: "Translation–orientation coupling",
+  },
+};
+
 class PanelA {
   constructor() {
     this.state = null;
@@ -48,7 +61,15 @@ class PanelA {
       }
       const modeButton = event.target.closest("[data-mode]");
       if (modeButton) {
-        await this.post(`/api/modes/${modeButton.dataset.mode}`, "Control mode activated.");
+        const selectedMode = modeButton.dataset.mode;
+        const isActive = this.state?.mode.active_mode === selectedMode;
+        const url = isActive
+          ? `/api/modes/${selectedMode}/deactivate`
+          : `/api/modes/${selectedMode}`;
+        const message = isActive
+          ? "Control mode deactivated."
+          : "Control mode activated.";
+        await this.post(url, message);
         return;
       }
       const recordButton = event.target.closest("[data-record]");
@@ -159,10 +180,24 @@ class PanelA {
             : "pill--busy"
     }`;
 
+    const modeIsTransitioning = ["starting", "stopping"].includes(mode.status);
     document.querySelectorAll("[data-mode]").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.mode === mode.active_mode);
-      button.setAttribute("aria-pressed", String(button.dataset.mode === mode.active_mode));
-      button.disabled = this.busy;
+      const buttonMode = button.dataset.mode;
+      const isActive = buttonMode === mode.active_mode;
+      const copy = MODE_COPY[buttonMode];
+      button.classList.toggle("is-active", isActive);
+      button.classList.toggle("is-stop", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+      button.querySelector("strong").textContent = isActive
+        ? copy.deactivate
+        : copy.activate;
+      button.querySelector("small").textContent = isActive
+        ? "Stop the joystick mapper"
+        : copy.description;
+      button.disabled =
+        this.busy ||
+        modeIsTransitioning ||
+        (mode.active_mode !== null && !isActive);
     });
     const modeError = document.getElementById("mode-error");
     modeError.hidden = !mode.error;

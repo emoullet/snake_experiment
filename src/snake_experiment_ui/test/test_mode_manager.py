@@ -69,6 +69,8 @@ class ModeManagerTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ModeError, "Unknown"):
             manager.activate("automatic")
+        with self.assertRaisesRegex(ModeError, "Unknown"):
+            manager.deactivate("automatic")
 
     @patch("snake_experiment_ui.mode_manager.os.killpg")
     def test_shutdown_stops_owned_process(self, killpg):
@@ -88,6 +90,65 @@ class ModeManagerTest(unittest.TestCase):
         manager.shutdown()
         killpg.assert_called_once()
         self.assertEqual(manager.snapshot()["status"], "inactive")
+
+    @patch("snake_experiment_ui.mode_manager.os.killpg")
+    def test_deactivate_stops_only_the_requested_owned_mode(self, killpg):
+        names = []
+
+        def create_process(*args, **kwargs):
+            names.append("joystick_mapper")
+            return FakeProcess(*args, **kwargs)
+
+        killpg.side_effect = lambda *_: names.clear()
+        manager = ModeManager(
+            node_names=lambda: names,
+            publish_mode_request=lambda _: None,
+            popen_factory=create_process,
+            sleep=lambda _: None,
+        )
+        manager.activate("baseline")
+
+        result = manager.deactivate("baseline")
+        repeated = manager.deactivate("baseline")
+
+        killpg.assert_called_once()
+        self.assertEqual(result["status"], "inactive")
+        self.assertIsNone(result["active_mode"])
+        self.assertEqual(repeated["status"], "inactive")
+
+    @patch("snake_experiment_ui.mode_manager.os.killpg")
+    def test_deactivate_rejects_a_different_mode(self, killpg):
+        names = []
+
+        def create_process(*args, **kwargs):
+            names.append("joystick_mapper")
+            return FakeProcess(*args, **kwargs)
+
+        manager = ModeManager(
+            node_names=lambda: names,
+            publish_mode_request=lambda _: None,
+            popen_factory=create_process,
+            sleep=lambda _: None,
+        )
+        manager.activate("baseline")
+
+        with self.assertRaisesRegex(ModeError, "while active mode is baseline"):
+            manager.deactivate("snake")
+
+        killpg.assert_not_called()
+        self.assertEqual(manager.snapshot()["active_mode"], "baseline")
+
+    @patch("snake_experiment_ui.mode_manager.os.killpg")
+    def test_deactivate_does_not_stop_an_external_mapper(self, killpg):
+        manager = ModeManager(
+            node_names=lambda: ["/joystick_mapper"],
+            publish_mode_request=lambda _: None,
+        )
+
+        result = manager.deactivate("baseline")
+
+        killpg.assert_not_called()
+        self.assertEqual(result["status"], "inactive")
 
 
 if __name__ == "__main__":

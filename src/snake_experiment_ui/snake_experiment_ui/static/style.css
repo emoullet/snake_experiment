@@ -209,6 +209,29 @@ h2 {
   box-shadow: inset 0 0 0 1px var(--blue);
 }
 
+.mode-button.is-stop {
+  color: var(--red);
+  border-color: #efb8bd;
+  background: var(--red-soft);
+  box-shadow: inset 0 0 0 1px #efb8bd;
+}
+
+.mode-button.is-stop .mode-button__mark {
+  color: var(--red);
+  background: #f9d9dc;
+}
+
+.mode-button.is-stop:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--red);
+  background: var(--red);
+  box-shadow: 0 7px 20px rgb(188 47 58 / 16%);
+}
+
+.mode-button.is-stop:hover:not(:disabled) small {
+  color: #fff;
+}
+
 .mode-button__mark {
   display: grid;
   width: 42px;

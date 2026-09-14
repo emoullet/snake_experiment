@@ -9,6 +9,7 @@ except ImportError:  # pragma: no cover - reported by the package dependency che
     httpx = None
 
 from snake_experiment_ui.calibration import CalibrationError
+from snake_experiment_ui.mode_manager import ModeError
 
 
 class FakeCalibrationState:
@@ -42,10 +43,20 @@ class FakeModeManager:
         self.mode = None
 
     def snapshot(self):
-        return {"active_mode": self.mode, "status": "active", "error": None}
+        return {
+            "active_mode": self.mode,
+            "status": "active" if self.mode else "inactive",
+            "error": None,
+        }
 
     def activate(self, mode):
         self.mode = mode
+
+    def deactivate(self, mode):
+        if self.mode is not None and self.mode != mode:
+            raise ModeError(f"Cannot deactivate {mode} while {self.mode} is active.")
+        if self.mode == mode:
+            self.mode = None
 
 
 class FakeStackManager:
@@ -126,6 +137,14 @@ class WebAppTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request("POST", "/api/modes/snake")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["mode"]["active_mode"], "snake")
+
+        response = await self.request("POST", "/api/modes/baseline/deactivate")
+        self.assertEqual(response.status_code, 409)
+
+        response = await self.request("POST", "/api/modes/snake/deactivate")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["mode"]["active_mode"])
+        self.assertEqual(response.json()["mode"]["status"], "inactive")
 
     def test_static_assets_follow_colcon_symlinks(self):
         path, stat_result = self.static_app.lookup_path("app.js")

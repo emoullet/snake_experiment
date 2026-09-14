@@ -140,6 +140,32 @@ class ModeManager:
             self._stop_locked(preserve_error=True)
             raise ModeError(self._error)
 
+    def deactivate(self, mode: str) -> dict:
+        """Stop the owned mapper for the requested active mode."""
+        if mode not in MODES:
+            raise ModeError(f"Unknown control mode: {mode}")
+        with self._lock:
+            self._refresh_process_state()
+            if self._active_mode is None and self._process is None:
+                self._status = "inactive"
+                self._error = None
+                return self.snapshot()
+            if self._active_mode != mode:
+                active_mode = self._active_mode or "none"
+                raise ModeError(
+                    f"Cannot deactivate {mode} mode while active mode is {active_mode}."
+                )
+
+            self._stop_locked()
+            deadline = time.monotonic() + self._shutdown_timeout_sec
+            while self._mapper_visible() and time.monotonic() < deadline:
+                self._sleep(0.05)
+            if self._mapper_visible():
+                self._status = "error"
+                self._error = "Joystick mapper did not leave the ROS graph in time."
+                raise ModeError(self._error)
+            return self.snapshot()
+
     def _stop_locked(self, preserve_error: bool = False) -> None:
         if self._process is None:
             if not preserve_error:
