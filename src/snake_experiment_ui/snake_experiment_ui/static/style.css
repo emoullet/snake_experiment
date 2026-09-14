@@ -294,6 +294,31 @@ button:disabled {
   margin-top: 8px;
 }
 
+.current-pose {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #c7d9f1;
+  border-radius: 12px;
+  background: var(--blue-soft);
+}
+
+.current-pose__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.current-pose__heading h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.current-pose__grid {
+  margin-top: 12px;
+  background: rgb(255 255 255 / 72%);
+}
+
 .capture-card {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto;
@@ -478,6 +503,11 @@ button:disabled {
 
   .pose-grid {
     grid-template-columns: 1fr;
+  }
+
+  .current-pose__heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

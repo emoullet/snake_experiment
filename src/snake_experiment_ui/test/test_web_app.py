@@ -17,7 +17,11 @@ class FakeCalibrationState:
 
     def snapshot(self):
         return {
-            "pose_stream": {"received": True, "fresh": True},
+            "pose_stream": {
+                "received": True,
+                "fresh": True,
+                "current_pose": None,
+            },
             "captures": {},
             "can_capture": True,
             "can_save": False,

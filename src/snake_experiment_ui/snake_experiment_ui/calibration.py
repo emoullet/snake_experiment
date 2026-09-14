@@ -180,6 +180,26 @@ class CalibrationState:
             age = self._pose_age()
             fresh = self._pose_is_fresh()
             error = self._save_error()
+            current_pose = None
+            if self._latest_pose is not None:
+                message = self._latest_pose
+                current_pose = {
+                    "frame_id": str(message.header.frame_id),
+                    "stamp_sec": int(message.header.stamp.sec),
+                    "stamp_nanosec": int(message.header.stamp.nanosec),
+                    "received_at_utc": self._latest_received_utc,
+                    "position": {
+                        "x": self._finite_or_none(message.pose.position.x),
+                        "y": self._finite_or_none(message.pose.position.y),
+                        "z": self._finite_or_none(message.pose.position.z),
+                    },
+                    "orientation": {
+                        "x": self._finite_or_none(message.pose.orientation.x),
+                        "y": self._finite_or_none(message.pose.orientation.y),
+                        "z": self._finite_or_none(message.pose.orientation.z),
+                        "w": self._finite_or_none(message.pose.orientation.w),
+                    },
+                }
             return {
                 "pose_stream": {
                     "received": self._latest_pose is not None,
@@ -190,6 +210,7 @@ class CalibrationState:
                         if self._latest_pose is not None
                         else None
                     ),
+                    "current_pose": current_pose,
                 },
                 "captures": {
                     pose_id: (
@@ -205,3 +226,8 @@ class CalibrationState:
                 and self._mode_provider() in ("baseline", "snake"),
                 "save_blocker": error,
             }
+
+    @staticmethod
+    def _finite_or_none(value) -> Optional[float]:
+        numeric_value = float(value)
+        return numeric_value if math.isfinite(numeric_value) else None

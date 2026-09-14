@@ -54,6 +54,20 @@ class CalibrationStateTest(unittest.TestCase):
         record = self.state.capture("target_1")
         self.assertEqual(record["orientation"]["w"], 1.0)
 
+    def test_snapshot_exposes_the_current_pose(self):
+        self.state.update_live_pose(pose_message())
+
+        stream = self.state.snapshot()["pose_stream"]
+
+        self.assertTrue(stream["fresh"])
+        self.assertEqual(stream["current_pose"]["frame_id"], "base_link")
+        self.assertEqual(
+            stream["current_pose"]["position"],
+            {"x": 1.0, "y": 2.0, "z": 3.0},
+        )
+        self.assertEqual(stream["current_pose"]["orientation"]["w"], 2.0)
+        self.assertEqual(stream["current_pose"]["stamp_nanosec"], 345)
+
     def test_invalid_pose_id_and_quaternion_are_rejected(self):
         self.state.update_live_pose(pose_message())
         with self.assertRaisesRegex(CalibrationError, "Unknown"):

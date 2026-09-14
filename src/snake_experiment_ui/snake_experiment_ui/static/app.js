@@ -180,6 +180,7 @@ class PanelA {
         ? `${this.state.pose_topic} is stale`
         : `Waiting for ${this.state.pose_topic}`;
     streamElement.innerHTML = `<span class="status-dot ${dotClass}"></span><span>${this.escapeHtml(streamLabel)}</span>`;
+    this.renderCurrentPose(stream);
 
     for (const [poseId] of POSES) {
       const card = document.querySelector(`[data-pose-id="${poseId}"]`);
@@ -187,9 +188,7 @@ class PanelA {
       const pill = card.querySelector("[class^='pill']");
       pill.textContent = capture ? "Recorded" : "Not recorded";
       pill.className = `pill ${capture ? "pill--recorded" : "pill--neutral"}`;
-      card.querySelector(".pose-slot").innerHTML = capture
-        ? this.poseDetails(capture)
-        : "";
+      this.renderCapturedPose(card.querySelector(".pose-slot"), capture);
       card.querySelector("[data-record]").disabled = this.busy || !this.state.can_capture;
     }
 
@@ -199,6 +198,43 @@ class PanelA {
       ? "All seven poses are ready to save."
       : this.state.save_blocker || "Calibration is not ready to save.";
     document.getElementById("save-directory").textContent = this.state.calibration_directory;
+  }
+
+  renderCurrentPose(stream) {
+    const pose = stream.current_pose;
+    const state = document.getElementById("current-pose-state");
+    state.textContent = !pose ? "Waiting for data" : stream.fresh ? "Live" : "Stale";
+    state.className = `pill ${
+      !pose ? "pill--neutral" : stream.fresh ? "pill--active" : "pill--busy"
+    }`;
+
+    document.getElementById("current-pose-frame").textContent = pose?.frame_id || "—";
+    document.getElementById("current-pose-age").textContent =
+      stream.age_sec === null || stream.age_sec === undefined
+        ? "—"
+        : `${Number(stream.age_sec).toFixed(3)} s`;
+    document.getElementById("current-pose-position").textContent = pose
+      ? this.vector(pose.position)
+      : "—";
+    document.getElementById("current-pose-orientation").textContent = pose
+      ? this.vector(pose.orientation)
+      : "—";
+    document.getElementById("current-pose-stamp").textContent = pose
+      ? `${pose.stamp_sec}.${String(pose.stamp_nanosec).padStart(9, "0")}`
+      : "—";
+    document.getElementById("current-pose-received").textContent =
+      pose?.received_at_utc || "—";
+  }
+
+  renderCapturedPose(slot, capture) {
+    const signature = capture ? JSON.stringify(capture) : "";
+    if (slot.dataset.poseSignature === signature) return;
+
+    const wasOpen = slot.querySelector("details")?.open || false;
+    slot.innerHTML = capture ? this.poseDetails(capture) : "";
+    const details = slot.querySelector("details");
+    if (details) details.open = wasOpen;
+    slot.dataset.poseSignature = signature;
   }
 
   poseDetails(pose) {
@@ -220,7 +256,9 @@ class PanelA {
 
   vector(values) {
     return Object.entries(values)
-      .map(([key, value]) => `${key} ${Number(value).toFixed(5)}`)
+      .map(([key, value]) =>
+        `${key} ${value === null || value === undefined ? "—" : Number(value).toFixed(5)}`
+      )
       .join(" · ");
   }
 

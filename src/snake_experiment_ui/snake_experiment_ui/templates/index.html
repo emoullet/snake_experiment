@@ -78,6 +78,21 @@
           </div>
         </div>
 
+        <section class="current-pose" aria-labelledby="current-pose-heading">
+          <div class="current-pose__heading">
+            <h3 id="current-pose-heading">Current pose</h3>
+            <span id="current-pose-state" class="pill pill--neutral">Waiting for data</span>
+          </div>
+          <dl class="pose-grid current-pose__grid">
+            <div><dt>Frame</dt><dd id="current-pose-frame">—</dd></div>
+            <div><dt>Age</dt><dd id="current-pose-age">—</dd></div>
+            <div><dt>Position</dt><dd id="current-pose-position">—</dd></div>
+            <div><dt>Quaternion</dt><dd id="current-pose-orientation">—</dd></div>
+            <div><dt>ROS stamp</dt><dd id="current-pose-stamp">—</dd></div>
+            <div><dt>Received</dt><dd id="current-pose-received">—</dd></div>
+          </dl>
+        </section>
+
         <div class="capture-list">
           <article class="capture-card" data-pose-id="target_1"></article>
           <article class="capture-card" data-pose-id="target_out_1"></article>
