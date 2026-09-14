@@ -10,7 +10,7 @@ def generate_launch_description():
         [
             FindPackageShare("joystick_mapper"),
             "config",
-            "joystick_2d.yaml",
+            "joystick_2d_baseline.yaml",
         ]
     )
     config_file = LaunchConfiguration("config_file")
