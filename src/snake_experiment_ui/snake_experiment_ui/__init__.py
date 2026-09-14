@@ -1,0 +1,1 @@
+"""Snake experiment operator interface."""

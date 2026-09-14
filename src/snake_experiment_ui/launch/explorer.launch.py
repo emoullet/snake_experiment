@@ -1,8 +1,14 @@
+"""Launch the Explorer stack without a joystick mapper."""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import (
+    LaunchConfiguration,
+    PathJoinSubstitution,
+    PythonExpression,
+)
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -10,49 +16,30 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     gui = LaunchConfiguration("gui")
     use_simulation = LaunchConfiguration("use_simulation")
-    joystick_config_file = LaunchConfiguration("joystick_config_file")
-    use_actuator_interface = PythonExpression([
-        "'false' if '", use_simulation, "' == 'true' else 'true'"
-    ])
+    use_actuator_interface = PythonExpression(
+        ["'false' if '", use_simulation, "' == 'true' else 'true'"]
+    )
 
-    declared_arguments = [
+    arguments = [
         DeclareLaunchArgument(
             "gui",
             default_value="true",
-            description="Start RViz2 automatically with this launch file.",
+            description="Start RViz2 automatically.",
         ),
         DeclareLaunchArgument(
             "use_simulation",
             default_value="false",
-            description="Whether to launch the Gazebo simulation environment.",
-        ),
-        DeclareLaunchArgument(
-            "joystick_config_file",
-            default_value=PathJoinSubstitution([
-                FindPackageShare("joystick_mapper"),
-                "config",
-                "joystick_3d.yaml",
-            ]),
-            description="Joystick mapper parameter file.",
-        ),
-        DeclareLaunchArgument(
-            "publish_ee_pose_from_tf",
-            default_value="true",
-            description="Publish /ee_pose from TF until qontrol_controller provides it.",
+            description="Launch Gazebo instead of the robot hardware.",
         ),
     ]
 
-    controller_config = PathJoinSubstitution([
-        FindPackageShare("cartesian_manager"),
-        "config",
-        "explorer_params.yaml",
-    ])
-
+    controller_config = PathJoinSubstitution(
+        [FindPackageShare("cartesian_manager"), "config", "explorer_params.yaml"]
+    )
     robot_simulation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            FindPackageShare("explorer_bringup"),
-            "/launch/simulation_base.launch.py",
-        ]),
+        PythonLaunchDescriptionSource(
+            [FindPackageShare("explorer_bringup"), "/launch/simulation_base.launch.py"]
+        ),
         launch_arguments={
             "use_POC2": "true",
             "gui": gui,
@@ -63,12 +50,10 @@ def generate_launch_description():
         }.items(),
         condition=IfCondition(use_simulation),
     )
-
     robot_hardware = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            FindPackageShare("explorer_bringup"),
-            "/launch/hardware_base.launch.py",
-        ]),
+        PythonLaunchDescriptionSource(
+            [FindPackageShare("explorer_bringup"), "/launch/hardware_base.launch.py"]
+        ),
         launch_arguments={
             "gui": gui,
             "use_sim_time": use_simulation,
@@ -88,14 +73,13 @@ def generate_launch_description():
         executable="spawner",
         arguments=["qontrol_explorer", "--controller-manager", "/controller_manager"],
     )
-
+    delayed_spawner_qontrol = TimerAction(period=2.0, actions=[spawner_qontrol])
     spawner_gripper_controller = Node(
         package="controller_manager",
         executable="spawner",
         arguments=["gripper_controller", "--controller-manager", "/controller_manager"],
         output="screen",
     )
-
     manager_node = Node(
         package="cartesian_manager",
         executable="cartesian_manager_node",
@@ -103,24 +87,16 @@ def generate_launch_description():
         output="screen",
         parameters=[controller_config],
     )
+    joy_node = Node(package="joy", executable="joy_node", name="joy_node")
 
-
-    joy_node = Node(
-        package="joy",
-        executable="joy_node",
-        name="joy_node",
+    return LaunchDescription(
+        arguments
+        + [
+            robot_simulation,
+            robot_hardware,
+            delayed_spawner_qontrol,
+            spawner_gripper_controller,
+            manager_node,
+            joy_node,
+        ]
     )
-
-
-    delayed_spawner_qontrol = TimerAction(
-        period=2.0,
-        actions=[spawner_qontrol],
-    )
-    return LaunchDescription(declared_arguments + [
-        robot_simulation,
-        robot_hardware,
-        delayed_spawner_qontrol,
-        spawner_gripper_controller,
-        manager_node,
-        joy_node,
-    ])

@@ -21,7 +21,7 @@ Initial dependency references do not constitute a validated experiment version.
 | `protocol/sources/` | English translation of the Drive draft and source provenance |
 | `bringup/` | Original launch and configuration files, preserved without changes |
 | `dependencies/` | Software repositories at exact commits, with caveats in their README |
-| `src/` | Reviewed Python planning, storage and synthetic technical workflow utilities |
+| `src/` | Experiment-owned ROS 2 packages, including the Panel A calibration interface |
 | `analysis/` | Location for future analysis calculations and views |
 | `docs/` | Target architecture, data, work status and open questions |
 
@@ -90,10 +90,11 @@ snake_targets=(
   explorer_description
   explorer_gazebo
   gripper_pincette
+  snake_experiment_ui
 )
 
 colcon list \
-  --base-paths "$snake_src/dependencies" \
+  --base-paths "$snake_src/dependencies" "$snake_src/src" \
   --packages-up-to "${snake_targets[@]}"
 ```
 
@@ -114,7 +115,7 @@ Check the system dependencies for the selected packages:
 ```bash
 mapfile -t snake_packages < <(
   colcon list \
-    --base-paths "$snake_src/dependencies" \
+    --base-paths "$snake_src/dependencies" "$snake_src/src" \
     --packages-up-to "${snake_targets[@]}" \
     --paths-only
 )
@@ -138,7 +139,7 @@ Build from the dedicated workspace directory:
 
 ```bash
 colcon build \
-  --base-paths "$snake_src/dependencies" \
+  --base-paths "$snake_src/dependencies" "$snake_src/src" \
   --packages-up-to "${snake_targets[@]}" \
   --symlink-install \
   --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo

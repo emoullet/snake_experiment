@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Snake experiment calibration panel">
+    <title>Experiment calibration · Panel A</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="workspace">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Snake experiment · Panel A</p>
+          <h1>Experiment calibration</h1>
+        </div>
+        <div class="connection-block" aria-live="polite">
+          <span id="connection-dot" class="status-dot status-dot--waiting"></span>
+          <span id="connection-label">Connecting</span>
+        </div>
+      </header>
+
+      <section class="stack-panel" aria-labelledby="stack-heading">
+        <div class="section-heading">
+          <div>
+            <p class="step-number">01</p>
+            <h2 id="stack-heading">Experiment stack</h2>
+          </div>
+          <span id="stack-status" class="pill pill--neutral">Inactive</span>
+        </div>
+        <div class="stack-control">
+          <p id="stack-help" class="supporting-copy">
+            Start the robot and Cartesian control services independently from the joystick mapper.
+          </p>
+          <button id="stack-button" class="stack-button" type="button" data-stack-action="start">
+            Start experiment stack
+          </button>
+        </div>
+        <p id="stack-error" class="inline-error" hidden></p>
+      </section>
+
+      <section class="mode-panel" aria-labelledby="mode-heading">
+        <div class="section-heading">
+          <div>
+            <p class="step-number">02</p>
+            <h2 id="mode-heading">Choose the control mode</h2>
+          </div>
+          <span id="mode-status" class="pill pill--neutral">Inactive</span>
+        </div>
+        <div class="mode-actions">
+          <button class="mode-button" data-mode="baseline" type="button">
+            <span class="mode-button__mark">B</span>
+            <span>
+              <strong>Activate baseline mode</strong>
+              <small>Jaco geometric control</small>
+            </span>
+          </button>
+          <button class="mode-button" data-mode="snake" type="button">
+            <span class="mode-button__mark">S</span>
+            <span>
+              <strong>Activate snake mode</strong>
+              <small>Translation–orientation coupling</small>
+            </span>
+          </button>
+        </div>
+        <p id="mode-error" class="inline-error" hidden></p>
+      </section>
+
+      <section class="capture-panel" aria-labelledby="capture-heading">
+        <div class="section-heading capture-heading">
+          <div>
+            <p class="step-number">03</p>
+            <h2 id="capture-heading">Record calibration poses</h2>
+          </div>
+          <div id="pose-stream" class="stream-status" aria-live="polite">
+            <span class="status-dot status-dot--waiting"></span>
+            <span>Waiting for /ee_pose</span>
+          </div>
+        </div>
+
+        <div class="capture-list">
+          <article class="capture-card" data-pose-id="target_1"></article>
+          <article class="capture-card" data-pose-id="target_out_1"></article>
+          <article class="capture-card" data-pose-id="target_2"></article>
+          <article class="capture-card" data-pose-id="target_out_2"></article>
+          <article class="capture-card" data-pose-id="target_3"></article>
+          <article class="capture-card" data-pose-id="target_out_3"></article>
+          <article class="capture-card" data-pose-id="starting_point"></article>
+        </div>
+      </section>
+
+      <section class="save-panel" aria-labelledby="save-heading">
+        <div>
+          <p class="step-number">04</p>
+          <h2 id="save-heading">Save the calibration</h2>
+          <p id="save-help" class="supporting-copy">Record all seven poses to continue.</p>
+          <p id="save-directory" class="directory"></p>
+        </div>
+        <button id="save-button" class="save-button" type="button" disabled>
+          Save experiment calibration
+        </button>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
