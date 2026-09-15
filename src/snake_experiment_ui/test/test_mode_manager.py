@@ -24,6 +24,7 @@ class ModeManagerTest(unittest.TestCase):
         names = []
         requests = []
         processes = []
+        mapper_transitions = []
 
         def create_process(*args, **kwargs):
             process = FakeProcess(*args, **kwargs)
@@ -34,6 +35,7 @@ class ModeManagerTest(unittest.TestCase):
         manager = ModeManager(
             node_names=lambda: names,
             publish_mode_request=requests.append,
+            mapper_transition=lambda: mapper_transitions.append("reset"),
             popen_factory=create_process,
             sleep=lambda _: None,
         )
@@ -53,6 +55,7 @@ class ModeManagerTest(unittest.TestCase):
             ],
         )
         self.assertEqual(requests, ["geometric/jaco", "geometric/jaco"])
+        self.assertEqual(mapper_transitions, ["reset"])
 
     def test_external_mapper_is_rejected(self):
         manager = ModeManager(

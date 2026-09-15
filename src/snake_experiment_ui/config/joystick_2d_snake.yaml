@@ -8,7 +8,7 @@ joystick_mapper:
     local_mode_button_index: 1
     local_mode_button_mode: toggle
     modes:
-      names: [b1, b2, b3]
+      names: [b1, b2]
       b1:
         angular_output_frame_id: base_link
         axes:
@@ -27,15 +27,6 @@ joystick_mapper:
           angular_x: {index: -1, scale: 1.0}
           angular_y: {index: -1, scale: 1.0}
           angular_z: {index: 1, scale: 1.0}
-      b3:
-        angular_output_frame_id: effector_frame
-        axes:
-          linear_x: {index: -1, scale: 1.0}
-          linear_y: {index: -1, scale: 1.0}
-          linear_z: {index: -1, scale: 1.0}
-          angular_x: {index: 0, scale: 1.0}
-          angular_y: {index: 1, scale: 1.0}
-          angular_z: {index: -1, scale: 1.0}
     jaco_button_index: 11
     jaco_button_mode: toggle
     snake_button_index: 10

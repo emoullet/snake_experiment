@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Snake experiment · Session</title>
+    <link rel="stylesheet" href="/session-static/session_style.css" />
+  </head>
+  <body>
+    <main class="workspace">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Snake experiment</p>
+          <h1>Session workflow</h1>
+        </div>
+        <div class="connection-block">
+          <span id="connection-dot" class="status-dot status-dot--waiting"></span>
+          <span id="connection-label">Connecting</span>
+        </div>
+      </header>
+
+      <nav class="stepper" aria-label="Session panels">
+        <div class="step is-current" data-panel-step="B"><strong>B</strong><span>System check-up</span></div>
+        <div class="step is-locked" data-panel-step="C"><strong>C</strong><span>Session setup</span></div>
+        <div class="step is-locked" data-panel-step="D"><strong>D</strong><span>Experiment</span></div>
+        <div class="step is-locked" data-panel-step="E"><strong>E</strong><span>Condition</span></div>
+      </nav>
+
+      <section id="panel-b" class="panel-page">
+        <section class="hero-card">
+          <div>
+            <p class="step-number">Panel B · Lot 2</p>
+            <h2>Pre-participant system check-up</h2>
+            <p class="supporting-copy">Start the robot stack, validate both control modes, then continue to session setup.</p>
+          </div>
+          <span id="workflow-status" class="pill pill--neutral">Idle</span>
+        </section>
+
+        <section class="card" aria-labelledby="stack-heading">
+          <div class="section-heading">
+            <div><p class="step-number">01</p><h2 id="stack-heading">Robot stack</h2></div>
+            <span id="stack-status" class="pill pill--neutral">Inactive</span>
+          </div>
+          <div class="action-row">
+            <p class="supporting-copy" id="stack-help">Hardware profile · launch ownership remains with this interface.</p>
+            <button id="stack-button" class="primary-button" data-stack="start" type="button">Start experiment stack</button>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="modes-heading">
+          <div class="section-heading">
+            <div><p class="step-number">02</p><h2 id="modes-heading">Control modes</h2></div>
+            <span class="supporting-copy">Complete both · any order</span>
+          </div>
+          <div class="mode-grid">
+            <article class="mode-card" data-mode-card="baseline">
+              <div class="mode-title"><span class="mode-mark">B</span><div><h3>Baseline</h3><p>Jaco geometric control · b1, b2, b3</p></div><span class="pill pill--neutral mode-status">Not tested</span></div>
+              <p class="mode-guidance">Start the stack before checking this mode.</p>
+              <div class="diagnostic-list"></div>
+              <div class="mode-actions">
+                <button class="secondary-button mode-start" data-mode-start="baseline" type="button">Check baseline mode</button>
+                <div class="confirmation" hidden>
+                  <span>Is the observed robot behaviour correct?</span>
+                  <button class="confirm-button" data-confirm="baseline" data-accepted="true" type="button">Yes, validate</button>
+                  <button class="reject-button" data-confirm="baseline" data-accepted="false" type="button">No</button>
+                </div>
+              </div>
+            </article>
+            <article class="mode-card" data-mode-card="snake">
+              <div class="mode-title"><span class="mode-mark">S</span><div><h3>Snake</h3><p>Translation–orientation coupling · b1, b2</p></div><span class="pill pill--neutral mode-status">Not tested</span></div>
+              <p class="mode-guidance">Start the stack before checking this mode.</p>
+              <div class="diagnostic-list"></div>
+              <div class="mode-actions">
+                <button class="secondary-button mode-start" data-mode-start="snake" type="button">Check snake mode</button>
+                <div class="confirmation" hidden>
+                  <span>Is the observed robot behaviour correct?</span>
+                  <button class="confirm-button" data-confirm="snake" data-accepted="true" type="button">Yes, validate</button>
+                  <button class="reject-button" data-confirm="snake" data-accepted="false" type="button">No</button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="goto-heading">
+          <div class="section-heading">
+            <div><p class="step-number">03</p><h2 id="goto-heading">Go-to verification</h2></div>
+            <span class="pill pill--warning">Not available · non-blocking</span>
+          </div>
+          <p class="supporting-copy">These robot functions are not implemented yet. The omission will be recorded in the check-up report.</p>
+          <div class="goto-grid">
+            <button disabled>Go to target 1</button><button disabled>Go to target 2</button>
+            <button disabled>Go to target 3</button><button disabled>Go to starting point</button>
+          </div>
+        </section>
+
+        <section class="validation-card">
+          <div><p class="step-number">04</p><h2>Complete the check-up</h2><p id="validation-help" class="supporting-copy">Both modes must pass before validation.</p></div>
+          <div class="validation-actions">
+            <button id="reset-button" class="text-button" type="button">Reset</button>
+            <button id="validate-button" class="primary-button" type="button" disabled>Validate system check-up</button>
+          </div>
+        </section>
+        <p id="global-error" class="inline-error" hidden></p>
+      </section>
+
+      <section id="panel-c" class="panel-page placeholder" hidden>
+        <p class="step-number">Panel C</p>
+        <h2>Session setup</h2>
+        <p>The system check-up passed and all owned launch processes were stopped.</p>
+        <p class="supporting-copy">Session creation and report persistence will be implemented in the next lot.</p>
+        <div class="report-ready"><span class="status-dot status-dot--ok"></span><strong>Panel B report is ready in memory</strong></div>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/session-static/session_app.js"></script>
+  </body>
+</html>

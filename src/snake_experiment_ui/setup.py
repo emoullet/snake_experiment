@@ -30,12 +30,13 @@ setup(
     zip_safe=True,
     maintainer="Etienne Moullet",
     maintainer_email="etienne.moullet@gmail.com",
-    description="Operator web interface for Snake experiment calibration",
+    description="Operator web interfaces for the Snake experiment",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "panel_a_node = snake_experiment_ui.node:main",
+            "session_interface_node = snake_experiment_ui.session_node:main",
         ],
     },
 )

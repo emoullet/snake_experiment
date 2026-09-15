@@ -3,7 +3,7 @@
 <package format="3">
   <name>snake_experiment_ui</name>
   <version>0.1.0</version>
-  <description>Operator web interface for Snake experiment calibration.</description>
+  <description>Operator web interfaces for the Snake experiment.</description>
 
   <maintainer email="etienne.moullet@gmail.com">Etienne Moullet</maintainer>
   <license>Apache-2.0</license>
@@ -12,6 +12,7 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>cartesian_manager</exec_depend>
   <exec_depend>controller_manager</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
   <exec_depend>explorer_bringup</exec_depend>
   <exec_depend>forward_command_controller</exec_depend>
   <exec_depend>joystick_mapper</exec_depend>
@@ -20,9 +21,12 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-fastapi</exec_depend>
   <exec_depend>python3-jinja2</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-uvicorn</exec_depend>
   <exec_depend>qontrol_controller</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
 
   <test_depend>ament_flake8</test_depend>

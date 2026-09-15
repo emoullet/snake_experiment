@@ -1,9 +1,11 @@
-# Snake experiment calibration interface
+# Snake experiment operator interfaces
 
-This ROS 2 package implements Panel A of the experimenter interface. It controls
+This ROS 2 package implements the independent operator interfaces for the Snake
+experiment. Panel A controls
 the experiment stack and the selected joystick mapper as separate processes,
 records seven end-effector poses from `/ee_pose`, and writes a versioned JSON
-calibration file.
+calibration file. The session interface implements Panel B (LOT 2) and reserves
+the sequential Panel C, D, and E workflow.
 
 ## Install, build, and run
 
@@ -71,6 +73,45 @@ moved to `calibrations/calib_archives/` with a unique UTC-stamped name.
 
 The server binds to loopback by default and has no authentication. Do not expose
 it on another interface without an appropriate network access policy.
+
+## Panel B: system check-up
+
+Build the same package and launch the second interface independently:
+
+```bash
+ros2 launch snake_experiment_ui session_interface.launch.py \
+  repository_root:="$(git rev-parse --show-toplevel)"
+```
+
+Open <http://127.0.0.1:8081>. Hardware is selected by default; use
+`stack_use_simulation:=true` for simulation. Panel B owns only the processes it
+starts and refuses to adopt or stop a stack or joystick mapper launched from a
+different terminal or interface.
+
+The check-up requires both Baseline and Snake in either order. It verifies the
+ROS graph, active controllers, topic types and rates, message validity, mapper
+parameters, joystick activity, and an operator confirmation. Baseline loads
+`b1`, `b2`, and `b3`; Snake loads only `b1` and `b2`. The current go-to controls
+are shown as unavailable and do not block validation.
+
+Diagnostic expectations live in `config/system_checkup.yaml`. Commit
+constraints are optional: Git provenance is always recorded, while a mismatch
+blocks validation only when `expected_revisions` contains an expected commit.
+The completed report remains in backend memory for the future Panel C, so it is
+lost if the session-interface process restarts before Panel C persists it.
+
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| `host` | `127.0.0.1` | HTTP bind address. |
+| `port` | `8081` | HTTP port. |
+| `stack_use_simulation` | `false` | Use simulation instead of robot hardware. |
+| `diagnostic_profile` | packaged profile | Override the check-up YAML. |
+| `measurement_window_sec` | `2.0` | Rolling topic-rate measurement window. |
+| `repository_root` | process working directory | Repository used for Git provenance. |
+| `mode_startup_timeout_sec` | `5.0` | Mapper startup timeout. |
+| `mode_shutdown_timeout_sec` | `5.0` | Mapper shutdown timeout. |
+| `stack_startup_timeout_sec` | `30.0` | Stack startup timeout. |
+| `stack_shutdown_timeout_sec` | `10.0` | Stack shutdown timeout. |
 
 ## JSON contract
 

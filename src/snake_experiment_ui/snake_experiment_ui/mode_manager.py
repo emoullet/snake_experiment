@@ -33,6 +33,7 @@ class ModeManager:
         self,
         node_names: Callable[[], Iterable[str]],
         publish_mode_request: Callable[[str], None],
+        mapper_transition: Callable[[], None] = lambda: None,
         startup_timeout_sec: float = 5.0,
         shutdown_timeout_sec: float = 5.0,
         popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
@@ -40,6 +41,7 @@ class ModeManager:
     ) -> None:
         self._node_names = node_names
         self._publish_mode_request = publish_mode_request
+        self._mapper_transition = mapper_transition
         self._startup_timeout_sec = startup_timeout_sec
         self._shutdown_timeout_sec = shutdown_timeout_sec
         self._popen_factory = popen_factory
@@ -108,6 +110,9 @@ class ModeManager:
                     self._error = "The previous joystick mapper did not leave the ROS graph."
                     raise ModeError(self._error)
 
+            # Parameter service clients can retain discovery state for the previous
+            # server because both profiles use the same ROS node and service names.
+            self._mapper_transition()
             self._status = "starting"
             self._error = None
             command = [

@@ -1,0 +1,51 @@
+schema_version: 1
+measurement_window_sec: 2.0
+diagnostic_timeout_sec: 30.0
+joystick_deadzone: 0.2
+
+required_nodes:
+  - /controller_manager
+  - /robot_state_publisher
+  - /cartesian_manager
+  - /joy_node
+
+required_controllers:
+  - joint_state_broadcaster
+  - qontrol_explorer
+  - gripper_controller
+
+base_topics:
+  /joint_states:
+    type: sensor_msgs/msg/JointState
+    min_rate_hz: 20.0
+  /ee_pose:
+    type: geometry_msgs/msg/PoseStamped
+    min_rate_hz: 20.0
+
+mode_topics:
+  /joy:
+    type: sensor_msgs/msg/Joy
+    min_rate_hz: 5.0
+  /joystick_cartesian_command:
+    type: geometry_msgs/msg/TwistStamped
+    min_rate_hz: 5.0
+  /cartesian_command:
+    type: geometry_msgs/msg/TwistStamped
+    min_rate_hz: 5.0
+  /mode_request:
+    type: std_msgs/msg/String
+    min_rate_hz: 0.5
+
+modes:
+  baseline:
+    mode_request: geometric/jaco
+    mapper_modes: [b1, b2, b3]
+    mapper_config: joystick_2d_baseline.yaml
+  snake:
+    mode_request: geometric/snake
+    mapper_modes: [b1, b2]
+    mapper_config: joystick_2d_snake.yaml
+
+# Optional commit constraints. Populate a value to make a mismatch blocking.
+# Keys are paths relative to repository_root; "." designates the main repository.
+expected_revisions: {}
