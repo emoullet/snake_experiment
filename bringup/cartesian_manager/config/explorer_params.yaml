@@ -10,6 +10,12 @@ controller_manager:
       type: forward_command_controller/ForwardCommandController
       auto_start: false
 
+gripper_controller:
+  ros__parameters:
+    joints:
+      - right_finger_joint
+    interface_name: position
+
 qontrol_explorer:
   ros__parameters:
     robot_description_origin: robot_state_publisher
