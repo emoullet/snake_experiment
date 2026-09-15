@@ -11,6 +11,7 @@ def generate_launch_description():
     gui = LaunchConfiguration("gui")
     use_simulation = LaunchConfiguration("use_simulation")
     joystick_config_file = LaunchConfiguration("joystick_config_file")
+
     use_actuator_interface = PythonExpression([
         "'false' if '", use_simulation, "' == 'true' else 'true'"
     ])
@@ -34,11 +35,6 @@ def generate_launch_description():
                 "joystick_3d.yaml",
             ]),
             description="Joystick mapper parameter file.",
-        ),
-        DeclareLaunchArgument(
-            "publish_ee_pose_from_tf",
-            default_value="true",
-            description="Publish /ee_pose from TF until qontrol_controller provides it.",
         ),
     ]
 
@@ -86,7 +82,11 @@ def generate_launch_description():
     spawner_qontrol = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["qontrol_explorer", "--controller-manager", "/controller_manager"],
+        arguments=[
+            "qontrol_explorer",
+            "--controller-manager", "/controller_manager",
+            "--param-file", controller_config,
+        ],
     )
 
     spawner_gripper_controller = Node(
@@ -104,23 +104,36 @@ def generate_launch_description():
         parameters=[controller_config],
     )
 
-
     joy_node = Node(
         package="joy",
         executable="joy_node",
         name="joy_node",
     )
 
+    joystick_mapper_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution([
+                FindPackageShare("joystick_mapper"),
+                "launch",
+                "joystick_mapper.launch.py",
+            ])
+        ),
+        launch_arguments={
+            "config_file": joystick_config_file,
+        }.items(),
+    )
 
     delayed_spawner_qontrol = TimerAction(
         period=2.0,
         actions=[spawner_qontrol],
     )
+
     return LaunchDescription(declared_arguments + [
         robot_simulation,
         robot_hardware,
-        delayed_spawner_qontrol,
         spawner_gripper_controller,
         manager_node,
         joy_node,
+        joystick_mapper_launch,
+        delayed_spawner_qontrol
     ])

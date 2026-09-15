@@ -61,7 +61,7 @@ class DiagnosticProfile:
         self.mode_topics = self._topics(raw["mode_topics"])
         self.modes = {}
         for name, values in raw["modes"].items():
-            mapper_config = self.path.parent / str(values["mapper_config"])
+            mapper_config = (self.path.parent / str(values["mapper_config"])).resolve()
             mapper_bytes = mapper_config.read_bytes()
             mapper_raw = yaml.safe_load(mapper_bytes) or {}
             try:

@@ -19,9 +19,8 @@ Initial dependency references do not constitute a validated experiment version.
 | `protocol/session.md` | Agreed session flow and rules, consolidated after discussion |
 | `protocol/parameters.json` | Machine-readable agreed parameters and synthetic configuration |
 | `protocol/sources/` | English translation of the Drive draft and source provenance |
-| `bringup/` | Original launch and configuration files, preserved without changes |
 | `dependencies/` | Software repositories at exact commits, with caveats in their README |
-| `src/` | Experiment-owned ROS 2 packages, including the Panel A calibration interface |
+| `src/` | Experiment-owned ROS 2 packages, including the operator interfaces and their packaged bringup snapshots |
 | `analysis/` | Location for future analysis calculations and views |
 | `docs/` | Target architecture, data, work status and open questions |
 

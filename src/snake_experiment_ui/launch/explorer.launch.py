@@ -34,7 +34,13 @@ def generate_launch_description():
     ]
 
     controller_config = PathJoinSubstitution(
-        [FindPackageShare("cartesian_manager"), "config", "explorer_params.yaml"]
+        [
+            FindPackageShare("snake_experiment_ui"),
+            "bringup",
+            "cartesian_manager",
+            "config",
+            "explorer_params.yaml",
+        ]
     )
     robot_simulation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(

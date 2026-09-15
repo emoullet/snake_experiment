@@ -1,6 +1,6 @@
 controller_manager:
   ros__parameters:
-    update_rate: 250
+    update_rate: 200
 
     qontrol_explorer:
       type: qontrol_controller/QontrolVelocityController
@@ -9,12 +9,6 @@ controller_manager:
     gripper_controller:
       type: forward_command_controller/ForwardCommandController
       auto_start: false
-
-gripper_controller:
-  ros__parameters:
-    joints:
-      - right_finger_joint
-    interface_name: position
 
 qontrol_explorer:
   ros__parameters:
@@ -27,12 +21,12 @@ qontrol_explorer:
       - effort
     robot_command: position
 
-    command_max_linear_velocity: 1.15
+    command_max_linear_velocity: 0.15
     topic_max_linear_velocity: /explorer_user_interfaces/rqt_armcontrol/max_linear_speed
-    command_max_angular_velocity: 1.4
+    command_max_angular_velocity: 0.4
     topic_max_angular_velocity: /explorer_user_interfaces/rqt_armcontrol/max_angular_speed
     input_topic_name: /cartesian_command
-    regularisation_weight: 1e-2
+    regularisation_weight: 1e-4
     topic_control_frame: /explorer_user_interfaces/rqt_armcontrol/control_frame_selection
     joint_target_topic_name: /joint_target_command
     joint_target_gain: 1.0
@@ -40,12 +34,22 @@ qontrol_explorer:
     joint_target_tolerance: 0.05
     joint_target_task_weight: 1.0
 
+gripper_controller:
+  ros__parameters:
+    joints:
+      - right_finger_joint
+    interface_name: position
+
 cartesian_manager:
   ros__parameters:
     update_rate_hz: 100.0
-    output_frame_id: base_link
-    default_input_frame_id: base_link
-    hybrid_frame_cone_angle_deg: 5.0
+
+    frames:
+      output_frame_id: base_link
+      default_input_frame_id: base_link
+      base_frame: base_link
+      ee_frame: ft_frame
+      hybrid_frame: hybrid_frame
 
     topics:
       joystick_command: /joystick_cartesian_command

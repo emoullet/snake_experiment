@@ -15,8 +15,20 @@ setup(
             ["resource/" + package_name],
         ),
         ("share/" + package_name, ["package.xml"]),
-        ("share/" + package_name + "/launch", glob("launch/*.launch.py")),
+        (
+            "share/" + package_name + "/launch",
+            glob("launch/*.launch.py")
+            + glob("bringup/joystick_mapper/launch/*.launch.py"),
+        ),
         ("share/" + package_name + "/config", glob("config/*.yaml")),
+        (
+            "share/" + package_name + "/bringup/cartesian_manager/config",
+            glob("bringup/cartesian_manager/config/*.yaml"),
+        ),
+        (
+            "share/" + package_name + "/bringup/joystick_mapper/config",
+            glob("bringup/joystick_mapper/config/*.yaml"),
+        ),
         (
             "share/" + package_name + "/templates",
             glob("snake_experiment_ui/templates/*.html"),

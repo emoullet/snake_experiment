@@ -7,6 +7,14 @@ records seven end-effector poses from `/ee_pose`, and writes a versioned JSON
 calibration file. The session interface implements Panel B (LOT 2) and reserves
 the sequential Panel C, D, and E workflow.
 
+Experiment-owned bringup resources are kept under `bringup/cartesian_manager`
+and `bringup/joystick_mapper`. Mapper configurations are installed under the
+same relative path, while mapper launch files are installed only once in the
+package's top-level `launch` directory. The cartesian-manager launch snapshot
+mirrors the currently pinned submodule version but remains source-only to avoid
+a duplicate `explorer.launch.py` in ROS 2 launch discovery. The panel launch
+files in `launch/` remain the executable entry points used by the interfaces.
+
 ## Install, build, and run
 
 Use the repository's [isolated workspace procedure](../../README.md#build-in-an-isolated-workspace).
@@ -97,6 +105,9 @@ are shown as unavailable and do not block validation.
 Diagnostic expectations live in `config/system_checkup.yaml`. Commit
 constraints are optional: Git provenance is always recorded, while a mismatch
 blocks validation only when `expected_revisions` contains an expected commit.
+The Baseline and Snake mapper profiles live in
+`bringup/joystick_mapper/config`; these are their only source copies and are
+installed with the package.
 The completed report remains in backend memory for the future Panel C, so it is
 lost if the session-interface process restarts before Panel C persists it.
 

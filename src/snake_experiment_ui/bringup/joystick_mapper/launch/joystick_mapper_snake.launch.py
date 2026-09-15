@@ -8,9 +8,11 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 def generate_launch_description():
     default_config_file = PathJoinSubstitution(
         [
-            FindPackageShare("joystick_mapper"),
+            FindPackageShare("snake_experiment_ui"),
+            "bringup",
+            "joystick_mapper",
             "config",
-            "joystick_2d_baseline.yaml",
+            "joystick_2d_snake.yaml",
         ]
     )
     config_file = LaunchConfiguration("config_file")
