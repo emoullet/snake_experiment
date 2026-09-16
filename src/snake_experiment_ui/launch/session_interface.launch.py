@@ -14,6 +14,8 @@ def generate_launch_description():
         DeclareLaunchArgument("diagnostic_profile", default_value=""),
         DeclareLaunchArgument("measurement_window_sec", default_value="2.0"),
         DeclareLaunchArgument("repository_root", default_value=""),
+        DeclareLaunchArgument("sessions_root", default_value=""),
+        DeclareLaunchArgument("calibration_file", default_value=""),
         DeclareLaunchArgument("mode_startup_timeout_sec", default_value="5.0"),
         DeclareLaunchArgument("mode_shutdown_timeout_sec", default_value="5.0"),
         DeclareLaunchArgument("stack_startup_timeout_sec", default_value="30.0"),
@@ -36,6 +38,8 @@ def generate_launch_description():
                     "measurement_window_sec"
                 ),
                 "repository_root": LaunchConfiguration("repository_root"),
+                "sessions_root": LaunchConfiguration("sessions_root"),
+                "calibration_file": LaunchConfiguration("calibration_file"),
                 "mode_startup_timeout_sec": LaunchConfiguration(
                     "mode_startup_timeout_sec"
                 ),

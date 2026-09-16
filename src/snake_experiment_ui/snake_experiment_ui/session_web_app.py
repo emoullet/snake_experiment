@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .checkup import CheckupError
 from .diagnostics import DiagnosticProfileError
+from .enrollment import EnrollmentError
 from .mode_manager import ModeError
 from .stack_manager import StackError
 
@@ -21,7 +22,31 @@ class Confirmation(BaseModel):
     accepted: bool
 
 
-def create_session_app(checkup, static_directory: Path, template_directory: Path):
+class FolderSelection(BaseModel):
+    path: str
+
+
+class FolderCreation(BaseModel):
+    parent_path: str
+    name: str
+
+
+class ParticipantForm(BaseModel):
+    pseudonym: str
+    gathered_consent: bool
+    handedness: str
+    joystick_experience: bool
+    visual_or_motor_impairment: bool
+
+
+class ResumeRequest(BaseModel):
+    pseudonym: str
+    acknowledge_mismatch: bool = False
+
+
+def create_session_app(
+    checkup, static_directory: Path, template_directory: Path, enrollment=None
+):
     """Create the Panel B-E app around an injectable CheckupController."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
     app.mount(
@@ -33,7 +58,13 @@ def create_session_app(checkup, static_directory: Path, template_directory: Path
     def action(callback):
         try:
             return callback()
-        except (CheckupError, DiagnosticProfileError, ModeError, StackError) as error:
+        except (
+            CheckupError,
+            DiagnosticProfileError,
+            EnrollmentError,
+            ModeError,
+            StackError,
+        ) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except RuntimeError as error:
             raise HTTPException(status_code=500, detail=str(error)) from error
@@ -44,10 +75,35 @@ def create_session_app(checkup, static_directory: Path, template_directory: Path
 
     @app.get("/api/state")
     async def state():
-        return checkup.snapshot()
+        return combined_snapshot()
+
+    def combined_snapshot():
+        state = checkup.snapshot()
+        if enrollment is not None and state.get("current_panel") != "B":
+            panel_c = enrollment.snapshot()
+            state["current_panel"] = panel_c["current_panel"]
+            state["enrollment"] = panel_c
+        return state
+
+    def enrollment_action(callback):
+        require_panel_c()
+        action(callback)
+        return combined_snapshot()
+
+    def require_panel_c():
+        if checkup.snapshot().get("current_panel") == "B":
+            raise HTTPException(
+                status_code=409,
+                detail="Validate Panel B before using session enrolment.",
+            )
+
+    def require_panel_b():
+        if checkup.snapshot().get("current_panel") != "B":
+            raise HTTPException(status_code=409, detail="Panel B is already complete.")
 
     @app.post("/api/stack/{command}")
     async def stack(command: str):
+        require_panel_b()
         if command == "start":
             return action(checkup.start_stack)
         if command == "stop":
@@ -56,23 +112,91 @@ def create_session_app(checkup, static_directory: Path, template_directory: Path
 
     @app.post("/api/checkup/modes/{mode}/start")
     async def start_mode(mode: str):
+        require_panel_b()
         return action(lambda: checkup.start_mode(mode))
 
     @app.post("/api/checkup/modes/{mode}/retry")
     async def retry_mode(mode: str):
+        require_panel_b()
         return action(lambda: checkup.retry_mode(mode))
 
     @app.post("/api/checkup/modes/{mode}/confirm")
     async def confirm_mode(mode: str, confirmation: Confirmation):
+        require_panel_b()
         return action(lambda: checkup.confirm_mode(mode, confirmation.accepted))
 
     @app.post("/api/checkup/validate")
     async def validate():
+        require_panel_b()
         return action(checkup.validate)
 
     @app.post("/api/checkup/reset")
     async def reset():
+        require_panel_b()
         return action(checkup.reset)
+
+    @app.get("/api/session/browse")
+    async def browse(path: str = ""):
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        require_panel_c()
+        return action(lambda: enrollment.browse(path))
+
+    @app.post("/api/session/root")
+    async def select_root(selection: FolderSelection):
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        return enrollment_action(lambda: enrollment.select_parent(selection.path))
+
+    @app.post("/api/session/folders")
+    async def create_folder(request: FolderCreation):
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        require_panel_c()
+        return action(
+            lambda: enrollment.create_folder(request.parent_path, request.name)
+        )
+
+    @app.post("/api/session/pseudonym/regenerate")
+    async def regenerate_pseudonym():
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        require_panel_c()
+        return action(enrollment.generate_pseudonym)
+
+    @app.post("/api/session/new")
+    async def create_participant(form: ParticipantForm):
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        return enrollment_action(lambda: enrollment.create_participant(form.dict()))
+
+    @app.post("/api/session/resume")
+    async def resume_participant(request: ResumeRequest):
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        return enrollment_action(
+            lambda: enrollment.resume_participant(
+                request.pseudonym, request.acknowledge_mismatch
+            )
+        )
+
+    @app.post("/api/session/cancel")
+    async def cancel_participant():
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        return enrollment_action(enrollment.cancel)
+
+    @app.post("/api/session/reset")
+    async def reset_session():
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        return enrollment_action(enrollment.reset)
+
+    @app.post("/api/session/launch")
+    async def launch_session():
+        if enrollment is None:
+            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+        return enrollment_action(enrollment.launch)
 
     @app.websocket("/ws")
     async def state_websocket(websocket: WebSocket):
@@ -80,7 +204,7 @@ def create_session_app(checkup, static_directory: Path, template_directory: Path
         previous = None
         try:
             while True:
-                current = checkup.snapshot()
+                current = combined_snapshot()
                 serialised = json.dumps(current, sort_keys=True)
                 if serialised != previous:
                     await websocket.send_json(current)

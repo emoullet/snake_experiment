@@ -104,14 +104,60 @@
         <p id="global-error" class="inline-error" hidden></p>
       </section>
 
-      <section id="panel-c" class="panel-page placeholder" hidden>
-        <p class="step-number">Panel C</p>
-        <h2>Session setup</h2>
-        <p>The system check-up passed and all owned launch processes were stopped.</p>
-        <p class="supporting-copy">Session creation and report persistence will be implemented in the next lot.</p>
-        <div class="report-ready"><span class="status-dot status-dot--ok"></span><strong>Panel B report is ready in memory</strong></div>
+      <section id="panel-c" class="panel-page" hidden>
+        <section class="hero-card">
+          <div><p class="step-number">Panel C · Lot 3</p><h2>Pseudonymised enrolment</h2><p class="supporting-copy">Select the experiment folder, create or resume a participant, then launch the assigned condition.</p></div>
+          <span id="enrollment-status" class="pill pill--neutral">Awaiting folder</span>
+        </section>
+
+        <section class="card">
+          <div class="section-heading"><div><p class="step-number">01</p><h2>Experiment folder</h2></div><span class="report-ready"><span class="status-dot status-dot--ok"></span><strong>Panel B report ready</strong></span></div>
+          <p id="selected-parent" class="path-display">No folder selected.</p>
+          <div class="button-row"><button id="browse-button" class="secondary-button" type="button">Browse folders</button><button id="change-parent-button" class="text-button" type="button" hidden>Change folder</button></div>
+          <div id="session-warnings" class="warning-list" hidden></div>
+        </section>
+
+        <section id="participant-selection" class="card" hidden>
+          <div class="section-heading"><div><p class="step-number">02</p><h2>Participant</h2></div><span class="supporting-copy">Create new or resume partial</span></div>
+          <div class="enrolment-grid">
+            <form id="participant-form" class="subcard">
+              <h3>New participant</h3>
+              <label>Pseudonym<div class="inline-field"><input id="pseudonym" name="pseudonym" maxlength="6" pattern="[A-Z0-9]{6}" required readonly><button id="regenerate-button" class="text-button" type="button">Regenerate</button></div></label>
+              <label class="consent-confirmation"><input name="gathered_consent" type="checkbox" value="true" required><span><strong>Consent gathered</strong><small>I confirm that participant consent was collected.</small></span></label>
+              <fieldset class="form-field"><legend>Handedness</legend><div class="choice-group"><label class="choice-option"><input name="handedness" type="radio" value="left" required><span>Left</span></label><label class="choice-option"><input name="handedness" type="radio" value="right" required><span>Right</span></label></div></fieldset>
+              <fieldset class="form-field"><legend>Relevant joystick, gaming, teleoperation or robotics experience</legend><div class="choice-group"><label class="choice-option"><input name="joystick_experience" type="radio" value="true" required><span>Yes</span></label><label class="choice-option"><input name="joystick_experience" type="radio" value="false" required><span>No</span></label></div></fieldset>
+              <fieldset class="form-field"><legend>Relevant visual or motor impairment</legend><div class="choice-group"><label class="choice-option"><input name="visual_or_motor_impairment" type="radio" value="true" required><span>Yes</span></label><label class="choice-option"><input name="visual_or_motor_impairment" type="radio" value="false" required><span>No</span></label></div></fieldset>
+              <button class="primary-button" type="submit">Create participant</button>
+            </form>
+            <div class="subcard"><h3>Resume partial session</h3><div id="resume-list" class="resume-list"><p class="supporting-copy">No resumable session.</p></div><div id="mismatch-warning" class="inline-warning" hidden><strong>Environment mismatch</strong><p>The saved bringup or calibration differs from the current version.</p><ul id="mismatch-list"></ul><label class="checkbox-label"><input id="acknowledge-mismatch" type="checkbox"> I acknowledge these differences and want to resume without overwriting saved files.</label></div></div>
+          </div>
+        </section>
+
+        <section id="participant-ready" class="validation-card" hidden>
+          <div><p class="step-number">03</p><h2 id="participant-heading">Participant ready</h2><dl id="participant-summary" class="participant-summary"></dl></div>
+          <div class="validation-actions"><button id="cancel-participant-button" class="reject-button" type="button">Cancel</button><button id="launch-experiment-button" class="primary-button" type="button">Launch experiment</button></div>
+        </section>
+        <p id="enrollment-error" class="inline-error" hidden></p>
+      </section>
+
+      <section id="panel-d" class="panel-page placeholder" hidden>
+        <p class="step-number">Panel D</p><h2>Experiment</h2>
+        <p>The experiment stack and the first assigned control mode are active.</p>
+        <p class="supporting-copy">Experiment execution will be implemented in the next lot.</p>
       </section>
     </main>
+    <div id="folder-dialog" class="dialog-backdrop" hidden>
+      <section class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title">
+        <div class="section-heading"><h2 id="folder-dialog-title">Select experiment folder</h2><button id="close-browser-button" class="text-button" type="button">Close</button></div>
+        <p id="browser-path" class="path-display"></p>
+        <form id="folder-create-form" class="folder-create-form">
+          <label for="new-folder-name">New folder</label>
+          <div class="inline-field"><input id="new-folder-name" maxlength="100" placeholder="Experiment folder name" required><button class="secondary-button" type="submit">Create</button></div>
+        </form>
+        <div id="browser-directories" class="folder-list"></div>
+        <div class="button-row"><button id="browser-up-button" class="text-button" type="button">Up</button><button id="select-folder-button" class="primary-button" type="button">Use this folder</button></div>
+      </section>
+    </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="/session-static/session_app.js"></script>
   </body>

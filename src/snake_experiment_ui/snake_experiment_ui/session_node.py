@@ -19,6 +19,7 @@ import uvicorn
 
 from .checkup import CheckupController
 from .diagnostics import DiagnosticMonitor, DiagnosticProfile, collect_git_provenance
+from .enrollment import EnrollmentController
 from .mode_manager import ModeManager
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
@@ -35,6 +36,8 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("diagnostic_profile", "")
         self.declare_parameter("measurement_window_sec", 2.0)
         self.declare_parameter("repository_root", "")
+        self.declare_parameter("sessions_root", "")
+        self.declare_parameter("calibration_file", "")
         self.declare_parameter("mode_startup_timeout_sec", 5.0)
         self.declare_parameter("mode_shutdown_timeout_sec", 5.0)
         self.declare_parameter("stack_startup_timeout_sec", 30.0)
@@ -158,10 +161,28 @@ class SessionInterfaceNode(Node):
             use_simulation=use_simulation,
             ros_distro=os.environ.get("ROS_DISTRO", "unknown"),
         )
+        configured_sessions_root = str(self.get_parameter("sessions_root").value)
+        sessions_root = Path(configured_sessions_root) if configured_sessions_root else Path.cwd()
+        configured_calibration = str(self.get_parameter("calibration_file").value)
+        calibration_file = (
+            Path(configured_calibration)
+            if configured_calibration
+            else Path.cwd() / "calibrations/latest_calib.json"
+        )
+        self._enrollment = EnrollmentController(
+            sessions_root=sessions_root,
+            calibration_file=calibration_file,
+            bringup_root=share / "bringup",
+            checkup_report_provider=lambda: self._checkup.snapshot()["pending_report"],
+            provenance_provider=lambda: collect_git_provenance(self._repository_root),
+            stack_manager=self._stack_manager,
+            mode_manager=self._mode_manager,
+        )
         app = create_session_app(
             self._checkup,
             static_directory=share / "static",
             template_directory=share / "templates",
+            enrollment=self._enrollment,
         )
         config = uvicorn.Config(
             app,
@@ -341,7 +362,12 @@ class SessionInterfaceNode(Node):
         self._checkup.shutdown()
         self._server.should_exit = True
         if self._server_thread.is_alive():
-            self._server_thread.join(timeout=3.0)
+            try:
+                self._server_thread.join(timeout=3.0)
+            except KeyboardInterrupt:
+                # ros2 launch can relay SIGINT while shutdown is already in
+                # progress. Owned ROS processes have already been stopped.
+                pass
         return super().destroy_node()
 
 

@@ -4,8 +4,8 @@ This ROS 2 package implements the independent operator interfaces for the Snake
 experiment. Panel A controls
 the experiment stack and the selected joystick mapper as separate processes,
 records seven end-effector poses from `/ee_pose`, and writes a versioned JSON
-calibration file. The session interface implements Panel B (LOT 2) and reserves
-the sequential Panel C, D, and E workflow.
+calibration file. The session interface implements Panel B (LOT 2) and Panel C
+(LOT 3), then reserves the sequential Panel D and E workflow.
 
 Experiment-owned bringup resources are kept under `bringup/cartesian_manager`
 and `bringup/joystick_mapper`. Mapper configurations are installed under the
@@ -108,8 +108,9 @@ blocks validation only when `expected_revisions` contains an expected commit.
 The Baseline and Snake mapper profiles live in
 `bringup/joystick_mapper/config`; these are their only source copies and are
 installed with the package.
-The completed report remains in backend memory for the future Panel C, so it is
-lost if the session-interface process restarts before Panel C persists it.
+The completed report remains in backend memory until Panel C creates or resumes
+a participant. Panel C then copies it into the participant's check-up history
+and marks it as the active report.
 
 | Parameter | Default | Purpose |
 | --- | --- | --- |
@@ -119,10 +120,33 @@ lost if the session-interface process restarts before Panel C persists it.
 | `diagnostic_profile` | packaged profile | Override the check-up YAML. |
 | `measurement_window_sec` | `2.0` | Rolling topic-rate measurement window. |
 | `repository_root` | process working directory | Repository used for Git provenance. |
+| `sessions_root` | process working directory | Root boundary exposed by the server-side folder browser. |
+| `calibration_file` | `<cwd>/calibrations/latest_calib.json` | Calibration copied into each participant environment. |
 | `mode_startup_timeout_sec` | `5.0` | Mapper startup timeout. |
 | `mode_shutdown_timeout_sec` | `5.0` | Mapper shutdown timeout. |
 | `stack_startup_timeout_sec` | `30.0` | Stack startup timeout. |
 | `stack_shutdown_timeout_sec` | `10.0` | Stack shutdown timeout. |
+
+## Panel C: enrolment and session resume
+
+After Panel B validation, select an experiment folder below `sessions_root`.
+The interface creates `experiment_state.csv` when absent, using the columns
+`session_date`, `pseudonym`, `gathered_consent`, `handedness`,
+`joystick_experience`, `visual_or_motor_impairment`, `starting_time`,
+`experimental_plan`, and `state`.
+
+New participants receive a collision-safe six-character pseudonym and the least
+represented experimental plan. Their folder contains the current calibration,
+the packaged bringup configuration snapshot, the Panel B report history, a Git
+provenance record, and a SHA-256 manifest. Partial sessions can be resumed; any
+bringup or calibration difference requires explicit operator acknowledgement
+and never overwrites the saved environment.
+
+Cancelling a participant created during the current Panel C visit removes its
+new folder and CSV row. Cancelling a resumed participant only clears the UI
+selection. Closing the browser or stopping the interface preserves partial
+sessions. Launching starts the owned stack, activates the first control mode in
+the assigned plan, and advances to the Panel D placeholder.
 
 ## JSON contract
 

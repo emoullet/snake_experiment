@@ -6,6 +6,7 @@ class SessionInterface {
     this.busy = false;
     this.reconnectDelay = 500;
     this.toastTimer = null;
+    this.browser = null;
     this.bindActions();
     this.connect();
   }
@@ -32,6 +33,16 @@ class SessionInterface {
           accepted: confirm.dataset.accepted === "true",
         });
       }
+      const folder = event.target.closest("[data-folder-path]");
+      if (folder) return this.browse(folder.dataset.folderPath);
+      const resume = event.target.closest("[data-resume]");
+      if (resume) {
+        const acknowledged = document.getElementById("acknowledge-mismatch").checked;
+        return this.post("/api/session/resume", {
+          pseudonym: resume.dataset.resume,
+          acknowledge_mismatch: acknowledged,
+        });
+      }
     });
     document.getElementById("validate-button").addEventListener("click", () =>
       this.post("/api/checkup/validate")
@@ -39,6 +50,27 @@ class SessionInterface {
     document.getElementById("reset-button").addEventListener("click", () =>
       this.post("/api/checkup/reset")
     );
+    document.getElementById("browse-button").addEventListener("click", () => this.browse(""));
+    document.getElementById("close-browser-button").addEventListener("click", () => this.closeBrowser());
+    document.getElementById("browser-up-button").addEventListener("click", () => {
+      if (this.browser?.parent) this.browse(this.browser.parent);
+    });
+    document.getElementById("select-folder-button").addEventListener("click", async () => {
+      if (!this.browser) return;
+      await this.post("/api/session/root", { path: this.browser.path });
+      this.closeBrowser();
+      this.resetParticipantForm();
+      await this.regeneratePseudonym();
+    });
+    document.getElementById("folder-create-form").addEventListener("submit", (event) => this.createFolder(event));
+    document.getElementById("change-parent-button").addEventListener("click", async () => {
+      await this.post("/api/session/reset");
+      await this.browse("");
+    });
+    document.getElementById("regenerate-button").addEventListener("click", () => this.regeneratePseudonym());
+    document.getElementById("participant-form").addEventListener("submit", (event) => this.createParticipant(event));
+    document.getElementById("cancel-participant-button").addEventListener("click", () => this.post("/api/session/cancel"));
+    document.getElementById("launch-experiment-button").addEventListener("click", () => this.post("/api/session/launch"));
   }
 
   async post(url, body = null) {
@@ -53,7 +85,17 @@ class SessionInterface {
       const response = await fetch(url, options);
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "The operation failed.");
-      this.update(payload);
+      if (url.startsWith("/api/session/")) {
+        const stateResponse = await fetch("/api/state");
+        const state = await stateResponse.json();
+        this.update(state);
+        if (["/api/session/cancel", "/api/session/reset"].includes(url)) {
+          this.resetParticipantForm();
+          if (state.enrollment?.selected_parent) await this.regeneratePseudonym();
+        }
+      } else {
+        this.update(payload);
+      }
     } catch (error) {
       this.showToast(error.message, true);
     } finally {
@@ -78,6 +120,81 @@ class SessionInterface {
     socket.onerror = () => socket.close();
   }
 
+  async browse(path) {
+    try {
+      const response = await fetch(`/api/session/browse?path=${encodeURIComponent(path)}`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Unable to browse folders.");
+      this.renderBrowser(payload);
+    } catch (error) {
+      this.showToast(error.message, true);
+    }
+  }
+
+  renderBrowser(payload) {
+    this.browser = payload;
+    document.getElementById("folder-dialog").hidden = false;
+    document.getElementById("browser-path").textContent = payload.path;
+    document.getElementById("browser-up-button").disabled = !payload.parent;
+    document.getElementById("browser-directories").innerHTML = payload.directories.length
+        ? payload.directories.map((item) => `<button class="folder-entry" data-folder-path="${this.escape(item.path)}" type="button"><span>📁</span>${this.escape(item.name)}</button>`).join("")
+        : '<p class="supporting-copy">No subfolders.</p>';
+  }
+
+  async createFolder(event) {
+    event.preventDefault();
+    if (!this.browser) return;
+    const input = document.getElementById("new-folder-name");
+    try {
+      const response = await fetch("/api/session/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parent_path: this.browser.path, name: input.value }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Unable to create folder.");
+      input.value = "";
+      this.renderBrowser(payload);
+      this.showToast("Folder created. You can select it or create a subfolder.");
+    } catch (error) {
+      this.showToast(error.message, true);
+    }
+  }
+
+  closeBrowser() {
+    document.getElementById("folder-dialog").hidden = true;
+    document.getElementById("new-folder-name").value = "";
+  }
+
+  async regeneratePseudonym() {
+    try {
+      const response = await fetch("/api/session/pseudonym/regenerate", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "Unable to generate pseudonym.");
+      document.getElementById("pseudonym").value = payload.pseudonym;
+    } catch (error) {
+      this.showToast(error.message, true);
+    }
+  }
+
+  createParticipant(event) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    return this.post("/api/session/new", {
+      pseudonym: values.get("pseudonym"),
+      gathered_consent: values.get("gathered_consent") === "true",
+      handedness: values.get("handedness"),
+      joystick_experience: values.get("joystick_experience") === "true",
+      visual_or_motor_impairment: values.get("visual_or_motor_impairment") === "true",
+    });
+  }
+
+  resetParticipantForm() {
+    const form = document.getElementById("participant-form");
+    form.reset();
+    document.getElementById("pseudonym").value = "";
+  }
+
   update(state) {
     this.state = state;
     this.render();
@@ -90,16 +207,22 @@ class SessionInterface {
 
   render() {
     if (!this.state) return;
-    const onPanelC = this.state.current_panel === "C";
-    document.getElementById("panel-b").hidden = onPanelC;
+    const currentPanel = this.state.current_panel;
+    const onPanelC = currentPanel === "C";
+    const onPanelD = currentPanel === "D";
+    document.getElementById("panel-b").hidden = currentPanel !== "B";
     document.getElementById("panel-c").hidden = !onPanelC;
+    document.getElementById("panel-d").hidden = !onPanelD;
     document.querySelectorAll("[data-panel-step]").forEach((step) => {
-      const current = step.dataset.panelStep === this.state.current_panel;
+      const current = step.dataset.panelStep === currentPanel;
       step.classList.toggle("is-current", current);
-      step.classList.toggle("is-locked", !current && step.dataset.panelStep !== "B");
-      step.classList.toggle("is-complete", onPanelC && step.dataset.panelStep === "B");
+      const completed = (currentPanel === "C" && step.dataset.panelStep === "B")
+        || (currentPanel === "D" && ["B", "C"].includes(step.dataset.panelStep));
+      step.classList.toggle("is-locked", !current && !completed);
+      step.classList.toggle("is-complete", completed);
     });
-    if (onPanelC) return;
+    if (onPanelC) return this.renderEnrollment();
+    if (onPanelD) return;
 
     const workflow = this.state.workflow.replaceAll("_", " ");
     const workflowPill = document.getElementById("workflow-status");
@@ -127,6 +250,51 @@ class SessionInterface {
     const error = document.getElementById("global-error");
     error.hidden = !this.state.error;
     error.textContent = this.state.error || "";
+  }
+
+  renderEnrollment() {
+    const enrollment = this.state.enrollment;
+    if (!enrollment) return;
+    const labels = {
+      awaiting_parent: "Awaiting folder", parent_selected: "Folder selected",
+      participant_ready: "Participant ready", launching: "Launching", error: "Error",
+    };
+    const pill = document.getElementById("enrollment-status");
+    pill.textContent = labels[enrollment.workflow] || enrollment.workflow;
+    pill.className = `pill ${enrollment.error ? "pill--error" : enrollment.participant ? "pill--active" : "pill--neutral"}`;
+    document.getElementById("selected-parent").textContent = enrollment.selected_parent || `Root: ${enrollment.sessions_root}`;
+    document.getElementById("change-parent-button").hidden = !enrollment.selected_parent;
+    document.getElementById("participant-selection").hidden = !enrollment.selected_parent || !!enrollment.participant;
+    document.getElementById("participant-ready").hidden = !enrollment.participant;
+
+    const warnings = document.getElementById("session-warnings");
+    warnings.hidden = !enrollment.warnings.length;
+    warnings.innerHTML = enrollment.warnings.length
+      ? `<strong>Folder warnings</strong><ul>${enrollment.warnings.map((item) => `<li>${this.escape(item)}</li>`).join("")}</ul>` : "";
+
+    const resumeList = document.getElementById("resume-list");
+    resumeList.innerHTML = enrollment.resume_candidates.length
+      ? enrollment.resume_candidates.map((item) => `<article class="resume-entry"><div><strong>${this.escape(item.pseudonym)}</strong><span>${this.escape(item.session_date)} · ${this.escape(item.experimental_plan)}</span></div><button class="secondary-button" data-resume="${this.escape(item.pseudonym)}" type="button">Resume</button></article>`).join("")
+      : '<p class="supporting-copy">No resumable session.</p>';
+
+    const mismatch = document.getElementById("mismatch-warning");
+    mismatch.hidden = !enrollment.mismatches.length;
+    document.getElementById("mismatch-list").innerHTML = enrollment.mismatches.map((item) => `<li>${this.escape(item.path)}</li>`).join("");
+
+    if (enrollment.participant) {
+      const participant = enrollment.participant;
+      document.getElementById("participant-heading").textContent = `${participant.pseudonym} is ready`;
+      document.getElementById("participant-summary").innerHTML = [
+        ["Session", participant.resumed ? "Resumed" : "New"],
+        ["Plan", participant.experimental_plan], ["Handedness", participant.handedness],
+        ["Started", participant.starting_time], ["Folder", participant.folder],
+      ].map(([term, value]) => `<div><dt>${this.escape(term)}</dt><dd>${this.escape(value)}</dd></div>`).join("");
+    }
+    document.getElementById("launch-experiment-button").disabled = this.busy || !enrollment.can_launch;
+    document.getElementById("cancel-participant-button").disabled = this.busy;
+    const error = document.getElementById("enrollment-error");
+    error.hidden = !enrollment.error;
+    error.textContent = enrollment.error || "";
   }
 
   renderMode(mode) {
