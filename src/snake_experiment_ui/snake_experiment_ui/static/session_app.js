@@ -57,6 +57,17 @@ class SessionInterface {
       if (blockAbort) {
         return this.post(`/api/experiment/blocks/${blockAbort.dataset.blockAbort}/abort`);
       }
+      const control = event.target.closest("[data-block-control]");
+      if (control) {
+        return this.post(`/api/experiment/blocks/${control.dataset.blockControl}/control`, {
+          active: control.dataset.active === "true",
+        });
+      }
+      const restart = event.target.closest("[data-restart-stack]");
+      if (restart) {
+        if (!window.confirm("Restart the experiment stack and restore the current control state?")) return;
+        return this.post(`/api/experiment/blocks/${restart.dataset.restartStack}/restart-stack`);
+      }
     });
     document.getElementById("validate-button").addEventListener("click", () =>
       this.post("/api/checkup/validate")
@@ -361,6 +372,7 @@ class SessionInterface {
     const block = progress.blocks.find((item) => item.id === progress.current_block);
     if (!block) return;
     const panel = document.getElementById(`panel-${block.panel.toLowerCase()}`);
+    if (block.phase === "discovery") return this.renderDiscovery(panel, block, experiment);
     const phase = this.title(block.phase);
     const settings = Object.entries(block.settings)
       .map(([key, value]) => `<div><dt>${this.escape(key.replaceAll("_", " "))}</dt><dd>${this.escape(JSON.stringify(value))}</dd></div>`).join("");
@@ -368,7 +380,33 @@ class SessionInterface {
       <h2>${this.escape(this.title(block.mode))} ${this.escape(block.phase)}</h2>
       <p class="supporting-copy">The experiment stack and the ${this.escape(this.title(block.mode))} mapper are active. Detailed ${this.escape(block.phase)} logic will be implemented in its dedicated lot.</p>
       <dl class="participant-summary block-metadata"><div><dt>Block</dt><dd>${this.escape(block.id)}</dd></div><div><dt>Folder</dt><dd>${this.escape(block.folder)}</dd></div><div><dt>Attempt</dt><dd>${block.attempts}</dd></div>${settings}</dl>
-      <div class="block-actions"><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${this.escape(block.phase)}" type="button" ${this.busy ? "disabled" : ""}>End ${this.escape(block.phase)}</button></div>`;
+      <div class="block-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${this.escape(block.phase)}" type="button" ${this.busy ? "disabled" : ""}>End ${this.escape(block.phase)}</button></div>`;
+  }
+
+  renderDiscovery(panel, block, experiment) {
+    const instructions = block.settings.instructions || {};
+    const segments = experiment.segments || [];
+    const recorder = experiment.recorder || { status: "inactive", storage: "mcap" };
+    const segmentRows = segments.length ? segments.map((segment) => {
+      const counts = segment.message_counts || {};
+      const countText = block.settings.rosbag_topics.map((topic) => `${topic}: ${counts[topic] || 0}`).join(" · ");
+      const pillClass = segment.valid ? "pill--active" : segment.status === "recording" ? "pill--warning" : "pill--error";
+      const label = segment.status === "recording" ? "Recording" : segment.valid ? "Valid" : this.title(segment.status);
+      return `<article class="segment-entry"><div><strong>${this.escape(segment.name)}</strong><span>${this.escape(countText)}</span></div><span class="pill ${pillClass}">${this.escape(label)}</span></article>`;
+    }).join("") : '<p class="supporting-copy">No recording segment yet.</p>';
+    const controlActive = experiment.control_active;
+    const processItems = [
+      ["Stack", experiment.stack.status],
+      ["Mapper", experiment.mapper.status],
+      ["Recorder", recorder.status],
+      ["Storage", recorder.storage || "mcap"],
+    ].map(([term, value]) => `<div><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
+    panel.className = "panel-page";
+    panel.innerHTML = `<section class="hero-card"><div><p class="step-number">Panel E · Discovery</p><h2>${this.escape(this.title(block.mode))} discovery</h2><p class="supporting-copy">Free movement without specified or validated targets.</p></div><span class="pill ${controlActive ? "pill--active" : "pill--neutral"}">${controlActive ? "Control and recording active" : "Control inactive"}</span></section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Instructions</p><h2>Standardised instructions</h2></div>${instructions.placeholder ? '<span class="pill pill--warning">Placeholder</span>' : ""}</div><p class="instruction-copy">${this.escape(instructions.text || "")}</p>${instructions.placeholder ? '<p class="inline-warning">Replace this placeholder before running participant sessions.</p>' : ""}</section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Control</p><h2>Mode and recording</h2></div><span class="supporting-copy">${this.escape(block.folder)}</span></div><dl class="participant-summary process-summary">${processItems}</dl><div class="discovery-controls"><button class="${controlActive ? "reject-button" : "primary-button"}" data-block-control="${this.escape(block.id)}" data-active="${controlActive ? "false" : "true"}" type="button" ${this.busy ? "disabled" : ""}>${controlActive ? "Deactivate mode and recording" : "Activate mode and recording"}</button><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button></div>${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Recordings</p><h2>MCAP segments</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--warning"}">${experiment.can_end ? "Required data verified" : "Valid segment required"}</span></div><div class="segment-list">${segmentRows}</div></section>
+      <section class="validation-card"><div><p class="step-number">Complete discovery</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">At least one segment must contain messages for all three expected topics.</p></div><div class="validation-actions"><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="discovery" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>End discovery</button></div></section>`;
   }
 
   title(value) {

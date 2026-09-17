@@ -16,6 +16,7 @@ from .diagnostics import DiagnosticProfileError
 from .enrollment import EnrollmentError
 from .experiment import ExperimentError
 from .mode_manager import ModeError
+from .rosbag_manager import RosbagError
 from .stack_manager import StackError
 
 
@@ -49,6 +50,10 @@ class EndBlockRequest(BaseModel):
     confirmed: bool
 
 
+class ControlRequest(BaseModel):
+    active: bool
+
+
 def create_session_app(
     checkup,
     static_directory: Path,
@@ -73,6 +78,7 @@ def create_session_app(
             EnrollmentError,
             ExperimentError,
             ModeError,
+            RosbagError,
             StackError,
         ) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -233,6 +239,16 @@ def create_session_app(
     @app.post("/api/experiment/blocks/{block_id}/abort")
     async def abort_experiment_block(block_id: str):
         return experiment_action(lambda: experiment.abort(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/control")
+    async def set_experiment_control(block_id: str, request: ControlRequest):
+        return experiment_action(
+            lambda: experiment.set_control(block_id, request.active)
+        )
+
+    @app.post("/api/experiment/blocks/{block_id}/restart-stack")
+    async def restart_experiment_stack(block_id: str):
+        return experiment_action(lambda: experiment.restart_stack(block_id))
 
     @app.websocket("/ws")
     async def state_websocket(websocket: WebSocket):

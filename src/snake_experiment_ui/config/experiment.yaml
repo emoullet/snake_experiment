@@ -23,6 +23,9 @@ block_sequence:
 phases:
   discovery:
     rosbag_topics: [/joy, /ee_pose, /joint_states]
+    instructions:
+      placeholder: true
+      text: "TODO — Replace this placeholder with the approved standardized discovery instructions before running participant sessions."
   training:
     cycles: 2
     target_sequence: [1, 2, 3, 1]
@@ -35,3 +38,7 @@ phases:
 success_thresholds:
   linear_m: null
   angular_rad: null
+
+rosbag:
+  storage: mcap
+  segment_pattern: "rosbag_{index:03d}"

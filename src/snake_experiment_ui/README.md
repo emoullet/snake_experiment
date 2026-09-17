@@ -127,6 +127,8 @@ and marks it as the active report.
 | `mode_shutdown_timeout_sec` | `5.0` | Mapper shutdown timeout. |
 | `stack_startup_timeout_sec` | `30.0` | Stack startup timeout. |
 | `stack_shutdown_timeout_sec` | `10.0` | Stack shutdown timeout. |
+| `rosbag_startup_timeout_sec` | `5.0` | Discovery recorder startup timeout. |
+| `rosbag_shutdown_timeout_sec` | `10.0` | Discovery recorder shutdown timeout. |
 
 ## Panel C: enrolment and session resume
 
@@ -165,6 +167,22 @@ while a browser disconnect alone does not. The final block stops the mapper and
 stack but deliberately leaves the participant CSV state as `partial`. Panels E,
 F, and G currently expose the block context and lifecycle controls; their
 discovery, training, and recording business logic belongs to later lots.
+
+## Panel E: discovery
+
+Discovery opens with the owned stack active and control disabled. The operator
+reads the standardised instruction text from the participant's snapshotted
+`experiment.yaml`, then activates the mapper and MCAP recorder together. Each
+activation writes a new `rosbag_001`, `rosbag_002`, and so on below the block
+folder; existing recordings are never overwritten. Deactivation closes the
+segment and verifies that `/joy`, `/ee_pose`, and `/joint_states` each contain
+messages before discovery can be completed.
+
+`Restart stack` is available from Panels E, F, and G. It restarts only processes
+owned by this interface and restores the previous control state. During
+discovery, an active recording is closed before restart and restoration creates
+a new numbered segment. The packaged instruction is intentionally marked as a
+placeholder and must be replaced before participant data collection.
 
 ## JSON contract
 

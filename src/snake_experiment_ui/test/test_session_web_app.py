@@ -116,6 +116,12 @@ class FakeExperiment:
         self.calls.append(("abort", block_id))
         self.panel = "D"
 
+    def set_control(self, block_id, active):
+        self.calls.append(("control", block_id, active))
+
+    def restart_stack(self, block_id):
+        self.calls.append(("restart", block_id))
+
 
 @unittest.skipIf(httpx is None, "FastAPI test dependencies are not installed")
 class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
@@ -200,6 +206,27 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             [("start", "mode_1_discovery"), ("end", "mode_1_discovery", True)],
         )
 
+    async def test_discovery_control_and_restart_routes(self):
+        self.checkup.workflow = "validated"
+        self.enrollment.panel = "D"
+        response = await self.request(
+            "POST",
+            "/api/experiment/blocks/mode_1_discovery/control",
+            json={"active": True},
+        )
+        self.assertEqual(response.status_code, 200)
+        response = await self.request(
+            "POST", "/api/experiment/blocks/mode_1_discovery/restart-stack"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.experiment.calls,
+            [
+                ("control", "mode_1_discovery", True),
+                ("restart", "mode_1_discovery"),
+            ],
+        )
+
 
 class SessionTemplateTest(unittest.TestCase):
     def test_participant_fields_use_explicit_choices_without_defaults(self):
@@ -232,6 +259,8 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("data-block-start", script)
         self.assertIn("data-block-end", script)
         self.assertIn("data-block-abort", script)
+        self.assertIn("data-block-control", script)
+        self.assertIn("data-restart-stack", script)
 
 
 if __name__ == "__main__":

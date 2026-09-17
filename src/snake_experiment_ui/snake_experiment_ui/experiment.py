@@ -64,7 +64,7 @@ def _atomic_json(path: Path, value: dict) -> None:
 class ExperimentProfile:
     """Validated, versioned description of the six Panel D blocks."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, allow_legacy: bool = False) -> None:
         self.path = Path(path).resolve()
         try:
             data = yaml.safe_load(self.path.read_text(encoding="utf-8"))
@@ -92,6 +92,22 @@ class ExperimentProfile:
             topics = settings.get("rosbag_topics")
             if topics != ["/joy", "/ee_pose", "/joint_states"]:
                 raise ExperimentError(f"Invalid rosbag_topics for phase '{phase}'.")
+        default_instructions = {
+            "placeholder": True,
+            "text": (
+                "TODO — Replace this placeholder with the approved standardized "
+                "discovery instructions before running participant sessions."
+            ),
+        }
+        instructions = phases["discovery"].get("instructions")
+        if instructions is None and allow_legacy:
+            phases["discovery"]["instructions"] = default_instructions
+        elif (
+            not isinstance(instructions, dict)
+            or not isinstance(instructions.get("placeholder"), bool)
+            or not str(instructions.get("text", "")).strip()
+        ):
+            raise ExperimentError("Discovery instructions are missing or invalid.")
         if phases["training"].get("cycles") != 2:
             raise ExperimentError("Training must define exactly 2 cycles.")
         if phases["recording"].get("cycles") != 10:
@@ -105,6 +121,19 @@ class ExperimentProfile:
             "angular_rad",
         } or any(value is not None for value in thresholds.values()):
             raise ExperimentError("Success thresholds must be explicitly null.")
+        rosbag = data.get("rosbag")
+        if rosbag is None and allow_legacy:
+            rosbag = {"storage": "mcap", "segment_pattern": "rosbag_{index:03d}"}
+            data["rosbag"] = rosbag
+        if not isinstance(rosbag, dict) or rosbag.get("storage") != "mcap":
+            raise ExperimentError("experiment.yaml rosbag storage must be 'mcap'.")
+        pattern = rosbag.get("segment_pattern")
+        try:
+            examples = [str(pattern).format(index=index) for index in (1, 999)]
+        except (AttributeError, KeyError, ValueError) as error:
+            raise ExperimentError("Invalid rosbag segment_pattern.") from error
+        if examples != ["rosbag_001", "rosbag_999"]:
+            raise ExperimentError("rosbag segment_pattern must produce rosbag_001 names.")
         self.data = data
         self.sha256 = _sha256(self.path)
 
@@ -134,6 +163,10 @@ class ExperimentProfile:
                     "updated_at_utc": None,
                     "completed_at_utc": None,
                     "error": None,
+                    "control_active": False,
+                    "current_segment": None,
+                    "segments": [],
+                    "restart": {"status": "idle", "error": None},
                 }
             )
         return blocks
@@ -147,12 +180,14 @@ class ExperimentController:
         profile: ExperimentProfile,
         stack_manager,
         mode_manager,
+        rosbag_manager,
         utc_clock: Callable[[], str] = _utc_now,
     ) -> None:
         self._source_profile = profile
         self._profile = profile
         self._stack = stack_manager
         self._modes = mode_manager
+        self._rosbag = rosbag_manager
         self._utc_clock = utc_clock
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
@@ -186,7 +221,7 @@ class ExperimentController:
                     )
                 profile_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(self._source_profile.path, profile_path)
-            profile = ExperimentProfile(profile_path)
+            profile = ExperimentProfile(profile_path, allow_legacy=True)
             if late_initialization:
                 self._record_late_initialization(folder, profile_path)
             self._profile = profile
@@ -198,16 +233,28 @@ class ExperimentController:
                     raise ExperimentError("experiment_progress.json is unreadable.") from error
                 self._validate_progress(progress, participant)
                 changed = False
+                recovered_active = False
                 for block in progress["blocks"]:
+                    changed = self._ensure_lot5_fields(block) or changed
                     if block["status"] in ("starting", "running"):
+                        if block.get("current_segment"):
+                            segment = self._segment(block, block["current_segment"])
+                            segment["status"] = "interrupted"
+                            segment["stopped_at_utc"] = self._utc_clock()
+                            segment["stop_reason"] = "interface_restart"
+                            segment["valid"] = False
+                        block["control_active"] = False
+                        block["current_segment"] = None
                         block["status"] = "interrupted"
                         block["updated_at_utc"] = self._utc_clock()
                         block["error"] = "Interface restarted while the block was active."
                         self._write_block(folder, block)
                         changed = True
+                        recovered_active = True
                 if changed:
-                    progress["workflow"] = "interrupted"
-                    progress["current_block"] = None
+                    if recovered_active:
+                        progress["workflow"] = "interrupted"
+                        progress["current_block"] = None
                     progress["updated_at_utc"] = self._utc_clock()
                     _atomic_json(progress_path, progress)
             else:
@@ -268,7 +315,8 @@ class ExperimentController:
             self._write_block(folder, block)
             try:
                 self._stack.start()
-                self._modes.activate(block["mode"])
+                if block["phase"] != "discovery":
+                    self._modes.activate(block["mode"])
             except Exception as error:
                 active_mode = self._modes.active_mode()
                 if active_mode:
@@ -286,6 +334,7 @@ class ExperimentController:
                 self._write_block(folder, block)
                 raise ExperimentError(self._error) from error
             block["status"] = "running"
+            block["control_active"] = block["phase"] != "discovery"
             block["updated_at_utc"] = self._utc_clock()
             progress["workflow"] = "block_running"
             self._current_panel = block["panel"]
@@ -300,14 +349,26 @@ class ExperimentController:
                 raise ExperimentError("Explicit confirmation is required to end a block.")
             progress, folder = self._require_prepared()
             block = self._running_block(block_id)
-            try:
-                self._modes.deactivate(block["mode"])
-            except Exception as error:
-                block["error"] = f"Unable to stop mapper: {error}"
-                block["updated_at_utc"] = self._utc_clock()
-                self._persist(folder)
-                self._write_block(folder, block)
-                raise ExperimentError(block["error"]) from error
+            if block["phase"] == "discovery":
+                if block["control_active"]:
+                    self._deactivate_discovery(block, folder, "end_block")
+                if not self._can_end(block):
+                    block["error"] = (
+                        "Discovery requires at least one valid segment with messages "
+                        "on every expected topic."
+                    )
+                    self._persist(folder)
+                    self._write_block(folder, block)
+                    raise ExperimentError(block["error"])
+            else:
+                try:
+                    self._modes.deactivate(block["mode"])
+                except Exception as error:
+                    block["error"] = f"Unable to stop mapper: {error}"
+                    block["updated_at_utc"] = self._utc_clock()
+                    self._persist(folder)
+                    self._write_block(folder, block)
+                    raise ExperimentError(block["error"]) from error
             now = self._utc_clock()
             block["status"] = "completed"
             block["completed_at_utc"] = now
@@ -336,20 +397,221 @@ class ExperimentController:
         with self._lock:
             progress, folder = self._require_prepared()
             block = self._running_block(block_id)
-            try:
-                self._modes.deactivate(block["mode"])
-            except Exception as error:
-                raise ExperimentError(f"Unable to stop mapper: {error}") from error
+            cleanup_errors = []
+            if block["phase"] == "discovery":
+                if block["control_active"]:
+                    try:
+                        self._deactivate_discovery(block, folder, "operator_abort")
+                    except Exception as error:
+                        cleanup_errors.append(str(error))
+                try:
+                    self._stack.stop()
+                except Exception as error:
+                    cleanup_errors.append(f"stack: {error}")
+            else:
+                try:
+                    self._modes.deactivate(block["mode"])
+                except Exception as error:
+                    raise ExperimentError(f"Unable to stop mapper: {error}") from error
             block["status"] = "interrupted"
             block["updated_at_utc"] = self._utc_clock()
             block["error"] = "Stopped by the operator; resume this block to continue."
+            if cleanup_errors:
+                block["error"] += " Cleanup warning: " + "; ".join(cleanup_errors)
             progress["workflow"] = "interrupted"
             progress["current_block"] = None
             self._current_panel = "D"
+            self._error = block["error"] if cleanup_errors else None
+            self._persist(folder)
+            self._write_block(folder, block)
+            return self.snapshot()
+
+    def set_control(self, block_id: str, active: bool) -> dict:
+        """Activate or deactivate coupled discovery control and recording."""
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._running_block(block_id)
+            if block["phase"] != "discovery":
+                raise ExperimentError("Control toggling is available only during discovery.")
+            if bool(block["control_active"]) == bool(active):
+                return self.snapshot()
+            if active:
+                self._activate_discovery(block, folder)
+            else:
+                self._deactivate_discovery(block, folder, "operator_toggle")
+            return self.snapshot()
+
+    def restart_stack(self, block_id: str) -> dict:
+        """Restart the owned stack and restore the previous control state."""
+        with self._lock:
+            progress, folder = self._require_prepared()
+            block = self._running_block(block_id)
+            was_active = bool(block["control_active"])
+            block["restart"] = {"status": "restarting", "error": None}
+            block["updated_at_utc"] = self._utc_clock()
+            self._persist(folder)
+            self._write_block(folder, block)
+            try:
+                if block["phase"] == "discovery":
+                    if was_active:
+                        self._deactivate_discovery(block, folder, "restart_stack")
+                else:
+                    active_mode = self._modes.active_mode()
+                    if active_mode:
+                        self._modes.deactivate(active_mode)
+                    block["control_active"] = False
+                self._stack.stop()
+                self._stack.start()
+                if was_active:
+                    if block["phase"] == "discovery":
+                        self._activate_discovery(block, folder)
+                    else:
+                        self._modes.activate(block["mode"])
+                        block["control_active"] = True
+            except Exception as error:
+                active_mode = self._modes.active_mode()
+                if active_mode:
+                    try:
+                        self._modes.deactivate(active_mode)
+                    except Exception:
+                        pass
+                try:
+                    self._rosbag.shutdown()
+                except Exception:
+                    pass
+                block["control_active"] = False
+                block["current_segment"] = None
+                block["restart"] = {"status": "error", "error": str(error)}
+                block["error"] = f"Unable to restart stack: {error}"
+                progress["workflow"] = "block_running"
+                self._error = block["error"]
+                self._persist(folder)
+                self._write_block(folder, block)
+                raise ExperimentError(block["error"]) from error
+            block["restart"] = {"status": "complete", "error": None}
+            block["error"] = None
             self._error = None
             self._persist(folder)
             self._write_block(folder, block)
             return self.snapshot()
+
+    def _activate_discovery(self, block: dict, folder: Path) -> None:
+        if self._stack.snapshot().get("status") != "active":
+            raise ExperimentError("Restart the experiment stack before activating control.")
+        segment = self._new_segment(block, folder)
+        topics = list(block["settings"]["rosbag_topics"])
+        storage = self._profile.data["rosbag"]["storage"]
+        try:
+            self._rosbag.start(folder / block["folder"] / segment["name"], topics, storage)
+            self._modes.activate(block["mode"])
+        except Exception as error:
+            active_mode = self._modes.active_mode()
+            if active_mode:
+                try:
+                    self._modes.deactivate(active_mode)
+                except Exception:
+                    pass
+            try:
+                result = self._rosbag.shutdown()
+            except Exception as stop_error:
+                result = {
+                    "valid": False,
+                    "message_counts": {topic: 0 for topic in topics},
+                    "missing_topics": topics,
+                    "metadata_error": str(stop_error),
+                }
+            self._finish_segment(segment, result, "activation_failure", "failed")
+            block["control_active"] = False
+            block["current_segment"] = None
+            block["error"] = f"Unable to activate discovery: {error}"
+            self._persist(folder)
+            self._write_block(folder, block)
+            raise ExperimentError(block["error"]) from error
+        segment["status"] = "recording"
+        segment["started_at_utc"] = self._utc_clock()
+        block["control_active"] = True
+        block["error"] = None
+        self._error = None
+        self._persist(folder)
+        self._write_block(folder, block)
+
+    def _deactivate_discovery(self, block: dict, folder: Path, reason: str) -> None:
+        segment = self._segment(block, block.get("current_segment"))
+        errors = []
+        try:
+            result = self._rosbag.stop()
+        except Exception as error:
+            errors.append(f"recorder: {error}")
+            result = {
+                "valid": False,
+                "message_counts": {
+                    topic: 0 for topic in block["settings"]["rosbag_topics"]
+                },
+                "missing_topics": list(block["settings"]["rosbag_topics"]),
+                "metadata_error": str(error),
+            }
+        active_mode = self._modes.active_mode()
+        if active_mode:
+            try:
+                self._modes.deactivate(active_mode)
+            except Exception as error:
+                errors.append(f"mapper: {error}")
+        self._finish_segment(
+            segment,
+            result,
+            reason,
+            "complete" if result.get("valid") else "incomplete",
+        )
+        block["control_active"] = False
+        block["current_segment"] = None
+        block["error"] = "; ".join(errors) if errors else None
+        self._persist(folder)
+        self._write_block(folder, block)
+        if errors:
+            raise ExperimentError("Unable to deactivate discovery cleanly: " + "; ".join(errors))
+
+    def _new_segment(self, block: dict, folder: Path) -> dict:
+        pattern = self._profile.data["rosbag"]["segment_pattern"]
+        index = 1
+        block_folder = folder / block["folder"]
+        existing_names = {item.get("name") for item in block["segments"]}
+        while True:
+            name = pattern.format(index=index)
+            if name not in existing_names and not (block_folder / name).exists():
+                break
+            index += 1
+        segment = {
+            "index": index,
+            "name": name,
+            "status": "starting",
+            "storage": self._profile.data["rosbag"]["storage"],
+            "topics": list(block["settings"]["rosbag_topics"]),
+            "started_at_utc": None,
+            "stopped_at_utc": None,
+            "stop_reason": None,
+            "message_counts": {},
+            "missing_topics": list(block["settings"]["rosbag_topics"]),
+            "metadata_error": None,
+            "valid": False,
+        }
+        block["segments"].append(segment)
+        block["current_segment"] = name
+        return segment
+
+    def _finish_segment(self, segment: dict, result: Optional[dict], reason: str, status: str) -> None:
+        result = result or {}
+        segment["status"] = status
+        segment["stopped_at_utc"] = self._utc_clock()
+        segment["stop_reason"] = reason
+        segment["storage"] = result.get("storage", segment["storage"])
+        segment["message_counts"] = dict(result.get("message_counts", {}))
+        segment["missing_topics"] = list(result.get("missing_topics", segment["topics"]))
+        segment["metadata_error"] = result.get("metadata_error")
+        segment["valid"] = bool(result.get("valid"))
+
+    @staticmethod
+    def _can_end(block: dict) -> bool:
+        return any(segment.get("valid") for segment in block.get("segments", []))
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -363,19 +625,53 @@ class ExperimentController:
                     "progress": None,
                     "stack": self._stack.snapshot(),
                     "mapper": self._modes.snapshot(),
+                    "recorder": self._rosbag.snapshot(),
+                    "control_active": False,
+                    "current_segment": None,
+                    "segments": [],
+                    "can_end": False,
+                    "restart": {"status": "idle", "error": None},
                 }
             stack_state = self._stack.snapshot()
             mapper_state = self._modes.snapshot()
+            recorder_state = self._rosbag.snapshot()
             if (
                 self._progress.get("workflow") == "block_running"
                 and self._progress.get("current_block")
             ):
                 block = self._block(self._progress["current_block"])
-                process_failed = (
-                    stack_state.get("status") != "active"
-                    or mapper_state.get("status") != "active"
-                    or mapper_state.get("active_mode") != block["mode"]
-                )
+                if block["phase"] == "discovery":
+                    process_failed = stack_state.get("status") != "active" or (
+                        block["control_active"]
+                        and (
+                            mapper_state.get("status") != "active"
+                            or mapper_state.get("active_mode") != block["mode"]
+                            or recorder_state.get("status") != "active"
+                        )
+                    )
+                    if process_failed:
+                        folder = Path(self._participant["folder"])
+                        if block["control_active"]:
+                            try:
+                                self._deactivate_discovery(
+                                    block, folder, "process_failure"
+                                )
+                            except Exception:
+                                block["control_active"] = False
+                                block["current_segment"] = None
+                        block["error"] = "A required owned process stopped unexpectedly."
+                        self._error = block["error"]
+                        self._persist(folder)
+                        self._write_block(folder, block)
+                        mapper_state = self._modes.snapshot()
+                        recorder_state = self._rosbag.snapshot()
+                    process_failed = False
+                else:
+                    process_failed = (
+                        stack_state.get("status") != "active"
+                        or mapper_state.get("status") != "active"
+                        or mapper_state.get("active_mode") != block["mode"]
+                    )
                 if process_failed:
                     folder = Path(self._participant["folder"])
                     if mapper_state.get("active_mode") == block["mode"]:
@@ -393,6 +689,9 @@ class ExperimentController:
                     self._error = block["error"]
                     self._persist(folder)
                     self._write_block(folder, block)
+            active_block = None
+            if self._progress.get("current_block"):
+                active_block = self._block(self._progress["current_block"])
             return {
                 "workflow": self._progress["workflow"],
                 "current_panel": self._current_panel,
@@ -411,6 +710,22 @@ class ExperimentController:
                 "progress": json.loads(json.dumps(self._progress)),
                 "stack": stack_state,
                 "mapper": mapper_state,
+                "recorder": recorder_state,
+                "control_active": bool(active_block and active_block["control_active"]),
+                "current_segment": (
+                    active_block.get("current_segment") if active_block else None
+                ),
+                "segments": (
+                    json.loads(json.dumps(active_block.get("segments", [])))
+                    if active_block
+                    else []
+                ),
+                "can_end": bool(active_block and self._can_end(active_block)),
+                "restart": (
+                    dict(active_block.get("restart", {}))
+                    if active_block
+                    else {"status": "idle", "error": None}
+                ),
             }
 
     def shutdown(self) -> None:
@@ -418,6 +733,13 @@ class ExperimentController:
             if self._progress is not None and self._progress.get("current_block"):
                 folder = Path(self._participant["folder"])
                 block = self._block(self._progress["current_block"])
+                if block["phase"] == "discovery" and block["control_active"]:
+                    try:
+                        self._deactivate_discovery(
+                            block, folder, "interface_shutdown"
+                        )
+                    except Exception:
+                        pass
                 block["status"] = "interrupted"
                 block["updated_at_utc"] = self._utc_clock()
                 block["error"] = "Interface stopped while the block was active."
@@ -425,6 +747,7 @@ class ExperimentController:
                 self._progress["current_block"] = None
                 self._persist(folder)
                 self._write_block(folder, block)
+            self._rosbag.shutdown()
             self._modes.shutdown()
             self._stack.shutdown()
             self._current_panel = "D"
@@ -441,6 +764,30 @@ class ExperimentController:
             if block["id"] == block_id:
                 return block
         raise ExperimentError(f"Unknown experiment block: {block_id}")
+
+    @staticmethod
+    def _segment(block: dict, name: Optional[str]) -> dict:
+        if name is None:
+            raise ExperimentError("No discovery segment is currently active.")
+        for segment in block.get("segments", []):
+            if segment.get("name") == name:
+                return segment
+        raise ExperimentError(f"Unknown discovery segment: {name}")
+
+    @staticmethod
+    def _ensure_lot5_fields(block: dict) -> bool:
+        changed = False
+        defaults = {
+            "control_active": False,
+            "current_segment": None,
+            "segments": [],
+            "restart": {"status": "idle", "error": None},
+        }
+        for key, value in defaults.items():
+            if key not in block:
+                block[key] = value
+                changed = True
+        return changed
 
     def _next_block(self) -> Optional[dict]:
         if self._progress is None:

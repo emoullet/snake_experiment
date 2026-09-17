@@ -22,6 +22,7 @@ from .diagnostics import DiagnosticMonitor, DiagnosticProfile, collect_git_prove
 from .enrollment import EnrollmentController
 from .experiment import ExperimentController, ExperimentProfile
 from .mode_manager import ModeManager
+from .rosbag_manager import RosbagManager
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
 
@@ -44,6 +45,8 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("mode_shutdown_timeout_sec", 5.0)
         self.declare_parameter("stack_startup_timeout_sec", 30.0)
         self.declare_parameter("stack_shutdown_timeout_sec", 10.0)
+        self.declare_parameter("rosbag_startup_timeout_sec", 5.0)
+        self.declare_parameter("rosbag_shutdown_timeout_sec", 10.0)
 
         share = Path(get_package_share_directory("snake_experiment_ui"))
         configured_profile = str(self.get_parameter("diagnostic_profile").value)
@@ -98,6 +101,15 @@ class SessionInterfaceNode(Node):
             ),
             shutdown_timeout_sec=float(
                 self.get_parameter("stack_shutdown_timeout_sec").value
+            ),
+        )
+        self._rosbag_manager = RosbagManager(
+            node_names=self._node_names,
+            startup_timeout_sec=float(
+                self.get_parameter("rosbag_startup_timeout_sec").value
+            ),
+            shutdown_timeout_sec=float(
+                self.get_parameter("rosbag_shutdown_timeout_sec").value
             ),
         )
         self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
@@ -182,6 +194,7 @@ class SessionInterfaceNode(Node):
             profile=self._experiment_profile,
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
+            rosbag_manager=self._rosbag_manager,
         )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
