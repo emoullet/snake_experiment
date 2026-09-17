@@ -1,4 +1,4 @@
-"""ROS node hosting the independent Snake experiment Panels B-E interface."""
+"""ROS node hosting the independent Snake experiment Panels B-G interface."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ import uvicorn
 from .checkup import CheckupController
 from .diagnostics import DiagnosticMonitor, DiagnosticProfile, collect_git_provenance
 from .enrollment import EnrollmentController
+from .experiment import ExperimentController, ExperimentProfile
 from .mode_manager import ModeManager
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
@@ -34,6 +35,7 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("port", 8081)
         self.declare_parameter("stack_use_simulation", False)
         self.declare_parameter("diagnostic_profile", "")
+        self.declare_parameter("experiment_profile", "")
         self.declare_parameter("measurement_window_sec", 2.0)
         self.declare_parameter("repository_root", "")
         self.declare_parameter("sessions_root", "")
@@ -169,6 +171,18 @@ class SessionInterfaceNode(Node):
             if configured_calibration
             else Path.cwd() / "calibrations/latest_calib.json"
         )
+        configured_experiment = str(self.get_parameter("experiment_profile").value)
+        experiment_profile_path = (
+            Path(configured_experiment)
+            if configured_experiment
+            else share / "config/experiment.yaml"
+        )
+        self._experiment_profile = ExperimentProfile(experiment_profile_path)
+        self._experiment = ExperimentController(
+            profile=self._experiment_profile,
+            stack_manager=self._stack_manager,
+            mode_manager=self._mode_manager,
+        )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
             calibration_file=calibration_file,
@@ -177,12 +191,15 @@ class SessionInterfaceNode(Node):
             provenance_provider=lambda: collect_git_provenance(self._repository_root),
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
+            experiment_profile=experiment_profile_path,
+            experiment_prepare=self._experiment.prepare,
         )
         app = create_session_app(
             self._checkup,
             static_directory=share / "static",
             template_directory=share / "templates",
             enrollment=self._enrollment,
+            experiment=self._experiment,
         )
         config = uvicorn.Config(
             app,
@@ -199,7 +216,7 @@ class SessionInterfaceNode(Node):
         self._server_thread.start()
         host = self.get_parameter("host").value
         port = self.get_parameter("port").value
-        self.get_logger().info(f"Panels B-E available at http://{host}:{port}")
+        self.get_logger().info(f"Panels B-G available at http://{host}:{port}")
 
     def _node_names(self):
         return [
@@ -359,6 +376,7 @@ class SessionInterfaceNode(Node):
         self._mode_publisher.publish(message)
 
     def destroy_node(self):
+        self._experiment.shutdown()
         self._checkup.shutdown()
         self._server.should_exit = True
         if self._server_thread.is_alive():

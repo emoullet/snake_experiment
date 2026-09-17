@@ -118,6 +118,7 @@ and marks it as the active report.
 | `port` | `8081` | HTTP port. |
 | `stack_use_simulation` | `false` | Use simulation instead of robot hardware. |
 | `diagnostic_profile` | packaged profile | Override the check-up YAML. |
+| `experiment_profile` | packaged profile | Override the versioned block-sequence YAML. |
 | `measurement_window_sec` | `2.0` | Rolling topic-rate measurement window. |
 | `repository_root` | process working directory | Repository used for Git provenance. |
 | `sessions_root` | process working directory | Root boundary exposed by the server-side folder browser. |
@@ -137,16 +138,33 @@ The interface creates `experiment_state.csv` when absent, using the columns
 
 New participants receive a collision-safe six-character pseudonym and the least
 represented experimental plan. Their folder contains the current calibration,
-the packaged bringup configuration snapshot, the Panel B report history, a Git
-provenance record, and a SHA-256 manifest. Partial sessions can be resumed; any
-bringup or calibration difference requires explicit operator acknowledgement
-and never overwrites the saved environment.
+the packaged bringup and experiment-profile snapshots, the Panel B report
+history, a Git provenance record, and a SHA-256 manifest. Partial sessions can
+be resumed; any bringup, profile, or calibration difference requires explicit
+operator acknowledgement and never overwrites the saved environment.
 
 Cancelling a participant created during the current Panel C visit removes its
 new folder and CSV row. Cancelling a resumed participant only clears the UI
 selection. Closing the browser or stopping the interface preserves partial
-sessions. Launching starts the owned stack, activates the first control mode in
-the assigned plan, and advances to the Panel D placeholder.
+sessions. Launching prepares durable experiment progress and advances to Panel D
+without starting the stack or a mapper.
+
+## Panel D: experiment sequence
+
+Panel D resolves `mode_1` and `mode_2` from the participant's counterbalanced
+plan and enforces the six blocks in `config/experiment.yaml`: both discovery
+blocks, then training and recording for mode 1, followed by training and
+recording for mode 2. Starting a block starts the owned stack when needed and
+activates only that block's mapper. Ending a block requires confirmation;
+stopping and returning marks it interrupted so the same block folder can be
+resumed.
+
+Progress is atomically stored in `experiment_progress.json`, with block metadata
+in `<mode>_<phase>/block.json`. Backend shutdown interrupts an active block,
+while a browser disconnect alone does not. The final block stops the mapper and
+stack but deliberately leaves the participant CSV state as `partial`. Panels E,
+F, and G currently expose the block context and lifecycle controls; their
+discovery, training, and recording business logic belongs to later lots.
 
 ## JSON contract
 

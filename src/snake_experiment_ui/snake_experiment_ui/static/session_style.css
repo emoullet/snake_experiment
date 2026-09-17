@@ -39,7 +39,7 @@ h1 { margin-bottom: 0; font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.05; l
 h2 { margin-bottom: 0; font-size: 1.25rem; }
 h3 { margin: 0; font-size: 1.03rem; }
 .supporting-copy { margin-bottom: 0; color: var(--muted); line-height: 1.55; }
-.stepper { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+.stepper { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 18px; }
 .step { display: flex; align-items: center; gap: 11px; padding: 12px 14px; color: var(--muted); border: 1px solid var(--line); border-radius: 12px; background: rgb(255 255 255 / 70%); }
 .step strong { display: grid; width: 28px; height: 28px; place-items: center; color: var(--blue-dark); border-radius: 8px; background: var(--blue-soft); }
 .step span { font-size: .84rem; font-weight: 700; }
@@ -125,6 +125,16 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
 .participant-summary div { display: grid; gap: 2px; }
 .participant-summary dt { color: var(--muted); font-size: .7rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .participant-summary dd { max-width: 440px; margin: 0; overflow-wrap: anywhere; font-size: .84rem; font-weight: 700; }
+.block-list { display: grid; gap: 10px; margin-top: 20px; }
+.block-entry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fbfdff; }
+.block-entry.is-next { border-color: #8fb6ec; background: var(--blue-soft); }
+.block-order { display: grid; width: 32px; height: 32px; place-items: center; color: var(--blue-dark); font-weight: 850; border-radius: 9px; background: white; }
+.block-copy { display: grid; gap: 3px; }
+.block-copy span { color: var(--muted); font-size: .78rem; }
+.process-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.block-placeholder { min-height: 360px; }
+.block-placeholder .block-actions { display: flex; justify-content: center; gap: 10px; margin-top: 28px; }
+.block-metadata { width: min(680px, 100%); margin: 24px auto 0; text-align: left; }
 .dialog-backdrop { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(19 32 51 / 45%); backdrop-filter: blur(3px); }
 .folder-dialog { width: min(700px, 100%); max-height: min(700px, calc(100vh - 40px)); padding: 24px; overflow: auto; border-radius: 17px; background: white; box-shadow: 0 28px 80px rgb(19 32 51 / 25%); }
 .folder-list { display: grid; gap: 7px; margin-top: 14px; }
@@ -143,6 +153,9 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
   .enrolment-grid { grid-template-columns: 1fr; }
   .goto-grid { grid-template-columns: repeat(2, 1fr); }
   .hero-card, .validation-card, .action-row { align-items: stretch; flex-direction: column; }
+  .block-entry { grid-template-columns: auto 1fr; }
+  .block-entry .pill, .block-entry button { grid-column: 2; justify-self: start; }
+  .process-card { align-items: stretch; flex-direction: column; }
   .confirmation { grid-template-columns: 1fr 1fr; }
   .confirmation span { grid-column: 1 / -1; }
 }

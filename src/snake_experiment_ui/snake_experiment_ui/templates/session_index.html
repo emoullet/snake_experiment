@@ -23,7 +23,9 @@
         <div class="step is-current" data-panel-step="B"><strong>B</strong><span>System check-up</span></div>
         <div class="step is-locked" data-panel-step="C"><strong>C</strong><span>Session setup</span></div>
         <div class="step is-locked" data-panel-step="D"><strong>D</strong><span>Experiment</span></div>
-        <div class="step is-locked" data-panel-step="E"><strong>E</strong><span>Condition</span></div>
+        <div class="step is-locked" data-panel-step="E"><strong>E</strong><span>Discovery</span></div>
+        <div class="step is-locked" data-panel-step="F"><strong>F</strong><span>Training</span></div>
+        <div class="step is-locked" data-panel-step="G"><strong>G</strong><span>Recording</span></div>
       </nav>
 
       <section id="panel-b" class="panel-page">
@@ -140,11 +142,26 @@
         <p id="enrollment-error" class="inline-error" hidden></p>
       </section>
 
-      <section id="panel-d" class="panel-page placeholder" hidden>
-        <p class="step-number">Panel D</p><h2>Experiment</h2>
-        <p>The experiment stack and the first assigned control mode are active.</p>
-        <p class="supporting-copy">Experiment execution will be implemented in the next lot.</p>
+      <section id="panel-d" class="panel-page" hidden>
+        <section class="hero-card">
+          <div><p class="step-number">Panel D · Lot 4</p><h2>Experiment sequence</h2><p class="supporting-copy">Start each block in the prescribed order. The assigned Baseline and Snake modes are shown explicitly.</p></div>
+          <span id="experiment-status" class="pill pill--neutral">Ready</span>
+        </section>
+        <div id="experiment-warning" class="warning-list" hidden></div>
+        <section class="card">
+          <div class="section-heading"><div><p class="step-number">01</p><h2>Assigned blocks</h2></div><span id="experiment-plan" class="supporting-copy"></span></div>
+          <div id="block-list" class="block-list"></div>
+        </section>
+        <section class="card process-card">
+          <div><p class="step-number">Process ownership</p><h2>Robot processes</h2></div>
+          <dl id="process-summary" class="participant-summary"></dl>
+        </section>
+        <p id="experiment-error" class="inline-error" hidden></p>
       </section>
+
+      <section id="panel-e" class="panel-page placeholder block-placeholder" hidden></section>
+      <section id="panel-f" class="panel-page placeholder block-placeholder" hidden></section>
+      <section id="panel-g" class="panel-page placeholder block-placeholder" hidden></section>
     </main>
     <div id="folder-dialog" class="dialog-backdrop" hidden>
       <section class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title">

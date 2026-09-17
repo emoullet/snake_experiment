@@ -56,6 +56,11 @@ class EnrollmentControllerTest(unittest.TestCase):
         ignored = self.bringup / "joystick_mapper" / "launch" / "mapper.launch.py"
         ignored.parent.mkdir(parents=True)
         ignored.write_text("ignored\n", encoding="utf-8")
+        self.experiment_profile = self.root / "experiment.yaml"
+        source_profile = Path(__file__).parents[1] / "config" / "experiment.yaml"
+        self.experiment_profile.write_text(
+            source_profile.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         self.stack = FakeStack()
         self.modes = FakeModes()
         self.controller = self.make_controller()
@@ -76,6 +81,7 @@ class EnrollmentControllerTest(unittest.TestCase):
             provenance_provider=lambda: {"repositories": {".": {"commit": "abc", "dirty": False}}},
             stack_manager=self.stack,
             mode_manager=self.modes,
+            experiment_profile=self.experiment_profile,
             utc_clock=lambda: "2026-09-15T12:34:56Z",
         )
 
@@ -127,6 +133,7 @@ class EnrollmentControllerTest(unittest.TestCase):
         self.assertFalse((folder / "experimental_environment/bringup/joystick_mapper/launch/mapper.launch.py").exists())
         self.assertTrue((folder / "calibration/latest_calib.json").is_file())
         self.assertTrue((folder / "checkups/check-1.json").is_file())
+        self.assertTrue((folder / "experimental_environment/experiment.yaml").is_file())
         manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["active_checkup_report"], "checkups/check-1.json")
         with (self.experiment / "experiment_state.csv").open(newline="") as source:
@@ -171,13 +178,12 @@ class EnrollmentControllerTest(unittest.TestCase):
         resumed.cancel()
         self.assertTrue((self.experiment / "A1B2C3").is_dir())
 
-    def test_launch_starts_stack_and_first_assigned_mode(self):
+    def test_launch_prepares_panel_d_without_starting_ros_processes(self):
         self.controller.select_parent(str(self.experiment))
         self.controller.create_participant(self.form())
-        first_mode = self.controller.snapshot()["participant"]["experimental_plan"].split("->")[0]
         state = self.controller.launch()
-        self.assertTrue(self.stack.active)
-        self.assertEqual(self.modes.active, first_mode)
+        self.assertFalse(self.stack.active)
+        self.assertIsNone(self.modes.active)
         self.assertEqual(state["current_panel"], "D")
         with self.assertRaisesRegex(EnrollmentError, "cannot be cancelled"):
             self.controller.cancel()

@@ -1,0 +1,37 @@
+schema_version: 1
+
+block_sequence:
+  - id: mode_1_discovery
+    mode_role: mode_1
+    phase: discovery
+  - id: mode_2_discovery
+    mode_role: mode_2
+    phase: discovery
+  - id: mode_1_training
+    mode_role: mode_1
+    phase: training
+  - id: mode_1_recording
+    mode_role: mode_1
+    phase: recording
+  - id: mode_2_training
+    mode_role: mode_2
+    phase: training
+  - id: mode_2_recording
+    mode_role: mode_2
+    phase: recording
+
+phases:
+  discovery:
+    rosbag_topics: [/joy, /ee_pose, /joint_states]
+  training:
+    cycles: 2
+    target_sequence: [1, 2, 3, 1]
+    rosbag_topics: [/joy, /ee_pose, /joint_states]
+  recording:
+    cycles: 10
+    target_sequence: [1, 2, 3, 1]
+    rosbag_topics: [/joy, /ee_pose, /joint_states]
+
+success_thresholds:
+  linear_m: null
+  angular_rad: null

@@ -58,6 +58,8 @@ class EnrollmentController:
         provenance_provider: Callable[[], dict],
         stack_manager,
         mode_manager,
+        experiment_profile: Optional[Path] = None,
+        experiment_prepare: Optional[Callable[[dict], dict]] = None,
         utc_clock: Callable[[], str] = _utc_now,
         token_choice: Callable = secrets.choice,
     ) -> None:
@@ -68,6 +70,10 @@ class EnrollmentController:
         self._provenance_provider = provenance_provider
         self._stack = stack_manager
         self._modes = mode_manager
+        self._experiment_profile = (
+            Path(experiment_profile).resolve() if experiment_profile else None
+        )
+        self._experiment_prepare = experiment_prepare
         self._utc_clock = utc_clock
         self._choice = token_choice
         self._lock = threading.RLock()
@@ -317,27 +323,16 @@ class EnrollmentController:
                 raise EnrollmentError("The experiment is already launched.")
             if self._participant is None:
                 raise EnrollmentError("Create or resume a participant before launching.")
-            first_mode = self._participant["experimental_plan"].split("->", 1)[0]
             self._workflow = "launching"
             self._error = None
             try:
-                self._stack.start()
-                self._modes.activate(first_mode)
+                if self._experiment_prepare is not None:
+                    self._experiment_prepare(self._participant)
             except Exception as error:
-                active_mode = self._modes.active_mode()
-                if active_mode:
-                    try:
-                        self._modes.deactivate(active_mode)
-                    except Exception:
-                        pass
-                try:
-                    self._stack.stop()
-                except Exception:
-                    pass
                 self._workflow = "error"
-                self._error = f"Unable to launch experiment: {error}"
+                self._error = f"Unable to prepare experiment: {error}"
                 raise EnrollmentError(self._error) from error
-            self._workflow = "launched"
+            self._workflow = "experiment_ready"
             self._current_panel = "D"
             return self.snapshot()
 
@@ -514,6 +509,20 @@ class EnrollmentController:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
             files.append({"path": str(Path("experimental_environment/bringup") / relative), "sha256": _sha256(destination)})
+        if self._experiment_profile is not None:
+            if not self._experiment_profile.is_file():
+                raise EnrollmentError(
+                    f"Experiment profile not found: {self._experiment_profile}"
+                )
+            experiment_destination = environment / "experiment.yaml"
+            experiment_destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self._experiment_profile, experiment_destination)
+            files.append(
+                {
+                    "path": "experimental_environment/experiment.yaml",
+                    "sha256": _sha256(experiment_destination),
+                }
+            )
         calibration_destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self._calibration_file, calibration_destination)
         checkup_destination.parent.mkdir(parents=True, exist_ok=True)
@@ -527,6 +536,10 @@ class EnrollmentController:
             "active_checkup_report": str(Path("checkups") / checkup_destination.name),
             "checkup_reports": [str(Path("checkups") / checkup_destination.name)],
             "git_provenance": self._provenance_provider(),
+            "experiment": {
+                "profile": "experimental_environment/experiment.yaml",
+                "progress": "experiment_progress.json",
+            },
             "files": files + [
                 {"path": "calibration/latest_calib.json", "sha256": _sha256(calibration_destination)},
                 {"path": str(Path("checkups") / checkup_destination.name), "sha256": _sha256(checkup_destination)},
@@ -580,6 +593,10 @@ class EnrollmentController:
             values[str(relative)] = _sha256(source)
         if self._calibration_file.is_file():
             values["calibration/latest_calib.json"] = _sha256(self._calibration_file)
+        if self._experiment_profile is not None and self._experiment_profile.is_file():
+            values["experimental_environment/experiment.yaml"] = _sha256(
+                self._experiment_profile
+            )
         return values
 
     def _compare_environment(self, manifest: dict) -> list[dict]:
@@ -587,9 +604,14 @@ class EnrollmentController:
             item["path"]: item["sha256"]
             for item in manifest.get("files", [])
             if item.get("path", "").startswith("experimental_environment/bringup/")
+            or item.get("path") == "experimental_environment/experiment.yaml"
             or item.get("path") == "calibration/latest_calib.json"
         }
         current = self._current_environment_hashes()
+        # Sessions created before LOT 4 legitimately have no experiment profile.
+        # It is snapshotted, with a manifest warning, when Panel D is first opened.
+        if "experimental_environment/experiment.yaml" not in saved:
+            current.pop("experimental_environment/experiment.yaml", None)
         mismatches = []
         for path in sorted(set(saved) | set(current)):
             if saved.get(path) != current.get(path):

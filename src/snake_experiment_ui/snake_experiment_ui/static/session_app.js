@@ -43,6 +43,20 @@ class SessionInterface {
           acknowledge_mismatch: acknowledged,
         });
       }
+      const blockStart = event.target.closest("[data-block-start]");
+      if (blockStart) {
+        return this.post(`/api/experiment/blocks/${blockStart.dataset.blockStart}/start`);
+      }
+      const blockEnd = event.target.closest("[data-block-end]");
+      if (blockEnd) {
+        const label = blockEnd.dataset.phase || "block";
+        if (!window.confirm(`End this ${label} block? This action advances the experiment sequence.`)) return;
+        return this.post(`/api/experiment/blocks/${blockEnd.dataset.blockEnd}/end`, { confirmed: true });
+      }
+      const blockAbort = event.target.closest("[data-block-abort]");
+      if (blockAbort) {
+        return this.post(`/api/experiment/blocks/${blockAbort.dataset.blockAbort}/abort`);
+      }
     });
     document.getElementById("validate-button").addEventListener("click", () =>
       this.post("/api/checkup/validate")
@@ -210,19 +224,24 @@ class SessionInterface {
     const currentPanel = this.state.current_panel;
     const onPanelC = currentPanel === "C";
     const onPanelD = currentPanel === "D";
+    const onBlockPanel = ["E", "F", "G"].includes(currentPanel);
     document.getElementById("panel-b").hidden = currentPanel !== "B";
     document.getElementById("panel-c").hidden = !onPanelC;
     document.getElementById("panel-d").hidden = !onPanelD;
+    for (const panel of ["E", "F", "G"]) {
+      document.getElementById(`panel-${panel.toLowerCase()}`).hidden = currentPanel !== panel;
+    }
     document.querySelectorAll("[data-panel-step]").forEach((step) => {
       const current = step.dataset.panelStep === currentPanel;
       step.classList.toggle("is-current", current);
-      const completed = (currentPanel === "C" && step.dataset.panelStep === "B")
-        || (currentPanel === "D" && ["B", "C"].includes(step.dataset.panelStep));
+      const panelOrder = ["B", "C", "D", "E", "F", "G"];
+      const completed = panelOrder.indexOf(step.dataset.panelStep) < panelOrder.indexOf(currentPanel);
       step.classList.toggle("is-locked", !current && !completed);
       step.classList.toggle("is-complete", completed);
     });
     if (onPanelC) return this.renderEnrollment();
-    if (onPanelD) return;
+    if (onPanelD) return this.renderExperiment();
+    if (onBlockPanel) return this.renderActiveBlock();
 
     const workflow = this.state.workflow.replaceAll("_", " ");
     const workflowPill = document.getElementById("workflow-status");
@@ -295,6 +314,66 @@ class SessionInterface {
     const error = document.getElementById("enrollment-error");
     error.hidden = !enrollment.error;
     error.textContent = enrollment.error || "";
+  }
+
+  renderExperiment() {
+    const experiment = this.state.experiment;
+    if (!experiment?.progress) return;
+    const progress = experiment.progress;
+    const statusLabels = {
+      ready: "Ready", interrupted: "Interrupted", error: "Action required",
+      sequence_completed: "Sequence complete", starting_block: "Starting",
+    };
+    const status = document.getElementById("experiment-status");
+    status.textContent = statusLabels[progress.workflow] || progress.workflow.replaceAll("_", " ");
+    status.className = `pill ${progress.workflow === "sequence_completed" ? "pill--active" : ["interrupted", "error"].includes(progress.workflow) ? "pill--warning" : "pill--neutral"}`;
+    document.getElementById("experiment-plan").textContent = experiment.participant.experimental_plan.replace("->", " → ");
+    const next = progress.blocks.find((block) => block.status !== "completed");
+    document.getElementById("block-list").innerHTML = progress.blocks.map((block) => {
+      const isNext = next?.id === block.id;
+      const labels = { not_started: "Locked", starting: "Starting", running: "Running", completed: "Complete", interrupted: "Interrupted", error: "Error" };
+      const pillClass = block.status === "completed" ? "pill--active" : ["interrupted", "error"].includes(block.status) ? "pill--warning" : "pill--neutral";
+      const startable = isNext && ["not_started", "interrupted", "error"].includes(block.status) && progress.workflow !== "sequence_completed";
+      const verb = block.status === "interrupted" ? "Resume" : block.status === "error" ? "Retry" : "Start";
+      return `<article class="block-entry${isNext ? " is-next" : ""}">
+        <span class="block-order">${block.order}</span>
+        <div class="block-copy"><strong>${this.escape(this.title(block.mode))} · ${this.escape(this.title(block.phase))}</strong><span>${this.escape(block.mode_role.replace("_", " "))} · folder ${this.escape(block.folder)}${block.attempts ? ` · ${block.attempts} attempt${block.attempts === 1 ? "" : "s"}` : ""}</span></div>
+        <span class="pill ${pillClass}">${labels[block.status] || this.escape(block.status)}</span>
+        <button class="secondary-button" data-block-start="${this.escape(block.id)}" type="button" ${this.busy || !startable ? "disabled" : ""}>${verb} ${this.escape(block.phase)}</button>
+      </article>`;
+    }).join("");
+    const warnings = document.getElementById("experiment-warning");
+    warnings.hidden = !progress.warnings.length;
+    warnings.innerHTML = progress.warnings.length ? `<strong>Session warning</strong><ul>${progress.warnings.map((warning) => `<li>${this.escape(warning)}</li>`).join("")}</ul>` : "";
+    document.getElementById("process-summary").innerHTML = [
+      ["Stack", experiment.stack.status], ["Mapper", experiment.mapper.status],
+      ["Active mode", experiment.mapper.active_mode || "None"], ["Profile", experiment.profile.sha256.slice(0, 12)],
+    ].map(([term, value]) => `<div><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
+    const error = document.getElementById("experiment-error");
+    error.hidden = !experiment.error;
+    error.textContent = experiment.error || "";
+  }
+
+  renderActiveBlock() {
+    const experiment = this.state.experiment;
+    const progress = experiment?.progress;
+    if (!progress) return;
+    const block = progress.blocks.find((item) => item.id === progress.current_block);
+    if (!block) return;
+    const panel = document.getElementById(`panel-${block.panel.toLowerCase()}`);
+    const phase = this.title(block.phase);
+    const settings = Object.entries(block.settings)
+      .map(([key, value]) => `<div><dt>${this.escape(key.replaceAll("_", " "))}</dt><dd>${this.escape(JSON.stringify(value))}</dd></div>`).join("");
+    panel.innerHTML = `<p class="step-number">Panel ${block.panel} · ${phase}</p>
+      <h2>${this.escape(this.title(block.mode))} ${this.escape(block.phase)}</h2>
+      <p class="supporting-copy">The experiment stack and the ${this.escape(this.title(block.mode))} mapper are active. Detailed ${this.escape(block.phase)} logic will be implemented in its dedicated lot.</p>
+      <dl class="participant-summary block-metadata"><div><dt>Block</dt><dd>${this.escape(block.id)}</dd></div><div><dt>Folder</dt><dd>${this.escape(block.folder)}</dd></div><div><dt>Attempt</dt><dd>${block.attempts}</dd></div>${settings}</dl>
+      <div class="block-actions"><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${this.escape(block.phase)}" type="button" ${this.busy ? "disabled" : ""}>End ${this.escape(block.phase)}</button></div>`;
+  }
+
+  title(value) {
+    const text = String(value || "").replaceAll("_", " ");
+    return text ? text[0].toUpperCase() + text.slice(1) : text;
   }
 
   renderMode(mode) {

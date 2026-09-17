@@ -1,4 +1,4 @@
-"""FastAPI surface for the independent Panels B-E interface."""
+"""FastAPI surface for the independent Panels B-G interface."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from .checkup import CheckupError
 from .diagnostics import DiagnosticProfileError
 from .enrollment import EnrollmentError
+from .experiment import ExperimentError
 from .mode_manager import ModeError
 from .stack_manager import StackError
 
@@ -44,10 +45,18 @@ class ResumeRequest(BaseModel):
     acknowledge_mismatch: bool = False
 
 
+class EndBlockRequest(BaseModel):
+    confirmed: bool
+
+
 def create_session_app(
-    checkup, static_directory: Path, template_directory: Path, enrollment=None
+    checkup,
+    static_directory: Path,
+    template_directory: Path,
+    enrollment=None,
+    experiment=None,
 ):
-    """Create the Panel B-E app around an injectable CheckupController."""
+    """Create the Panel B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
     app.mount(
         "/session-static",
@@ -62,6 +71,7 @@ def create_session_app(
             CheckupError,
             DiagnosticProfileError,
             EnrollmentError,
+            ExperimentError,
             ModeError,
             StackError,
         ) as error:
@@ -83,6 +93,10 @@ def create_session_app(
             panel_c = enrollment.snapshot()
             state["current_panel"] = panel_c["current_panel"]
             state["enrollment"] = panel_c
+            if experiment is not None and panel_c["current_panel"] != "C":
+                panel_d = experiment.snapshot()
+                state["current_panel"] = panel_d["current_panel"]
+                state["experiment"] = panel_d
         return state
 
     def enrollment_action(callback):
@@ -197,6 +211,28 @@ def create_session_app(
         if enrollment is None:
             raise HTTPException(status_code=404, detail="Panel C is not configured.")
         return enrollment_action(enrollment.launch)
+
+    def experiment_action(callback):
+        if experiment is None:
+            raise HTTPException(status_code=404, detail="Panel D is not configured.")
+        if checkup.snapshot().get("current_panel") == "B":
+            raise HTTPException(status_code=409, detail="Validate Panel B first.")
+        if enrollment is None or enrollment.snapshot().get("current_panel") == "C":
+            raise HTTPException(status_code=409, detail="Prepare a participant from Panel C first.")
+        action(callback)
+        return combined_snapshot()
+
+    @app.post("/api/experiment/blocks/{block_id}/start")
+    async def start_experiment_block(block_id: str):
+        return experiment_action(lambda: experiment.start(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/end")
+    async def end_experiment_block(block_id: str, request: EndBlockRequest):
+        return experiment_action(lambda: experiment.end(block_id, request.confirmed))
+
+    @app.post("/api/experiment/blocks/{block_id}/abort")
+    async def abort_experiment_block(block_id: str):
+        return experiment_action(lambda: experiment.abort(block_id))
 
     @app.websocket("/ws")
     async def state_websocket(websocket: WebSocket):

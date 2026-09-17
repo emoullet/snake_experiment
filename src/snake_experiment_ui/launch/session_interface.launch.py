@@ -1,4 +1,4 @@
-"""Launch the independent Panels B-E Snake experiment interface."""
+"""Launch the independent Panels B-G Snake experiment interface."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -12,6 +12,7 @@ def generate_launch_description():
         DeclareLaunchArgument("port", default_value="8081"),
         DeclareLaunchArgument("stack_use_simulation", default_value="false"),
         DeclareLaunchArgument("diagnostic_profile", default_value=""),
+        DeclareLaunchArgument("experiment_profile", default_value=""),
         DeclareLaunchArgument("measurement_window_sec", default_value="2.0"),
         DeclareLaunchArgument("repository_root", default_value=""),
         DeclareLaunchArgument("sessions_root", default_value=""),
@@ -34,6 +35,7 @@ def generate_launch_description():
                     "stack_use_simulation"
                 ),
                 "diagnostic_profile": LaunchConfiguration("diagnostic_profile"),
+                "experiment_profile": LaunchConfiguration("experiment_profile"),
                 "measurement_window_sec": LaunchConfiguration(
                     "measurement_window_sec"
                 ),

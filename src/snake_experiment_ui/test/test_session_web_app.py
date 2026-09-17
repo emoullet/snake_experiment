@@ -92,6 +92,31 @@ class FakeEnrollment:
         self.panel = "D"
 
 
+class FakeExperiment:
+    def __init__(self):
+        self.panel = "D"
+        self.calls = []
+
+    def snapshot(self):
+        return {
+            "workflow": "ready",
+            "current_panel": self.panel,
+            "progress": {"workflow": "ready", "blocks": []},
+        }
+
+    def start(self, block_id):
+        self.calls.append(("start", block_id))
+        self.panel = "E"
+
+    def end(self, block_id, confirmed):
+        self.calls.append(("end", block_id, confirmed))
+        self.panel = "D"
+
+    def abort(self, block_id):
+        self.calls.append(("abort", block_id))
+        self.panel = "D"
+
+
 @unittest.skipIf(httpx is None, "FastAPI test dependencies are not installed")
 class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -107,7 +132,10 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         (templates / "session_index.html").write_text("Panel B", encoding="utf-8")
         self.checkup = FakeCheckup()
         self.enrollment = FakeEnrollment()
-        self.app = create_session_app(self.checkup, static, templates, self.enrollment)
+        self.experiment = FakeExperiment()
+        self.app = create_session_app(
+            self.checkup, static, templates, self.enrollment, self.experiment
+        )
 
     def tearDown(self):
         self.temporary_directory.cleanup()
@@ -156,6 +184,22 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request("POST", "/api/session/launch")
         self.assertEqual(response.json()["current_panel"], "D")
 
+        response = await self.request(
+            "POST", "/api/experiment/blocks/mode_1_discovery/start"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["current_panel"], "E")
+        response = await self.request(
+            "POST",
+            "/api/experiment/blocks/mode_1_discovery/end",
+            json={"confirmed": True},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.experiment.calls,
+            [("start", "mode_1_discovery"), ("end", "mode_1_discovery", True)],
+        )
+
 
 class SessionTemplateTest(unittest.TestCase):
     def test_participant_fields_use_explicit_choices_without_defaults(self):
@@ -178,6 +222,16 @@ class SessionTemplateTest(unittest.TestCase):
         script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
         self.assertIn("this.resetParticipantForm();", script)
         self.assertIn('["/api/session/cancel", "/api/session/reset"]', script)
+
+    def test_lot_4_panels_and_actions_are_present(self):
+        package_root = Path(__file__).parents[1] / "snake_experiment_ui"
+        html = (package_root / "templates/session_index.html").read_text(encoding="utf-8")
+        script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
+        for panel in ("D", "E", "F", "G"):
+            self.assertIn(f'data-panel-step="{panel}"', html)
+        self.assertIn("data-block-start", script)
+        self.assertIn("data-block-end", script)
+        self.assertIn("data-block-abort", script)
 
 
 if __name__ == "__main__":
