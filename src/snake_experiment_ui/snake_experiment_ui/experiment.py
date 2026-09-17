@@ -10,9 +10,19 @@ from pathlib import Path
 import shutil
 import tempfile
 import threading
+import time
 from typing import Callable, Optional
 
 import yaml
+
+from .training import (
+    TrainingError,
+    build_trials,
+    effective_thresholds,
+    pose_error,
+    validate_thresholds,
+    validate_training_settings,
+)
 
 
 MODES = ("baseline", "snake")
@@ -25,6 +35,25 @@ REQUIRED_SEQUENCE = (
     ("mode_2_training", "mode_2", "training"),
     ("mode_2_recording", "mode_2", "recording"),
 )
+DEFAULT_TRAINING_SETTINGS = {
+    "cycles": 2,
+    "target_sequence": [1, 2, 3, 1],
+    "rosbag_topics": ["/joy", "/ee_pose", "/joint_states"],
+    "trial_folder_pattern": (
+        "{mode}_training_trial_{trial_id:03d}_{cycle:02d}_"
+        "{target_start}_{target_end}"
+    ),
+    "attempt_pattern": "attempt_{attempt:03d}",
+}
+DEFAULT_TRAINING_THRESHOLDS = {
+    "provisional": True,
+    "linear_mm": 5.0,
+    "angular_deg": 5.0,
+    "start_linear_mm": 5.0,
+    "start_angular_deg": 5.0,
+    "success_dwell_sec": 0.5,
+    "pose_freshness_sec": 0.5,
+}
 
 
 class ExperimentError(RuntimeError):
@@ -108,19 +137,28 @@ class ExperimentProfile:
             or not str(instructions.get("text", "")).strip()
         ):
             raise ExperimentError("Discovery instructions are missing or invalid.")
-        if phases["training"].get("cycles") != 2:
-            raise ExperimentError("Training must define exactly 2 cycles.")
+        if allow_legacy:
+            for key, value in DEFAULT_TRAINING_SETTINGS.items():
+                phases["training"].setdefault(key, json.loads(json.dumps(value)))
+        try:
+            validate_training_settings(phases["training"])
+        except TrainingError as error:
+            raise ExperimentError(str(error)) from error
         if phases["recording"].get("cycles") != 10:
             raise ExperimentError("Recording must define exactly 10 cycles.")
-        for phase in ("training", "recording"):
-            if phases[phase].get("target_sequence") != [1, 2, 3, 1]:
-                raise ExperimentError(f"Invalid target sequence for phase '{phase}'.")
+        if phases["recording"].get("target_sequence") != [1, 2, 3, 1]:
+            raise ExperimentError("Invalid target sequence for phase 'recording'.")
         thresholds = data.get("success_thresholds")
-        if not isinstance(thresholds, dict) or set(thresholds) != {
-            "linear_m",
-            "angular_rad",
-        } or any(value is not None for value in thresholds.values()):
-            raise ExperimentError("Success thresholds must be explicitly null.")
+        if allow_legacy and (
+            not isinstance(thresholds, dict)
+            or set(thresholds) == {"linear_m", "angular_rad"}
+        ):
+            thresholds = dict(DEFAULT_TRAINING_THRESHOLDS)
+            data["success_thresholds"] = thresholds
+        try:
+            validate_thresholds(thresholds)
+        except TrainingError as error:
+            raise ExperimentError(str(error)) from error
         rosbag = data.get("rosbag")
         if rosbag is None and allow_legacy:
             rosbag = {"storage": "mcap", "segment_pattern": "rosbag_{index:03d}"}
@@ -155,7 +193,7 @@ class ExperimentProfile:
                     "phase": phase,
                     "panel": PHASE_PANELS[phase],
                     "folder": f"{resolved_mode}_{phase}",
-                    "settings": dict(self.data["phases"][phase]),
+                    "settings": json.loads(json.dumps(self.data["phases"][phase])),
                     "success_thresholds": dict(self.data["success_thresholds"]),
                     "status": "not_started",
                     "attempts": 0,
@@ -167,6 +205,16 @@ class ExperimentProfile:
                     "current_segment": None,
                     "segments": [],
                     "restart": {"status": "idle", "error": None},
+                    "training_workflow": (
+                        "awaiting_prepare" if phase == "training" else None
+                    ),
+                    "training_trials": (
+                        build_trials(resolved_mode, self.data["phases"][phase])
+                        if phase == "training"
+                        else []
+                    ),
+                    "current_trial_id": None,
+                    "training_deviations": [],
                 }
             )
         return blocks
@@ -182,6 +230,8 @@ class ExperimentController:
         mode_manager,
         rosbag_manager,
         utc_clock: Callable[[], str] = _utc_now,
+        monotonic_clock: Callable[[], float] = time.monotonic,
+        thread_factory: Callable[..., threading.Thread] = threading.Thread,
     ) -> None:
         self._source_profile = profile
         self._profile = profile
@@ -189,11 +239,16 @@ class ExperimentController:
         self._modes = mode_manager
         self._rosbag = rosbag_manager
         self._utc_clock = utc_clock
+        self._monotonic_clock = monotonic_clock
+        self._thread_factory = thread_factory
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
         self._progress: Optional[dict] = None
         self._current_panel = "D"
         self._error: Optional[str] = None
+        self._calibration: Optional[dict] = None
+        self._latest_pose: Optional[dict] = None
+        self._latest_pose_monotonic: Optional[float] = None
 
     def prepare(self, participant: dict) -> dict:
         """Load or create durable progress without starting a ROS process."""
@@ -225,6 +280,7 @@ class ExperimentController:
             if late_initialization:
                 self._record_late_initialization(folder, profile_path)
             self._profile = profile
+            self._calibration = self._load_calibration(folder)
             progress_path = folder / "experiment_progress.json"
             if progress_path.is_file():
                 try:
@@ -234,8 +290,12 @@ class ExperimentController:
                 self._validate_progress(progress, participant)
                 changed = False
                 recovered_active = False
+                lot6_migrated = False
                 for block in progress["blocks"]:
                     changed = self._ensure_lot5_fields(block) or changed
+                    migrated = self._ensure_lot6_fields(block)
+                    changed = migrated or changed
+                    lot6_migrated = migrated or lot6_migrated
                     if block["status"] in ("starting", "running"):
                         if block.get("current_segment"):
                             segment = self._segment(block, block["current_segment"])
@@ -243,6 +303,10 @@ class ExperimentController:
                             segment["stopped_at_utc"] = self._utc_clock()
                             segment["stop_reason"] = "interface_restart"
                             segment["valid"] = False
+                        if block["phase"] == "training":
+                            self._recover_training_attempt(
+                                block, folder, "interface_restart"
+                            )
                         block["control_active"] = False
                         block["current_segment"] = None
                         block["status"] = "interrupted"
@@ -252,6 +316,14 @@ class ExperimentController:
                         changed = True
                         recovered_active = True
                 if changed:
+                    if lot6_migrated:
+                        warning = (
+                            "LOT 6 training fields were initialised with the "
+                            "effective development profile."
+                        )
+                        progress.setdefault("warnings", [])
+                        if warning not in progress["warnings"]:
+                            progress["warnings"].append(warning)
                     if recovered_active:
                         progress["workflow"] = "interrupted"
                         progress["current_block"] = None
@@ -360,6 +432,19 @@ class ExperimentController:
                     self._persist(folder)
                     self._write_block(folder, block)
                     raise ExperimentError(block["error"])
+            elif block["phase"] == "training":
+                if not self._training_can_end(block):
+                    block["error"] = "Resolve every training trial before ending the block."
+                    self._persist(folder)
+                    self._write_block(folder, block)
+                    raise ExperimentError(block["error"])
+                try:
+                    self._modes.deactivate(block["mode"])
+                except Exception as error:
+                    block["error"] = f"Unable to stop mapper: {error}"
+                    self._persist(folder)
+                    self._write_block(folder, block)
+                    raise ExperimentError(block["error"]) from error
             else:
                 try:
                     self._modes.deactivate(block["mode"])
@@ -408,6 +493,24 @@ class ExperimentController:
                     self._stack.stop()
                 except Exception as error:
                     cleanup_errors.append(f"stack: {error}")
+            elif block["phase"] == "training":
+                if block.get("training_workflow") in ("recording", "stopping_success"):
+                    try:
+                        self._finish_training_attempt(
+                            block, folder, "operator_abort", successful=False
+                        )
+                    except Exception as error:
+                        cleanup_errors.append(str(error))
+                active_mode = self._modes.active_mode()
+                if active_mode:
+                    try:
+                        self._modes.deactivate(active_mode)
+                    except Exception as error:
+                        cleanup_errors.append(f"mapper: {error}")
+                try:
+                    self._stack.stop()
+                except Exception as error:
+                    cleanup_errors.append(f"stack: {error}")
             else:
                 try:
                     self._modes.deactivate(block["mode"])
@@ -441,12 +544,255 @@ class ExperimentController:
                 self._deactivate_discovery(block, folder, "operator_toggle")
             return self.snapshot()
 
+    def prepare_training_trial(self, block_id: str) -> dict:
+        """Select the next unresolved training trial and begin start-pose checks."""
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._training_block(block_id)
+            self._require_training_processes(block)
+            if block["training_workflow"] != "awaiting_prepare":
+                raise ExperimentError("Finish the current training step first.")
+            trial = next(
+                (
+                    item
+                    for item in block["training_trials"]
+                    if item["status"] == "pending"
+                ),
+                None,
+            )
+            if trial is None:
+                raise ExperimentError("No unresolved training trial remains.")
+            block["current_trial_id"] = trial["id"]
+            block["training_workflow"] = "awaiting_start_pose"
+            trial["status"] = "positioning"
+            trial["prepared_at_utc"] = self._utc_clock()
+            trial["ready_at_utc"] = None
+            block["training_live"] = self._empty_training_live()
+            self._refresh_training_live(block)
+            self._persist_training(folder, block, trial)
+            return self.snapshot()
+
+    def training_participant_ready(self, block_id: str) -> dict:
+        """Record participant readiness after a valid calibrated start pose."""
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._training_block(block_id)
+            self._require_training_processes(block)
+            if block["training_workflow"] != "awaiting_start_pose":
+                raise ExperimentError("Prepare a training trial before confirming readiness.")
+            self._refresh_training_live(block)
+            if not block["training_live"].get("start_within_thresholds"):
+                raise ExperimentError("Move the robot to the calibrated start pose first.")
+            trial = self._current_training_trial(block)
+            trial["status"] = "ready"
+            trial["ready_at_utc"] = self._utc_clock()
+            block["training_workflow"] = "ready"
+            self._persist_training(folder, block, trial)
+            return self.snapshot()
+
+    def start_training_attempt(self, block_id: str) -> dict:
+        """Start one owned MCAP attempt after rechecking the start pose."""
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._training_block(block_id)
+            self._require_training_processes(block)
+            if block["training_workflow"] != "ready":
+                raise ExperimentError("Confirm participant readiness before recording.")
+            self._refresh_training_live(block)
+            if not block["training_live"].get("start_within_thresholds"):
+                raise ExperimentError("The robot left the calibrated start pose.")
+            trial = self._current_training_trial(block)
+            attempt_number = len(trial["attempts"]) + 1
+            attempt_name = block["settings"]["attempt_pattern"].format(
+                attempt=attempt_number
+            )
+            output = folder / block["folder"] / trial["folder"] / attempt_name
+            attempt = {
+                "number": attempt_number,
+                "name": attempt_name,
+                "status": "starting",
+                "started_at_utc": self._utc_clock(),
+                "stopped_at_utc": None,
+                "stop_reason": None,
+                "target_start": trial["target_start"],
+                "target_end": trial["target_end"],
+                "thresholds": effective_thresholds(block["success_thresholds"]),
+                "start_error": dict(block["training_live"].get("start_error") or {}),
+                "final_error": None,
+                "minimum_error": {"linear_m": None, "angular_rad": None},
+                "success_dwell_sec": 0.0,
+                "success_dwell_started_monotonic": None,
+                "incidents": [],
+                "storage": self._profile.data["rosbag"]["storage"],
+                "topics": list(block["settings"]["rosbag_topics"]),
+                "message_counts": {},
+                "missing_topics": list(block["settings"]["rosbag_topics"]),
+                "metadata_error": None,
+                "valid": False,
+                "decision": None,
+            }
+            trial["attempts"].append(attempt)
+            try:
+                self._rosbag.start(
+                    output,
+                    list(block["settings"]["rosbag_topics"]),
+                    self._profile.data["rosbag"]["storage"],
+                )
+            except Exception as error:
+                attempt["status"] = "invalid"
+                attempt["stopped_at_utc"] = self._utc_clock()
+                attempt["stop_reason"] = "recorder_start_failure"
+                attempt["metadata_error"] = str(error)
+                trial["status"] = "decision_required"
+                block["training_workflow"] = "decision_required"
+                block["error"] = f"Unable to start training recorder: {error}"
+                self._persist_training(folder, block, trial, attempt)
+                raise ExperimentError(block["error"]) from error
+            attempt["status"] = "recording"
+            trial["status"] = "recording"
+            block["training_workflow"] = "recording"
+            block["error"] = None
+            block["training_live"] = self._empty_training_live()
+            self._persist_training(folder, block, trial, attempt)
+            return self.snapshot()
+
+    def stop_training_attempt(self, block_id: str) -> dict:
+        """Stop and invalidate the active attempt at the operator's request."""
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._training_block(block_id)
+            if block["training_workflow"] != "recording":
+                raise ExperimentError("No training attempt is currently recording.")
+            self._finish_training_attempt(
+                block, folder, "operator_stop", successful=False
+            )
+            return self.snapshot()
+
+    def add_training_incident(self, block_id: str, text: str) -> dict:
+        """Append a non-invalidating, timestamped incident to the active attempt."""
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._training_block(block_id)
+            if block["training_workflow"] != "recording":
+                raise ExperimentError("Incidents can be recorded only during acquisition.")
+            value = str(text).strip()
+            if not value:
+                raise ExperimentError("Incident text must not be empty.")
+            if len(value) > 2000:
+                raise ExperimentError("Incident text must not exceed 2000 characters.")
+            trial = self._current_training_trial(block)
+            attempt = self._current_training_attempt(trial)
+            attempt["incidents"].append(
+                {
+                    "at_utc": self._utc_clock(),
+                    "text": value,
+                }
+            )
+            self._persist_training(folder, block, trial, attempt)
+            return self.snapshot()
+
+    def resolve_training_attempt(self, block_id: str, decision: str) -> dict:
+        """Retry an invalid trial or accept it as a protocol deviation."""
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._training_block(block_id)
+            if block["training_workflow"] != "decision_required":
+                raise ExperimentError("No invalid training attempt requires a decision.")
+            if decision not in ("retry", "advance_with_deviation"):
+                raise ExperimentError("Unknown training resolution decision.")
+            trial = self._current_training_trial(block)
+            attempt = self._current_training_attempt(trial)
+            attempt["decision"] = decision
+            trial["decision"] = decision
+            if decision == "retry":
+                trial["status"] = "pending"
+            else:
+                trial["status"] = "completed_with_deviation"
+                trial["completed_at_utc"] = self._utc_clock()
+                if trial["id"] not in block["training_deviations"]:
+                    block["training_deviations"].append(trial["id"])
+            block["current_trial_id"] = None
+            block["training_workflow"] = (
+                "ready_to_end" if self._training_can_end(block) else "awaiting_prepare"
+            )
+            block["training_live"] = self._empty_training_live()
+            block["error"] = None
+            self._persist_training(folder, block, trial, attempt)
+            return self.snapshot()
+
+    def update_ee_pose(self, message) -> None:
+        """Update live training errors and schedule success finalisation."""
+        worker = None
+        with self._lock:
+            try:
+                self._latest_pose = self._pose_document(message)
+            except (AttributeError, TypeError, ValueError):
+                self._latest_pose = None
+            self._latest_pose_monotonic = self._monotonic_clock()
+            if (
+                self._progress is None
+                or self._progress.get("workflow") != "block_running"
+                or not self._progress.get("current_block")
+            ):
+                return
+            block = self._block(self._progress["current_block"])
+            if block["phase"] != "training":
+                return
+            self._refresh_training_live(block)
+            if block["training_workflow"] != "recording":
+                return
+            trial = self._current_training_trial(block)
+            attempt = self._current_training_attempt(trial)
+            target_error = block["training_live"].get("target_error")
+            if not target_error:
+                attempt["success_dwell_started_monotonic"] = None
+                attempt["success_dwell_sec"] = 0.0
+                return
+            linear = target_error["linear_m"]
+            angular = target_error["angular_rad"]
+            attempt["final_error"] = dict(target_error)
+            minimum = attempt["minimum_error"]
+            minimum["linear_m"] = (
+                linear if minimum["linear_m"] is None else min(minimum["linear_m"], linear)
+            )
+            minimum["angular_rad"] = (
+                angular
+                if minimum["angular_rad"] is None
+                else min(minimum["angular_rad"], angular)
+            )
+            thresholds = effective_thresholds(block["success_thresholds"])
+            within = (
+                linear <= thresholds["linear_m"]
+                and angular <= thresholds["angular_rad"]
+            )
+            now = self._monotonic_clock()
+            if not within:
+                attempt["success_dwell_started_monotonic"] = None
+                attempt["success_dwell_sec"] = 0.0
+                return
+            if attempt["success_dwell_started_monotonic"] is None:
+                attempt["success_dwell_started_monotonic"] = now
+            attempt["success_dwell_sec"] = max(
+                0.0, now - attempt["success_dwell_started_monotonic"]
+            )
+            if attempt["success_dwell_sec"] >= thresholds["success_dwell_sec"]:
+                block["training_workflow"] = "stopping_success"
+                attempt["status"] = "stopping_success"
+                worker = self._thread_factory(
+                    target=self._finish_training_success_worker,
+                    args=(block["id"], trial["id"], attempt["number"]),
+                    daemon=True,
+                )
+        if worker is not None:
+            worker.start()
+
     def restart_stack(self, block_id: str) -> dict:
         """Restart the owned stack and restore the previous control state."""
         with self._lock:
             progress, folder = self._require_prepared()
             block = self._running_block(block_id)
             was_active = bool(block["control_active"])
+            restore_control = was_active or block["phase"] == "training"
             block["restart"] = {"status": "restarting", "error": None}
             block["updated_at_utc"] = self._utc_clock()
             self._persist(folder)
@@ -455,6 +801,18 @@ class ExperimentController:
                 if block["phase"] == "discovery":
                     if was_active:
                         self._deactivate_discovery(block, folder, "restart_stack")
+                elif block["phase"] == "training":
+                    if block.get("training_workflow") in (
+                        "recording",
+                        "stopping_success",
+                    ):
+                        self._finish_training_attempt(
+                            block, folder, "restart_stack", successful=False
+                        )
+                    active_mode = self._modes.active_mode()
+                    if active_mode:
+                        self._modes.deactivate(active_mode)
+                    block["control_active"] = False
                 else:
                     active_mode = self._modes.active_mode()
                     if active_mode:
@@ -462,7 +820,7 @@ class ExperimentController:
                     block["control_active"] = False
                 self._stack.stop()
                 self._stack.start()
-                if was_active:
+                if restore_control:
                     if block["phase"] == "discovery":
                         self._activate_discovery(block, folder)
                     else:
@@ -494,6 +852,257 @@ class ExperimentController:
             self._persist(folder)
             self._write_block(folder, block)
             return self.snapshot()
+
+    def _finish_training_success_worker(
+        self, block_id: str, trial_id: int, attempt_number: int
+    ) -> None:
+        with self._lock:
+            if self._progress is None or self._progress.get("current_block") != block_id:
+                return
+            block = self._block(block_id)
+            if block.get("current_trial_id") != trial_id:
+                return
+            trial = self._current_training_trial(block)
+            attempt = self._current_training_attempt(trial)
+            if (
+                attempt["number"] != attempt_number
+                or block.get("training_workflow") != "stopping_success"
+            ):
+                return
+            folder = Path(self._participant["folder"])
+            try:
+                self._finish_training_attempt(
+                    block, folder, "success_threshold", successful=True
+                )
+            except Exception as error:
+                block["error"] = f"Unable to finalise successful training attempt: {error}"
+                self._error = block["error"]
+                self._persist(folder)
+                self._write_block(folder, block)
+
+    def _finish_training_attempt(
+        self, block: dict, folder: Path, reason: str, successful: bool
+    ) -> None:
+        trial = self._current_training_trial(block)
+        attempt = self._current_training_attempt(trial)
+        try:
+            result = self._rosbag.stop()
+        except Exception as error:
+            result = {
+                "storage": self._profile.data["rosbag"]["storage"],
+                "message_counts": {
+                    topic: 0 for topic in block["settings"]["rosbag_topics"]
+                },
+                "missing_topics": list(block["settings"]["rosbag_topics"]),
+                "metadata_error": str(error),
+                "valid": False,
+            }
+        data_valid = bool(result.get("valid"))
+        completed = bool(successful and data_valid)
+        attempt["status"] = "succeeded" if completed else "invalid"
+        attempt["stopped_at_utc"] = self._utc_clock()
+        attempt["stop_reason"] = reason if not successful or data_valid else "invalid_data"
+        attempt["storage"] = result.get("storage", attempt["storage"])
+        attempt["message_counts"] = dict(result.get("message_counts", {}))
+        attempt["missing_topics"] = list(
+            result.get("missing_topics", attempt["topics"])
+        )
+        attempt["metadata_error"] = result.get("metadata_error")
+        attempt["valid"] = completed
+        attempt["success_dwell_started_monotonic"] = None
+        if completed:
+            trial["status"] = "completed"
+            trial["completed_at_utc"] = self._utc_clock()
+            trial["decision"] = "automatic_success"
+            block["current_trial_id"] = None
+            block["training_workflow"] = (
+                "ready_to_end" if self._training_can_end(block) else "awaiting_prepare"
+            )
+            block["error"] = None
+        else:
+            trial["status"] = "decision_required"
+            block["training_workflow"] = "decision_required"
+            block["error"] = (
+                "Training attempt is invalid. Retry it or continue with a deviation."
+            )
+        block["training_live"] = self._empty_training_live()
+        self._persist_training(folder, block, trial, attempt)
+
+    def _refresh_training_live(self, block: dict) -> None:
+        live = self._empty_training_live()
+        if self._latest_pose is None or self._latest_pose_monotonic is None:
+            live["error"] = "No end-effector pose has been received."
+            block["training_live"] = live
+            return
+        age = max(0.0, self._monotonic_clock() - self._latest_pose_monotonic)
+        live["pose_age_sec"] = age
+        thresholds = effective_thresholds(block["success_thresholds"])
+        live["pose_fresh"] = age <= thresholds["pose_freshness_sec"]
+        if not live["pose_fresh"]:
+            live["error"] = "The end-effector pose is stale."
+            block["training_live"] = live
+            return
+        if block.get("current_trial_id") is None:
+            block["training_live"] = live
+            return
+        trial = self._current_training_trial(block)
+        try:
+            start_target = self._calibration_pose(f"target_out_{trial['target_start']}")
+            start_linear, start_angular = pose_error(self._latest_pose, start_target)
+            live["start_error"] = self._error_document(start_linear, start_angular)
+            live["start_within_thresholds"] = (
+                start_linear <= thresholds["start_linear_m"]
+                and start_angular <= thresholds["start_angular_rad"]
+            )
+            target = self._calibration_pose(f"target_{trial['target_end']}")
+            target_linear, target_angular = pose_error(self._latest_pose, target)
+            live["target_error"] = self._error_document(target_linear, target_angular)
+            live["target_within_thresholds"] = (
+                target_linear <= thresholds["linear_m"]
+                and target_angular <= thresholds["angular_rad"]
+            )
+        except TrainingError as error:
+            live["error"] = str(error)
+        block["training_live"] = live
+
+    @staticmethod
+    def _empty_training_live() -> dict:
+        return {
+            "pose_fresh": False,
+            "pose_age_sec": None,
+            "start_error": None,
+            "start_within_thresholds": False,
+            "target_error": None,
+            "target_within_thresholds": False,
+            "error": None,
+        }
+
+    @staticmethod
+    def _error_document(linear: float, angular: float) -> dict:
+        return {
+            "linear_m": linear,
+            "linear_mm": linear * 1000.0,
+            "angular_rad": angular,
+            "angular_deg": angular * 180.0 / 3.141592653589793,
+        }
+
+    @staticmethod
+    def _pose_document(message) -> dict:
+        if isinstance(message, dict):
+            return json.loads(json.dumps(message))
+        return {
+            "frame_id": str(message.header.frame_id),
+            "position": {
+                "x": float(message.pose.position.x),
+                "y": float(message.pose.position.y),
+                "z": float(message.pose.position.z),
+            },
+            "orientation": {
+                "x": float(message.pose.orientation.x),
+                "y": float(message.pose.orientation.y),
+                "z": float(message.pose.orientation.z),
+                "w": float(message.pose.orientation.w),
+            },
+        }
+
+    def _calibration_pose(self, name: str) -> dict:
+        if self._calibration is None:
+            raise TrainingError("Participant calibration is not loaded.")
+        try:
+            return self._calibration["poses"][name]
+        except (KeyError, TypeError) as error:
+            raise TrainingError(f"Calibration pose {name} is missing.") from error
+
+    @staticmethod
+    def _load_calibration(folder: Path) -> dict:
+        path = folder / "calibration" / "latest_calib.json"
+        try:
+            calibration = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ExperimentError("Participant calibration is unreadable.") from error
+        if not isinstance(calibration, dict) or calibration.get("schema_version") != 1:
+            raise ExperimentError("Participant calibration must use schema_version 1.")
+        poses = calibration.get("poses")
+        required = {
+            *(f"target_{index}" for index in (1, 2, 3)),
+            *(f"target_out_{index}" for index in (1, 2, 3)),
+        }
+        if not isinstance(poses, dict) or not required.issubset(poses):
+            raise ExperimentError("Participant calibration is missing training poses.")
+        try:
+            for name in required:
+                pose_error(poses[name], poses[name])
+        except TrainingError as error:
+            raise ExperimentError(f"Invalid participant calibration: {error}") from error
+        return calibration
+
+    def _training_block(self, block_id: str) -> dict:
+        block = self._running_block(block_id)
+        if block["phase"] != "training":
+            raise ExperimentError("Training actions are available only on Panel F.")
+        return block
+
+    def _require_training_processes(self, block: dict) -> None:
+        stack = self._stack.snapshot()
+        mapper = self._modes.snapshot()
+        if (
+            stack.get("status") != "active"
+            or mapper.get("status") != "active"
+            or mapper.get("active_mode") != block["mode"]
+        ):
+            raise ExperimentError("Restart the stack before continuing training.")
+
+    @staticmethod
+    def _training_can_end(block: dict) -> bool:
+        trials = block.get("training_trials", [])
+        return bool(trials) and all(
+            trial.get("status") in ("completed", "completed_with_deviation")
+            for trial in trials
+        )
+
+    @staticmethod
+    def _current_training_trial(block: dict) -> dict:
+        trial_id = block.get("current_trial_id")
+        for trial in block.get("training_trials", []):
+            if trial.get("id") == trial_id:
+                return trial
+        raise ExperimentError("No training trial is currently selected.")
+
+    @staticmethod
+    def _current_training_attempt(trial: dict) -> dict:
+        if not trial.get("attempts"):
+            raise ExperimentError("No training attempt exists for the current trial.")
+        return trial["attempts"][-1]
+
+    def _persist_training(
+        self,
+        folder: Path,
+        block: dict,
+        trial: dict,
+        attempt: Optional[dict] = None,
+    ) -> None:
+        block["updated_at_utc"] = self._utc_clock()
+        self._persist(folder)
+        self._write_block(folder, block)
+        self._write_trial(folder, block, trial)
+        if attempt is not None:
+            self._write_attempt(folder, block, trial, attempt)
+
+    @staticmethod
+    def _write_trial(folder: Path, block: dict, trial: dict) -> None:
+        path = folder / block["folder"] / trial["folder"] / "trial.json"
+        _atomic_json(path, trial)
+
+    @staticmethod
+    def _write_attempt(folder: Path, block: dict, trial: dict, attempt: dict) -> None:
+        path = (
+            folder
+            / block["folder"]
+            / trial["folder"]
+            / attempt["name"]
+            / "attempt.json"
+        )
+        _atomic_json(path, attempt)
 
     def _activate_discovery(self, block: dict, folder: Path) -> None:
         if self._stack.snapshot().get("status") != "active":
@@ -631,6 +1240,7 @@ class ExperimentController:
                     "segments": [],
                     "can_end": False,
                     "restart": {"status": "idle", "error": None},
+                    "training": None,
                 }
             stack_state = self._stack.snapshot()
             mapper_state = self._modes.snapshot()
@@ -666,6 +1276,47 @@ class ExperimentController:
                         mapper_state = self._modes.snapshot()
                         recorder_state = self._rosbag.snapshot()
                     process_failed = False
+                elif block["phase"] == "training":
+                    stack_or_mapper_failed = (
+                        stack_state.get("status") != "active"
+                        or mapper_state.get("status") != "active"
+                        or mapper_state.get("active_mode") != block["mode"]
+                    )
+                    recorder_failed = (
+                        block.get("training_workflow") == "recording"
+                        and recorder_state.get("status") != "active"
+                    )
+                    if stack_or_mapper_failed or recorder_failed:
+                        folder = Path(self._participant["folder"])
+                        if block.get("training_workflow") in (
+                            "recording",
+                            "stopping_success",
+                        ):
+                            try:
+                                self._finish_training_attempt(
+                                    block,
+                                    folder,
+                                    "process_failure",
+                                    successful=False,
+                                )
+                            except Exception:
+                                pass
+                        if stack_or_mapper_failed:
+                            block["control_active"] = False
+                        block["error"] = (
+                            "A required owned process stopped unexpectedly. "
+                            + (
+                                "Restart the stack."
+                                if stack_or_mapper_failed
+                                else "Resolve the invalid attempt."
+                            )
+                        )
+                        self._error = block["error"]
+                        self._persist(folder)
+                        self._write_block(folder, block)
+                        mapper_state = self._modes.snapshot()
+                        recorder_state = self._rosbag.snapshot()
+                    process_failed = False
                 else:
                     process_failed = (
                         stack_state.get("status") != "active"
@@ -692,6 +1343,63 @@ class ExperimentController:
             active_block = None
             if self._progress.get("current_block"):
                 active_block = self._block(self._progress["current_block"])
+                if active_block["phase"] == "training":
+                    self._refresh_training_live(active_block)
+            can_end = False
+            if active_block:
+                if active_block["phase"] == "discovery":
+                    can_end = self._can_end(active_block)
+                elif active_block["phase"] == "training":
+                    can_end = self._training_can_end(active_block)
+            training_state = None
+            if active_block and active_block["phase"] == "training":
+                trials = active_block.get("training_trials", [])
+                current_trial = next(
+                    (
+                        trial
+                        for trial in trials
+                        if trial.get("id") == active_block.get("current_trial_id")
+                    ),
+                    None,
+                )
+                current_attempt = (
+                    current_trial["attempts"][-1]
+                    if current_trial and current_trial.get("attempts")
+                    else None
+                )
+                resolved = sum(
+                    trial.get("status")
+                    in ("completed", "completed_with_deviation")
+                    for trial in trials
+                )
+                training_state = {
+                    "workflow": active_block.get("training_workflow"),
+                    "trials": json.loads(json.dumps(trials)),
+                    "current_trial_id": active_block.get("current_trial_id"),
+                    "current_trial": json.loads(json.dumps(current_trial)),
+                    "current_attempt": json.loads(json.dumps(current_attempt)),
+                    "live": json.loads(
+                        json.dumps(active_block.get("training_live", {}))
+                    ),
+                    "stability": {
+                        "duration_sec": (
+                            current_attempt.get("success_dwell_sec", 0.0)
+                            if current_attempt
+                            else 0.0
+                        ),
+                        "required_sec": active_block["success_thresholds"][
+                            "success_dwell_sec"
+                        ],
+                    },
+                    "progress": {"resolved": resolved, "total": len(trials)},
+                    "deviations": list(
+                        active_block.get("training_deviations", [])
+                    ),
+                    "thresholds": effective_thresholds(
+                        active_block["success_thresholds"]
+                    ),
+                    "go_to_available": False,
+                }
             return {
                 "workflow": self._progress["workflow"],
                 "current_panel": self._current_panel,
@@ -720,12 +1428,13 @@ class ExperimentController:
                     if active_block
                     else []
                 ),
-                "can_end": bool(active_block and self._can_end(active_block)),
+                "can_end": bool(can_end),
                 "restart": (
                     dict(active_block.get("restart", {}))
                     if active_block
                     else {"status": "idle", "error": None}
                 ),
+                "training": training_state,
             }
 
     def shutdown(self) -> None:
@@ -737,6 +1446,15 @@ class ExperimentController:
                     try:
                         self._deactivate_discovery(
                             block, folder, "interface_shutdown"
+                        )
+                    except Exception:
+                        pass
+                if block["phase"] == "training" and block.get(
+                    "training_workflow"
+                ) in ("recording", "stopping_success"):
+                    try:
+                        self._finish_training_attempt(
+                            block, folder, "interface_shutdown", successful=False
                         )
                     except Exception:
                         pass
@@ -788,6 +1506,60 @@ class ExperimentController:
                 block[key] = value
                 changed = True
         return changed
+
+    def _ensure_lot6_fields(self, block: dict) -> bool:
+        if block.get("phase") != "training":
+            return False
+        changed = False
+        settings = block.setdefault("settings", {})
+        for key, value in self._profile.data["phases"]["training"].items():
+            if key not in settings:
+                settings[key] = json.loads(json.dumps(value))
+                changed = True
+        thresholds = block.get("success_thresholds")
+        try:
+            validate_thresholds(thresholds)
+        except TrainingError:
+            block["success_thresholds"] = dict(
+                self._profile.data["success_thresholds"]
+            )
+            changed = True
+        defaults = {
+            "training_workflow": "awaiting_prepare",
+            "training_trials": build_trials(block["mode"], settings),
+            "current_trial_id": None,
+            "training_deviations": [],
+            "training_live": self._empty_training_live(),
+        }
+        for key, value in defaults.items():
+            if key not in block:
+                block[key] = value
+                changed = True
+        return changed
+
+    def _recover_training_attempt(
+        self, block: dict, folder: Path, reason: str
+    ) -> None:
+        trial_id = block.get("current_trial_id")
+        if trial_id is None:
+            block["training_workflow"] = "awaiting_prepare"
+            return
+        trial = self._current_training_trial(block)
+        if trial.get("attempts"):
+            attempt = trial["attempts"][-1]
+            if attempt.get("status") in ("starting", "recording", "stopping_success"):
+                attempt["status"] = "invalid"
+                attempt["stopped_at_utc"] = self._utc_clock()
+                attempt["stop_reason"] = reason
+                attempt["valid"] = False
+                trial["status"] = "decision_required"
+                block["training_workflow"] = "decision_required"
+                self._write_attempt(folder, block, trial, attempt)
+                self._write_trial(folder, block, trial)
+                return
+        trial["status"] = "pending"
+        block["current_trial_id"] = None
+        block["training_workflow"] = "awaiting_prepare"
 
     def _next_block(self) -> Optional[dict]:
         if self._progress is None:

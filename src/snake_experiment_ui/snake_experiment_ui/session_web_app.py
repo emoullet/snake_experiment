@@ -18,6 +18,7 @@ from .experiment import ExperimentError
 from .mode_manager import ModeError
 from .rosbag_manager import RosbagError
 from .stack_manager import StackError
+from .training import TrainingError
 
 
 class Confirmation(BaseModel):
@@ -54,6 +55,14 @@ class ControlRequest(BaseModel):
     active: bool
 
 
+class IncidentRequest(BaseModel):
+    text: str
+
+
+class TrainingResolutionRequest(BaseModel):
+    decision: str
+
+
 def create_session_app(
     checkup,
     static_directory: Path,
@@ -80,6 +89,7 @@ def create_session_app(
             ModeError,
             RosbagError,
             StackError,
+            TrainingError,
         ) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except RuntimeError as error:
@@ -224,7 +234,10 @@ def create_session_app(
         if checkup.snapshot().get("current_panel") == "B":
             raise HTTPException(status_code=409, detail="Validate Panel B first.")
         if enrollment is None or enrollment.snapshot().get("current_panel") == "C":
-            raise HTTPException(status_code=409, detail="Prepare a participant from Panel C first.")
+            raise HTTPException(
+                status_code=409,
+                detail="Prepare a participant from Panel C first.",
+            )
         action(callback)
         return combined_snapshot()
 
@@ -249,6 +262,40 @@ def create_session_app(
     @app.post("/api/experiment/blocks/{block_id}/restart-stack")
     async def restart_experiment_stack(block_id: str):
         return experiment_action(lambda: experiment.restart_stack(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/training/prepare")
+    async def prepare_training_trial(block_id: str):
+        return experiment_action(lambda: experiment.prepare_training_trial(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/training/ready")
+    async def confirm_training_ready(block_id: str):
+        return experiment_action(
+            lambda: experiment.training_participant_ready(block_id)
+        )
+
+    @app.post("/api/experiment/blocks/{block_id}/training/start")
+    async def start_training_attempt(block_id: str):
+        return experiment_action(lambda: experiment.start_training_attempt(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/training/stop")
+    async def stop_training_attempt(block_id: str):
+        return experiment_action(lambda: experiment.stop_training_attempt(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/training/incidents")
+    async def add_training_incident(block_id: str, request: IncidentRequest):
+        return experiment_action(
+            lambda: experiment.add_training_incident(block_id, request.text)
+        )
+
+    @app.post("/api/experiment/blocks/{block_id}/training/resolve")
+    async def resolve_training_attempt(
+        block_id: str, request: TrainingResolutionRequest
+    ):
+        return experiment_action(
+            lambda: experiment.resolve_training_attempt(
+                block_id, request.decision
+            )
+        )
 
     @app.websocket("/ws")
     async def state_websocket(websocket: WebSocket):

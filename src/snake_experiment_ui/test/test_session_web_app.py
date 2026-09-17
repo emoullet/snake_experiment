@@ -122,6 +122,24 @@ class FakeExperiment:
     def restart_stack(self, block_id):
         self.calls.append(("restart", block_id))
 
+    def prepare_training_trial(self, block_id):
+        self.calls.append(("training_prepare", block_id))
+
+    def training_participant_ready(self, block_id):
+        self.calls.append(("training_ready", block_id))
+
+    def start_training_attempt(self, block_id):
+        self.calls.append(("training_start", block_id))
+
+    def stop_training_attempt(self, block_id):
+        self.calls.append(("training_stop", block_id))
+
+    def add_training_incident(self, block_id, text):
+        self.calls.append(("training_incident", block_id, text))
+
+    def resolve_training_attempt(self, block_id, decision):
+        self.calls.append(("training_resolve", block_id, decision))
+
 
 @unittest.skipIf(httpx is None, "FastAPI test dependencies are not installed")
 class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
@@ -227,6 +245,39 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_training_routes(self):
+        self.checkup.workflow = "validated"
+        self.enrollment.panel = "D"
+        block = "mode_1_training"
+        for action in ("prepare", "ready", "start", "stop"):
+            response = await self.request(
+                "POST", f"/api/experiment/blocks/{block}/training/{action}"
+            )
+            self.assertEqual(response.status_code, 200)
+        response = await self.request(
+            "POST",
+            f"/api/experiment/blocks/{block}/training/incidents",
+            json={"text": "Minor issue"},
+        )
+        self.assertEqual(response.status_code, 200)
+        response = await self.request(
+            "POST",
+            f"/api/experiment/blocks/{block}/training/resolve",
+            json={"decision": "retry"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.experiment.calls,
+            [
+                ("training_prepare", block),
+                ("training_ready", block),
+                ("training_start", block),
+                ("training_stop", block),
+                ("training_incident", block, "Minor issue"),
+                ("training_resolve", block, "retry"),
+            ],
+        )
+
 
 class SessionTemplateTest(unittest.TestCase):
     def test_participant_fields_use_explicit_choices_without_defaults(self):
@@ -261,6 +312,9 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("data-block-abort", script)
         self.assertIn("data-block-control", script)
         self.assertIn("data-restart-stack", script)
+        self.assertIn("data-training-action", script)
+        self.assertIn("data-training-incident-form", script)
+        self.assertIn("Continue with deviation", script)
 
 
 if __name__ == "__main__":

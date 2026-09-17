@@ -51,7 +51,9 @@ class SessionInterfaceNode(Node):
         share = Path(get_package_share_directory("snake_experiment_ui"))
         configured_profile = str(self.get_parameter("diagnostic_profile").value)
         profile_path = (
-            Path(configured_profile) if configured_profile else share / "config/system_checkup.yaml"
+            Path(configured_profile)
+            if configured_profile
+            else share / "config/system_checkup.yaml"
         )
         self._profile = DiagnosticProfile(profile_path)
         measurement_window = float(
@@ -124,7 +126,7 @@ class SessionInterfaceNode(Node):
             self.create_subscription(
                 PoseStamped,
                 "/ee_pose",
-                lambda message: self._diagnostics.record("/ee_pose", message),
+                self._record_ee_pose,
                 50,
             ),
             self.create_subscription(
@@ -230,6 +232,12 @@ class SessionInterfaceNode(Node):
         host = self.get_parameter("host").value
         port = self.get_parameter("port").value
         self.get_logger().info(f"Panels B-G available at http://{host}:{port}")
+
+    def _record_ee_pose(self, message: PoseStamped) -> None:
+        self._diagnostics.record("/ee_pose", message)
+        experiment = getattr(self, "_experiment", None)
+        if experiment is not None:
+            experiment.update_ee_pose(message)
 
     def _node_names(self):
         return [

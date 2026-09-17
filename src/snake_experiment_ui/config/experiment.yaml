@@ -30,14 +30,21 @@ phases:
     cycles: 2
     target_sequence: [1, 2, 3, 1]
     rosbag_topics: [/joy, /ee_pose, /joint_states]
+    trial_folder_pattern: "{mode}_training_trial_{trial_id:03d}_{cycle:02d}_{target_start}_{target_end}"
+    attempt_pattern: "attempt_{attempt:03d}"
   recording:
     cycles: 10
     target_sequence: [1, 2, 3, 1]
     rosbag_topics: [/joy, /ee_pose, /joint_states]
 
 success_thresholds:
-  linear_m: null
-  angular_rad: null
+  provisional: true
+  linear_mm: 5.0
+  angular_deg: 5.0
+  start_linear_mm: 5.0
+  start_angular_deg: 5.0
+  success_dwell_sec: 0.5
+  pose_freshness_sec: 0.5
 
 rosbag:
   storage: mcap

@@ -1,7 +1,10 @@
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+
+import yaml
 
 from snake_experiment_ui.experiment import (
     ExperimentController,
@@ -109,6 +112,15 @@ class FakeRosbag:
         }
 
 
+class ImmediateThread:
+    def __init__(self, target, args=(), daemon=None):
+        self.target = target
+        self.args = args
+
+    def start(self):
+        self.target(*self.args)
+
+
 class ExperimentControllerTest(unittest.TestCase):
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -119,17 +131,41 @@ class ExperimentControllerTest(unittest.TestCase):
             json.dumps({"schema_version": 1, "pseudonym": "A1B2C3", "files": []}),
             encoding="utf-8",
         )
+        calibration_folder = self.participant_folder / "calibration"
+        calibration_folder.mkdir()
+        self.calibration = {
+            "schema_version": 1,
+            "poses": {
+                name: {
+                    "frame_id": "base_link",
+                    "position": {
+                        "x": index * 0.1 + (0.02 if "out" in name else 0.0),
+                        "y": 0.0,
+                        "z": 0.4,
+                    },
+                    "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+                }
+                for index in (1, 2, 3)
+                for name in (f"target_{index}", f"target_out_{index}")
+            },
+        }
+        (calibration_folder / "latest_calib.json").write_text(
+            json.dumps(self.calibration), encoding="utf-8"
+        )
         self.source_profile = Path(__file__).parents[1] / "config" / "experiment.yaml"
         self.stack = FakeStack()
         self.modes = FakeModes()
         self.rosbag = FakeRosbag()
         self.clock_tick = 0
+        self.monotonic_value = 10.0
         self.controller = ExperimentController(
             ExperimentProfile(self.source_profile),
             self.stack,
             self.modes,
             self.rosbag,
             utc_clock=self.clock,
+            monotonic_clock=lambda: self.monotonic_value,
+            thread_factory=ImmediateThread,
         )
         self.participant = {
             "pseudonym": "A1B2C3",
@@ -143,6 +179,32 @@ class ExperimentControllerTest(unittest.TestCase):
     def clock(self):
         self.clock_tick += 1
         return f"2026-09-16T10:00:{self.clock_tick:02d}Z"
+
+    def pose(self, name):
+        return self.calibration["poses"][name]
+
+    def complete_discovery(self, block_id):
+        self.controller.start(block_id)
+        self.controller.set_control(block_id, True)
+        self.controller.set_control(block_id, False)
+        self.controller.end(block_id, True)
+
+    def complete_training(self, block_id):
+        for _ in range(6):
+            state = self.controller.prepare_training_trial(block_id)
+            trial = next(
+                trial
+                for trial in state["training"]["trials"]
+                if trial["id"] == state["training"]["current_trial_id"]
+            )
+            self.controller.update_ee_pose(
+                self.pose(f"target_out_{trial['target_start']}")
+            )
+            self.controller.training_participant_ready(block_id)
+            self.controller.start_training_attempt(block_id)
+            self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
+            self.monotonic_value += 0.6
+            self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
 
     def test_prepare_legacy_session_snapshots_profile_and_resolves_plan(self):
         state = self.controller.prepare(self.participant)
@@ -206,6 +268,8 @@ class ExperimentControllerTest(unittest.TestCase):
             if "discovery" in block_id:
                 self.controller.set_control(block_id, True)
                 self.controller.set_control(block_id, False)
+            if "training" in block_id:
+                self.complete_training(block_id)
             state = self.controller.end(block_id, True)
         self.assertEqual(state["progress"]["workflow"], "sequence_completed")
         self.assertEqual(self.stack.status, "inactive")
@@ -278,6 +342,202 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(block["segments"][0]["stop_reason"], "interface_shutdown")
         self.assertEqual(block["status"], "interrupted")
         self.assertFalse(self.rosbag.active)
+
+    def test_training_generates_six_global_trials_and_gates_start_pose(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        state = self.controller.start("mode_1_training")
+        trials = state["training"]["trials"]
+        self.assertEqual([trial["id"] for trial in trials], list(range(1, 7)))
+        self.assertEqual(
+            trials[0]["folder"], "snake_training_trial_001_01_1_2"
+        )
+        self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_3"))
+        with self.assertRaisesRegex(ExperimentError, "calibrated start pose"):
+            self.controller.training_participant_ready("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        state = self.controller.training_participant_ready("mode_1_training")
+        self.assertEqual(state["training"]["workflow"], "ready")
+
+    def test_training_success_stops_recorder_after_stable_pose(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.training_participant_ready("mode_1_training")
+        self.controller.start_training_attempt("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_2"))
+        recording_state = self.controller.snapshot()
+        self.assertTrue(self.rosbag.active)
+        self.assertEqual(recording_state["training"]["current_trial"]["cycle"], 1)
+        self.assertEqual(recording_state["training"]["current_attempt"]["number"], 1)
+        self.assertEqual(recording_state["training"]["progress"], {"resolved": 0, "total": 6})
+        self.assertEqual(recording_state["training"]["stability"]["duration_sec"], 0.0)
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+        state = self.controller.snapshot()
+        self.assertFalse(self.rosbag.active)
+        self.assertEqual(state["training"]["trials"][0]["status"], "completed")
+        self.assertEqual(self.rosbag.starts[-1], "attempt_001")
+        trial_folder = self.participant_folder / "snake_training" / (
+            "snake_training_trial_001_01_1_2"
+        )
+        self.assertTrue((trial_folder / "trial.json").is_file())
+        self.assertTrue((trial_folder / "attempt_001" / "attempt.json").is_file())
+
+    def test_training_stale_pose_blocks_readiness_and_recording(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.monotonic_value += 0.6
+        with self.assertRaisesRegex(ExperimentError, "calibrated start pose"):
+            self.controller.training_participant_ready("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.training_participant_ready("mode_1_training")
+        self.monotonic_value += 0.6
+        with self.assertRaisesRegex(ExperimentError, "left the calibrated start pose"):
+            self.controller.start_training_attempt("mode_1_training")
+
+    def test_training_invalid_mcap_requires_operator_resolution(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.training_participant_ready("mode_1_training")
+        self.controller.start_training_attempt("mode_1_training")
+        self.rosbag.valid = False
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+        state = self.controller.snapshot()
+        attempt = state["training"]["trials"][0]["attempts"][0]
+        self.assertEqual(state["training"]["workflow"], "decision_required")
+        self.assertEqual(attempt["stop_reason"], "invalid_data")
+        self.assertFalse(attempt["valid"])
+        self.assertEqual(set(attempt["missing_topics"]), set(attempt["topics"]))
+
+    def test_shutdown_invalidates_active_training_attempt(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.training_participant_ready("mode_1_training")
+        self.controller.start_training_attempt("mode_1_training")
+        self.controller.shutdown()
+        progress = json.loads(
+            (self.participant_folder / "experiment_progress.json").read_text()
+        )
+        block = progress["blocks"][2]
+        attempt = block["training_trials"][0]["attempts"][0]
+        self.assertEqual(block["status"], "interrupted")
+        self.assertEqual(attempt["status"], "invalid")
+        self.assertEqual(attempt["stop_reason"], "interface_shutdown")
+        self.assertFalse(self.rosbag.active)
+
+    def test_lot6_fields_are_migrated_from_legacy_profile(self):
+        self.controller.prepare(self.participant)
+        profile_path = (
+            self.participant_folder / "experimental_environment" / "experiment.yaml"
+        )
+        profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        training = profile["phases"]["training"]
+        training.pop("trial_folder_pattern")
+        training.pop("attempt_pattern")
+        profile["success_thresholds"] = {"linear_m": None, "angular_rad": None}
+        profile_path.write_text(yaml.safe_dump(profile), encoding="utf-8")
+        digest = hashlib.sha256(profile_path.read_bytes()).hexdigest()
+        progress_path = self.participant_folder / "experiment_progress.json"
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        progress["profile"]["sha256"] = digest
+        training_block = progress["blocks"][2]
+        for key in (
+            "training_workflow",
+            "training_trials",
+            "current_trial_id",
+            "training_deviations",
+            "training_live",
+        ):
+            training_block.pop(key, None)
+        training_block["settings"].pop("trial_folder_pattern")
+        training_block["settings"].pop("attempt_pattern")
+        training_block["success_thresholds"] = {
+            "linear_m": None,
+            "angular_rad": None,
+        }
+        progress_path.write_text(json.dumps(progress), encoding="utf-8")
+
+        migrated = ExperimentController(
+            ExperimentProfile(self.source_profile),
+            self.stack,
+            self.modes,
+            self.rosbag,
+            utc_clock=self.clock,
+            monotonic_clock=lambda: self.monotonic_value,
+            thread_factory=ImmediateThread,
+        ).prepare(self.participant)
+        block = migrated["progress"]["blocks"][2]
+        self.assertEqual(len(block["training_trials"]), 6)
+        self.assertEqual(block["success_thresholds"]["linear_mm"], 5.0)
+        self.assertTrue(
+            any("LOT 6 training fields" in warning for warning in migrated["progress"]["warnings"])
+        )
+
+    def test_manual_stop_incident_retry_and_deviation(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.training_participant_ready("mode_1_training")
+        self.controller.start_training_attempt("mode_1_training")
+        self.controller.add_training_incident("mode_1_training", "Joystick slipped")
+        state = self.controller.stop_training_attempt("mode_1_training")
+        self.assertEqual(state["training"]["workflow"], "decision_required")
+        attempt = state["training"]["trials"][0]["attempts"][0]
+        self.assertEqual(attempt["incidents"][0]["text"], "Joystick slipped")
+        self.controller.resolve_training_attempt("mode_1_training", "retry")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.training_participant_ready("mode_1_training")
+        self.controller.start_training_attempt("mode_1_training")
+        self.controller.stop_training_attempt("mode_1_training")
+        state = self.controller.resolve_training_attempt(
+            "mode_1_training", "advance_with_deviation"
+        )
+        self.assertEqual(
+            state["training"]["trials"][0]["status"],
+            "completed_with_deviation",
+        )
+        self.assertEqual(state["training"]["deviations"], [1])
+
+    def test_restart_during_training_invalidates_attempt(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.training_participant_ready("mode_1_training")
+        self.controller.start_training_attempt("mode_1_training")
+        state = self.controller.restart_stack("mode_1_training")
+        self.assertEqual(state["training"]["workflow"], "decision_required")
+        self.assertEqual(
+            state["training"]["trials"][0]["attempts"][0]["stop_reason"],
+            "restart_stack",
+        )
+        self.assertEqual(self.modes.active, "snake")
 
 
 if __name__ == "__main__":

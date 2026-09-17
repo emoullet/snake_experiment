@@ -142,6 +142,17 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
 .segment-entry { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 11px; background: #fbfdff; }
 .segment-entry div { display: grid; gap: 4px; }
 .segment-entry span:not(.pill) { color: var(--muted); font-size: .78rem; }
+.training-actions, .go-to-grid, .incident-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 18px; }
+.training-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 18px 0; }
+.training-metrics article { padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: #f7f9fc; }
+.training-metrics span, .training-metrics strong { display: block; }
+.training-metrics span { margin-bottom: 4px; color: var(--muted); font-size: .76rem; }
+.decision-card { margin-top: 18px; padding: 16px; color: var(--amber); border-radius: 11px; background: var(--amber-soft); }
+.decision-card p { margin: 6px 0 0; }
+.incident-form textarea { flex: 1 1 360px; min-height: 76px; padding: 11px; resize: vertical; color: var(--ink); font: inherit; border: 1px solid #bdcad9; border-radius: 9px; background: white; }
+.incident-list { display: grid; gap: 8px; padding-left: 20px; }
+.incident-list span { display: block; color: var(--muted); font-size: .72rem; }
+.go-to-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .dialog-backdrop { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(19 32 51 / 45%); backdrop-filter: blur(3px); }
 .folder-dialog { width: min(700px, 100%); max-height: min(700px, calc(100vh - 40px)); padding: 24px; overflow: auto; border-radius: 17px; background: white; box-shadow: 0 28px 80px rgb(19 32 51 / 25%); }
 .folder-list { display: grid; gap: 7px; margin-top: 14px; }

@@ -127,8 +127,8 @@ and marks it as the active report.
 | `mode_shutdown_timeout_sec` | `5.0` | Mapper shutdown timeout. |
 | `stack_startup_timeout_sec` | `30.0` | Stack startup timeout. |
 | `stack_shutdown_timeout_sec` | `10.0` | Stack shutdown timeout. |
-| `rosbag_startup_timeout_sec` | `5.0` | Discovery recorder startup timeout. |
-| `rosbag_shutdown_timeout_sec` | `10.0` | Discovery recorder shutdown timeout. |
+| `rosbag_startup_timeout_sec` | `5.0` | Recorder startup timeout. |
+| `rosbag_shutdown_timeout_sec` | `10.0` | Recorder shutdown timeout. |
 
 ## Panel C: enrolment and session resume
 
@@ -183,6 +183,25 @@ owned by this interface and restores the previous control state. During
 discovery, an active recording is closed before restart and restoration creates
 a new numbered segment. The packaged instruction is intentionally marked as a
 placeholder and must be replaced before participant data collection.
+
+## Panel F: training
+
+Training expands the configured target sequence into globally numbered trials
+for every cycle. The mapper remains active throughout the block. Before each
+attempt, the interface requires a fresh `/ee_pose` within the configured start
+thresholds of `target_out_<n>` and an explicit `Participant ready` action.
+
+Each acquisition is stored as an MCAP `attempt_###` below its trial folder. A
+trial succeeds when the end-effector remains within both the linear and angular
+thresholds of the destination `target_<n>` for the configured dwell time and
+all required topics contain messages. Manual stops, process failures, missing
+data, and stack restarts invalidate the attempt; the operator must retry or
+continue with a recorded protocol deviation. Informational incidents may be
+added without invalidating an attempt.
+
+The packaged 5 mm and 5 degree thresholds are explicitly provisional
+development values. Automatic Go-to controls remain visible but disabled until
+a dedicated and validated ROS motion interface is available.
 
 ## JSON contract
 
