@@ -36,6 +36,8 @@ phases:
     cycles: 10
     target_sequence: [1, 2, 3, 1]
     rosbag_topics: [/joy, /ee_pose, /joint_states]
+    trial_folder_pattern: "{mode}_trial_{trial_id:03d}_{cycle:02d}_{target_start}_{target_end}"
+    attempt_pattern: "attempt_{attempt:03d}"
 
 success_thresholds:
   provisional: true

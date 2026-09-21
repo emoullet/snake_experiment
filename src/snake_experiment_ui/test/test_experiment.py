@@ -190,21 +190,41 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.end(block_id, True)
 
     def complete_training(self, block_id):
-        for _ in range(6):
-            state = self.controller.prepare_training_trial(block_id)
+        self.complete_trials(block_id, "training")
+
+    def complete_recording(self, block_id):
+        self.complete_trials(block_id, "recording")
+
+    def complete_trials(self, block_id, phase):
+        prepare = getattr(self.controller, f"prepare_{phase}_trial")
+        ready = getattr(self.controller, f"{phase}_participant_ready")
+        start = getattr(self.controller, f"start_{phase}_attempt")
+        state_key = phase
+        count = len(self.controller.snapshot()[state_key]["trials"])
+        for _ in range(count):
+            state = prepare(block_id)
             trial = next(
                 trial
-                for trial in state["training"]["trials"]
-                if trial["id"] == state["training"]["current_trial_id"]
+                for trial in state[state_key]["trials"]
+                if trial["id"] == state[state_key]["current_trial_id"]
             )
             self.controller.update_ee_pose(
                 self.pose(f"target_out_{trial['target_start']}")
             )
-            self.controller.training_participant_ready(block_id)
-            self.controller.start_training_attempt(block_id)
+            ready(block_id)
+            start(block_id)
             self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
             self.monotonic_value += 0.6
             self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
+
+    def start_first_recording_block(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.complete_training("mode_1_training")
+        self.controller.end("mode_1_training", True)
+        return self.controller.start("mode_1_recording")
 
     def test_prepare_legacy_session_snapshots_profile_and_resolves_plan(self):
         state = self.controller.prepare(self.participant)
@@ -233,6 +253,18 @@ class ExperimentControllerTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ExperimentError, "storage must be 'mcap'"):
             ExperimentProfile(invalid)
+
+        configurable = self.root / "configurable-experiment.yaml"
+        configurable_data = yaml.safe_load(
+            self.source_profile.read_text(encoding="utf-8")
+        )
+        configurable_data["phases"]["recording"]["cycles"] = 3
+        configurable.write_text(
+            yaml.safe_dump(configurable_data), encoding="utf-8"
+        )
+        profile = ExperimentProfile(configurable)
+        recording_block = profile.blocks("snake->baseline")[3]
+        self.assertEqual(len(recording_block["training_trials"]), 9)
 
     def test_sequence_is_strict_and_abort_resumes_same_folder(self):
         self.controller.prepare(self.participant)
@@ -270,6 +302,8 @@ class ExperimentControllerTest(unittest.TestCase):
                 self.controller.set_control(block_id, False)
             if "training" in block_id:
                 self.complete_training(block_id)
+            if "recording" in block_id:
+                self.complete_recording(block_id)
             state = self.controller.end(block_id, True)
         self.assertEqual(state["progress"]["workflow"], "sequence_completed")
         self.assertEqual(self.stack.status, "inactive")
@@ -445,7 +479,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(attempt["stop_reason"], "interface_shutdown")
         self.assertFalse(self.rosbag.active)
 
-    def test_lot6_fields_are_migrated_from_legacy_profile(self):
+    def test_trial_fields_are_migrated_from_legacy_profile(self):
         self.controller.prepare(self.participant)
         profile_path = (
             self.participant_folder / "experimental_environment" / "experiment.yaml"
@@ -454,27 +488,32 @@ class ExperimentControllerTest(unittest.TestCase):
         training = profile["phases"]["training"]
         training.pop("trial_folder_pattern")
         training.pop("attempt_pattern")
+        recording = profile["phases"]["recording"]
+        recording.pop("trial_folder_pattern")
+        recording.pop("attempt_pattern")
         profile["success_thresholds"] = {"linear_m": None, "angular_rad": None}
         profile_path.write_text(yaml.safe_dump(profile), encoding="utf-8")
         digest = hashlib.sha256(profile_path.read_bytes()).hexdigest()
         progress_path = self.participant_folder / "experiment_progress.json"
         progress = json.loads(progress_path.read_text(encoding="utf-8"))
         progress["profile"]["sha256"] = digest
-        training_block = progress["blocks"][2]
-        for key in (
-            "training_workflow",
-            "training_trials",
-            "current_trial_id",
-            "training_deviations",
-            "training_live",
-        ):
-            training_block.pop(key, None)
-        training_block["settings"].pop("trial_folder_pattern")
-        training_block["settings"].pop("attempt_pattern")
-        training_block["success_thresholds"] = {
-            "linear_m": None,
-            "angular_rad": None,
-        }
+        for index in (2, 3):
+            trial_block = progress["blocks"][index]
+            if index == 2:
+                for key in (
+                    "training_workflow",
+                    "training_trials",
+                    "current_trial_id",
+                    "training_deviations",
+                    "training_live",
+                ):
+                    trial_block.pop(key, None)
+            trial_block["settings"].pop("trial_folder_pattern")
+            trial_block["settings"].pop("attempt_pattern")
+            trial_block["success_thresholds"] = {
+                "linear_m": None,
+                "angular_rad": None,
+            }
         progress_path.write_text(json.dumps(progress), encoding="utf-8")
 
         migrated = ExperimentController(
@@ -486,11 +525,16 @@ class ExperimentControllerTest(unittest.TestCase):
             monotonic_clock=lambda: self.monotonic_value,
             thread_factory=ImmediateThread,
         ).prepare(self.participant)
-        block = migrated["progress"]["blocks"][2]
-        self.assertEqual(len(block["training_trials"]), 6)
-        self.assertEqual(block["success_thresholds"]["linear_mm"], 5.0)
+        training_block = migrated["progress"]["blocks"][2]
+        recording_block = migrated["progress"]["blocks"][3]
+        self.assertEqual(len(training_block["training_trials"]), 6)
+        self.assertEqual(len(recording_block["training_trials"]), 30)
+        self.assertEqual(training_block["success_thresholds"]["linear_mm"], 5.0)
         self.assertTrue(
             any("LOT 6 training fields" in warning for warning in migrated["progress"]["warnings"])
+        )
+        self.assertTrue(
+            any("LOT 7 recording fields" in warning for warning in migrated["progress"]["warnings"])
         )
 
     def test_manual_stop_incident_retry_and_deviation(self):
@@ -538,6 +582,102 @@ class ExperimentControllerTest(unittest.TestCase):
             "restart_stack",
         )
         self.assertEqual(self.modes.active, "snake")
+
+    def test_recording_generates_thirty_trials_with_official_names(self):
+        state = self.start_first_recording_block()
+        trials = state["recording"]["trials"]
+        self.assertIsNone(state["training"])
+        self.assertEqual([trial["id"] for trial in trials], list(range(1, 31)))
+        self.assertEqual(trials[0]["folder"], "snake_trial_001_01_1_2")
+        self.assertEqual(trials[-1]["folder"], "snake_trial_030_10_3_1")
+        self.assertEqual(state["recording"]["progress"], {"resolved": 0, "total": 30})
+        with self.assertRaisesRegex(ExperimentError, "Panel F"):
+            self.controller.prepare_training_trial("mode_1_recording")
+        with self.assertRaisesRegex(ExperimentError, "Resolve every trial"):
+            self.controller.end("mode_1_recording", True)
+
+    def test_recording_success_and_retry_deviation_match_training(self):
+        self.start_first_recording_block()
+        block_id = "mode_1_recording"
+        self.controller.prepare_recording_trial(block_id)
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.recording_participant_ready(block_id)
+        self.controller.start_recording_attempt(block_id)
+        self.controller.add_recording_incident(block_id, "Participant paused")
+        stopped = self.controller.stop_recording_attempt(block_id)
+        self.assertEqual(stopped["recording"]["workflow"], "decision_required")
+        self.controller.resolve_recording_attempt(block_id, "retry")
+
+        self.controller.prepare_recording_trial(block_id)
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.recording_participant_ready(block_id)
+        self.controller.start_recording_attempt(block_id)
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+        state = self.controller.snapshot()
+        trial = state["recording"]["trials"][0]
+        self.assertEqual(trial["status"], "completed")
+        self.assertEqual([attempt["name"] for attempt in trial["attempts"]], [
+            "attempt_001",
+            "attempt_002",
+        ])
+        trial_folder = self.participant_folder / "snake_recording" / (
+            "snake_trial_001_01_1_2"
+        )
+        self.assertTrue((trial_folder / "attempt_001" / "attempt.json").is_file())
+        self.assertTrue((trial_folder / "attempt_002" / "attempt.json").is_file())
+
+    def test_recording_restart_invalidates_attempt_and_restores_mapper(self):
+        self.start_first_recording_block()
+        block_id = "mode_1_recording"
+        self.controller.prepare_recording_trial(block_id)
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.recording_participant_ready(block_id)
+        self.controller.start_recording_attempt(block_id)
+        state = self.controller.restart_stack(block_id)
+        self.assertEqual(state["recording"]["workflow"], "decision_required")
+        attempt = state["recording"]["trials"][0]["attempts"][0]
+        self.assertEqual(attempt["stop_reason"], "restart_stack")
+        self.assertEqual(self.modes.active, "snake")
+
+    def test_recording_rejects_stale_start_and_invalid_mcap(self):
+        self.start_first_recording_block()
+        block_id = "mode_1_recording"
+        self.controller.prepare_recording_trial(block_id)
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.monotonic_value += 0.6
+        with self.assertRaisesRegex(ExperimentError, "calibrated start pose"):
+            self.controller.recording_participant_ready(block_id)
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.recording_participant_ready(block_id)
+        self.controller.start_recording_attempt(block_id)
+        self.rosbag.valid = False
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+        state = self.controller.snapshot()
+        attempt = state["recording"]["trials"][0]["attempts"][0]
+        self.assertEqual(state["recording"]["workflow"], "decision_required")
+        self.assertEqual(attempt["stop_reason"], "invalid_data")
+        self.assertFalse(attempt["valid"])
+
+    def test_shutdown_invalidates_active_official_recording(self):
+        self.start_first_recording_block()
+        block_id = "mode_1_recording"
+        self.controller.prepare_recording_trial(block_id)
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.recording_participant_ready(block_id)
+        self.controller.start_recording_attempt(block_id)
+        self.controller.shutdown()
+        progress = json.loads(
+            (self.participant_folder / "experiment_progress.json").read_text()
+        )
+        block = progress["blocks"][3]
+        attempt = block["training_trials"][0]["attempts"][0]
+        self.assertEqual(block["status"], "interrupted")
+        self.assertEqual(attempt["stop_reason"], "interface_shutdown")
+        self.assertFalse(self.rosbag.active)
 
 
 if __name__ == "__main__":

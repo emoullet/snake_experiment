@@ -297,6 +297,40 @@ def create_session_app(
             )
         )
 
+    @app.post("/api/experiment/blocks/{block_id}/recording/prepare")
+    async def prepare_recording_trial(block_id: str):
+        return experiment_action(lambda: experiment.prepare_recording_trial(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/recording/ready")
+    async def confirm_recording_ready(block_id: str):
+        return experiment_action(
+            lambda: experiment.recording_participant_ready(block_id)
+        )
+
+    @app.post("/api/experiment/blocks/{block_id}/recording/start")
+    async def start_recording_attempt(block_id: str):
+        return experiment_action(lambda: experiment.start_recording_attempt(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/recording/stop")
+    async def stop_recording_attempt(block_id: str):
+        return experiment_action(lambda: experiment.stop_recording_attempt(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/recording/incidents")
+    async def add_recording_incident(block_id: str, request: IncidentRequest):
+        return experiment_action(
+            lambda: experiment.add_recording_incident(block_id, request.text)
+        )
+
+    @app.post("/api/experiment/blocks/{block_id}/recording/resolve")
+    async def resolve_recording_attempt(
+        block_id: str, request: TrainingResolutionRequest
+    ):
+        return experiment_action(
+            lambda: experiment.resolve_recording_attempt(
+                block_id, request.decision
+            )
+        )
+
     @app.websocket("/ws")
     async def state_websocket(websocket: WebSocket):
         await websocket.accept()

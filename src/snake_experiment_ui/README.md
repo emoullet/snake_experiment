@@ -164,9 +164,7 @@ resumed.
 Progress is atomically stored in `experiment_progress.json`, with block metadata
 in `<mode>_<phase>/block.json`. Backend shutdown interrupts an active block,
 while a browser disconnect alone does not. The final block stops the mapper and
-stack but deliberately leaves the participant CSV state as `partial`. Panels E,
-F, and G currently expose the block context and lifecycle controls; their
-discovery, training, and recording business logic belongs to later lots.
+stack but deliberately leaves the participant CSV state as `partial`.
 
 ## Panel E: discovery
 
@@ -202,6 +200,19 @@ added without invalidating an attempt.
 The packaged 5 mm and 5 degree thresholds are explicitly provisional
 development values. Automatic Go-to controls remain visible but disabled until
 a dedicated and validated ROS motion interface is available.
+
+## Panel G: official recordings
+
+Recording uses the same pose gates, automatic success detection, MCAP
+validation, incidents, retries, deviations, and process-ownership rules as
+training. Its independently configurable cycle count and target sequence produce
+30 trials by default, numbered from `001` to `030` within each mode block.
+
+Trial folders use `<mode>_trial_<id>_<cycle>_<start>_<end>`, with each acquisition
+stored below it as a new `attempt_###`. The mapper and stack remain active between
+trials. Completing the final recording block stops both owned processes and marks
+the six-block sequence complete. Questionnaires, pause timing, and final manifest
+locking remain outside this lot.
 
 ## JSON contract
 

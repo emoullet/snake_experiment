@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable
+from typing import Iterable, Optional
 
 
 class TrainingError(RuntimeError):
@@ -44,11 +44,13 @@ def build_trials(mode: str, settings: dict) -> list[dict]:
     return trials
 
 
-def validate_training_settings(settings: dict) -> None:
-    """Validate the configurable training sequence and folder patterns."""
+def validate_training_settings(
+    settings: dict, expected_folder: Optional[str] = None
+) -> None:
+    """Validate configurable trial sequencing and folder patterns."""
     cycles = settings.get("cycles")
     if isinstance(cycles, bool) or not isinstance(cycles, int) or cycles <= 0:
-        raise TrainingError("Training cycles must be a positive integer.")
+        raise TrainingError("Trial cycles must be a positive integer.")
     sequence = settings.get("target_sequence")
     if (
         not isinstance(sequence, list)
@@ -56,7 +58,7 @@ def validate_training_settings(settings: dict) -> None:
         or any(isinstance(item, bool) or item not in (1, 2, 3) for item in sequence)
     ):
         raise TrainingError(
-            "Training target_sequence must contain at least two targets from 1, 2, 3."
+            "Trial target_sequence must contain at least two targets from 1, 2, 3."
         )
     _validate_pattern(
         settings.get("trial_folder_pattern"),
@@ -68,7 +70,7 @@ def validate_training_settings(settings: dict) -> None:
             "target_end": 2,
         },
         "trial_folder_pattern",
-        "snake_training_trial_001_01_1_2",
+        expected_folder or "snake_training_trial_001_01_1_2",
     )
     _validate_pattern(
         settings.get("attempt_pattern"),

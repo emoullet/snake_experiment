@@ -68,26 +68,27 @@ class SessionInterface {
         if (!window.confirm("Restart the experiment stack and restore the current control state?")) return;
         return this.post(`/api/experiment/blocks/${restart.dataset.restartStack}/restart-stack`);
       }
-      const trainingAction = event.target.closest("[data-training-action]");
-      if (trainingAction) {
-        return this.post(`/api/experiment/blocks/${trainingAction.dataset.blockId}/training/${trainingAction.dataset.trainingAction}`);
+      const trialAction = event.target.closest("[data-trial-action]");
+      if (trialAction) {
+        return this.post(`/api/experiment/blocks/${trialAction.dataset.blockId}/${trialAction.dataset.trialPhase}/${trialAction.dataset.trialAction}`);
       }
-      const trainingResolution = event.target.closest("[data-training-resolve]");
-      if (trainingResolution) {
-        return this.post(`/api/experiment/blocks/${trainingResolution.dataset.blockId}/training/resolve`, {
-          decision: trainingResolution.dataset.trainingResolve,
+      const trialResolution = event.target.closest("[data-trial-resolve]");
+      if (trialResolution) {
+        return this.post(`/api/experiment/blocks/${trialResolution.dataset.blockId}/${trialResolution.dataset.trialPhase}/resolve`, {
+          decision: trialResolution.dataset.trialResolve,
         });
       }
     });
     document.addEventListener("submit", (event) => {
-      const form = event.target.closest("[data-training-incident-form]");
+      const form = event.target.closest("[data-trial-incident-form]");
       if (!form) return;
       event.preventDefault();
       const input = form.querySelector("textarea");
       const blockId = form.dataset.blockId;
+      const phase = form.dataset.trialPhase;
       const text = input.value;
       input.value = "";
-      this.post(`/api/experiment/blocks/${blockId}/training/incidents`, { text });
+      this.post(`/api/experiment/blocks/${blockId}/${phase}/incidents`, { text });
     });
     document.getElementById("validate-button").addEventListener("click", () =>
       this.post("/api/checkup/validate")
@@ -394,6 +395,7 @@ class SessionInterface {
     const panel = document.getElementById(`panel-${block.panel.toLowerCase()}`);
     if (block.phase === "discovery") return this.renderDiscovery(panel, block, experiment);
     if (block.phase === "training") return this.renderTraining(panel, block, experiment);
+    if (block.phase === "recording") return this.renderRecording(panel, block, experiment);
     const phase = this.title(block.phase);
     const settings = Object.entries(block.settings)
       .map(([key, value]) => `<div><dt>${this.escape(key.replaceAll("_", " "))}</dt><dd>${this.escape(JSON.stringify(value))}</dd></div>`).join("");
@@ -431,7 +433,15 @@ class SessionInterface {
   }
 
   renderTraining(panel, block, experiment) {
-    const training = experiment.training || {};
+    return this.renderTrialPanel(panel, block, experiment, "training", "F", "Training");
+  }
+
+  renderRecording(panel, block, experiment) {
+    return this.renderTrialPanel(panel, block, experiment, "recording", "G", "Recording");
+  }
+
+  renderTrialPanel(panel, block, experiment, phase, panelLetter, title) {
+    const training = experiment[phase] || {};
     const trials = training.trials || [];
     const workflow = training.workflow || "awaiting_prepare";
     const current = training.current_trial || trials.find((trial) => trial.id === training.current_trial_id) || null;
@@ -459,18 +469,18 @@ class SessionInterface {
     const canStart = workflow === "ready" && live.start_within_thresholds;
     const recording = workflow === "recording";
     panel.className = "panel-page";
-    panel.innerHTML = `<section class="hero-card"><div><p class="step-number">Panel F · Training</p><h2>${this.escape(this.title(block.mode))} training</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span></section>
+    panel.innerHTML = `<section class="hero-card"><div><p class="step-number">Panel ${panelLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span></section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Development configuration</p><h2>${Number(thresholds.linear_mm || 0).toFixed(1)} mm · ${Number(thresholds.angular_deg || 0).toFixed(1)}° thresholds</h2></div><span class="pill pill--warning">Provisional</span></div><p class="inline-warning">These thresholds are development values and must be scientifically approved before participant sessions. Success requires ${Number(thresholds.success_dwell_sec || 0).toFixed(1)} s continuously inside both limits.</p><dl class="participant-summary process-summary">${processItems}</dl></section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Current trial</p><h2>${current ? `Trial ${current.id} · cycle ${current.cycle} · target ${current.target_start} → ${current.target_end}` : experiment.can_end ? "All trials resolved" : "Prepare the next trial"}</h2></div><span class="supporting-copy">${current ? this.escape(current.folder) : this.escape(block.folder)}</span></div>
         <div class="training-metrics"><article><span>Start linear error</span><strong>${errorValue(live.start_error, "linear_mm")}</strong></article><article><span>Start angular error</span><strong>${errorValue(live.start_error, "angular_deg")}</strong></article><article><span>Target linear error</span><strong>${errorValue(live.target_error, "linear_mm")}</strong></article><article><span>Target angular error</span><strong>${errorValue(live.target_error, "angular_deg")}</strong></article></div>
         <p class="supporting-copy">${live.error ? this.escape(live.error) : current ? `Place the robot at target_out_${current.target_start}. Arrival success is measured at target_${current.target_end}.` : "The mapper remains active between trials."}</p>
-        <div class="training-actions"><button class="secondary-button" data-training-action="prepare" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canPrepare ? "disabled" : ""}>Prepare for next trial</button><button class="secondary-button" data-training-action="ready" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canReady ? "disabled" : ""}>Participant ready</button><button class="primary-button" data-training-action="start" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canStart ? "disabled" : ""}>Start recording</button><button class="reject-button" data-training-action="stop" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !recording ? "disabled" : ""}>Stop recording</button></div>
-        ${workflow === "decision_required" ? `<div class="decision-card"><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-training-resolve="retry" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-training-resolve="advance_with_deviation" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Continue with deviation</button></div></div>` : ""}
+        <div class="training-actions"><button class="secondary-button" data-trial-action="prepare" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canPrepare ? "disabled" : ""}>Prepare for next trial</button><button class="secondary-button" data-trial-action="ready" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canReady ? "disabled" : ""}>Participant ready</button><button class="primary-button" data-trial-action="start" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canStart ? "disabled" : ""}>Start recording</button><button class="reject-button" data-trial-action="stop" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !recording ? "disabled" : ""}>Stop recording</button></div>
+        ${workflow === "decision_required" ? `<div class="decision-card"><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-trial-resolve="retry" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-trial-resolve="advance_with_deviation" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Continue with deviation</button></div></div>` : ""}
         ${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
-      <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Timestamped incidents</h2></div></div><form class="incident-form" data-training-incident-form data-block-id="${this.escape(block.id)}"><textarea maxlength="2000" placeholder="Describe the issue observed during this attempt" ${recording ? "" : "disabled"}></textarea><button class="secondary-button" type="submit" ${this.busy || !recording ? "disabled" : ""}>Signal trial issue</button></form>${incidentRows}</section>
-      <section class="card"><div class="section-heading"><div><p class="step-number">Protocol progress</p><h2>Training trials</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--neutral"}">${completed}/${trials.length}</span></div><div class="segment-list">${trialRows}</div></section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Timestamped incidents</h2></div></div><form class="incident-form" data-trial-incident-form data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}"><textarea maxlength="2000" placeholder="Describe the issue observed during this attempt" ${recording ? "" : "disabled"}></textarea><button class="secondary-button" type="submit" ${this.busy || !recording ? "disabled" : ""}>Signal trial issue</button></form>${incidentRows}</section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Protocol progress</p><h2>${title} trials</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--neutral"}">${completed}/${trials.length}</span></div><div class="segment-list">${trialRows}</div></section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Automatic positioning unavailable</h2></div></div><div class="go-to-grid">${[1, 2, 3].map((target) => `<button class="secondary-button" type="button" disabled>Go to target ${target}</button>`).join("")}<button class="secondary-button" type="button" disabled>Go to starting point</button></div></section>
-      <section class="validation-card"><div><p class="step-number">Complete training</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">Every trial must succeed or be explicitly accepted with a deviation.</p></div><div class="validation-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="training" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>End training</button></div></section>`;
+      <section class="validation-card"><div><p class="step-number">Complete ${phase}</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">Every trial must succeed or be explicitly accepted with a deviation.</p></div><div class="validation-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${phase}" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>${phase === "recording" ? "End recordings" : "End training"}</button></div></section>`;
   }
 
   title(value) {

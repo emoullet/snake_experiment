@@ -39,6 +39,22 @@ class TrainingHelpersTest(unittest.TestCase):
         self.assertEqual(trials[-1]["cycle"], 2)
         self.assertEqual(trials[-1]["folder"], "baseline_training_trial_006_02_3_1")
 
+    def test_build_recording_trials_uses_thirty_per_block(self):
+        settings = {
+            "cycles": 10,
+            "target_sequence": [1, 2, 3, 1],
+            "trial_folder_pattern": (
+                "{mode}_trial_{trial_id:03d}_{cycle:02d}_"
+                "{target_start}_{target_end}"
+            ),
+            "attempt_pattern": "attempt_{attempt:03d}",
+        }
+        validate_training_settings(settings, "snake_trial_001_01_1_2")
+        trials = build_trials("baseline", settings)
+        self.assertEqual(len(trials), 30)
+        self.assertEqual(trials[0]["folder"], "baseline_trial_001_01_1_2")
+        self.assertEqual(trials[-1]["folder"], "baseline_trial_030_10_3_1")
+
     def test_threshold_units_convert_to_si(self):
         thresholds = effective_thresholds(
             {

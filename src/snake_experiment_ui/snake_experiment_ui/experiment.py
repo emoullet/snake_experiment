@@ -27,6 +27,7 @@ from .training import (
 
 MODES = ("baseline", "snake")
 PHASE_PANELS = {"discovery": "E", "training": "F", "recording": "G"}
+TRIAL_PHASES = ("training", "recording")
 REQUIRED_SEQUENCE = (
     ("mode_1_discovery", "mode_1", "discovery"),
     ("mode_2_discovery", "mode_2", "discovery"),
@@ -41,6 +42,16 @@ DEFAULT_TRAINING_SETTINGS = {
     "rosbag_topics": ["/joy", "/ee_pose", "/joint_states"],
     "trial_folder_pattern": (
         "{mode}_training_trial_{trial_id:03d}_{cycle:02d}_"
+        "{target_start}_{target_end}"
+    ),
+    "attempt_pattern": "attempt_{attempt:03d}",
+}
+DEFAULT_RECORDING_SETTINGS = {
+    "cycles": 10,
+    "target_sequence": [1, 2, 3, 1],
+    "rosbag_topics": ["/joy", "/ee_pose", "/joint_states"],
+    "trial_folder_pattern": (
+        "{mode}_trial_{trial_id:03d}_{cycle:02d}_"
         "{target_start}_{target_end}"
     ),
     "attempt_pattern": "attempt_{attempt:03d}",
@@ -140,14 +151,16 @@ class ExperimentProfile:
         if allow_legacy:
             for key, value in DEFAULT_TRAINING_SETTINGS.items():
                 phases["training"].setdefault(key, json.loads(json.dumps(value)))
+            for key, value in DEFAULT_RECORDING_SETTINGS.items():
+                phases["recording"].setdefault(key, json.loads(json.dumps(value)))
         try:
             validate_training_settings(phases["training"])
+            validate_training_settings(
+                phases["recording"],
+                "snake_trial_001_01_1_2",
+            )
         except TrainingError as error:
             raise ExperimentError(str(error)) from error
-        if phases["recording"].get("cycles") != 10:
-            raise ExperimentError("Recording must define exactly 10 cycles.")
-        if phases["recording"].get("target_sequence") != [1, 2, 3, 1]:
-            raise ExperimentError("Invalid target sequence for phase 'recording'.")
         thresholds = data.get("success_thresholds")
         if allow_legacy and (
             not isinstance(thresholds, dict)
@@ -205,12 +218,14 @@ class ExperimentProfile:
                     "current_segment": None,
                     "segments": [],
                     "restart": {"status": "idle", "error": None},
+                    # Schema 1 retains the training_* storage keys for backward
+                    # compatibility; they carry the shared trial workflow for G.
                     "training_workflow": (
-                        "awaiting_prepare" if phase == "training" else None
+                        "awaiting_prepare" if phase in TRIAL_PHASES else None
                     ),
                     "training_trials": (
                         build_trials(resolved_mode, self.data["phases"][phase])
-                        if phase == "training"
+                        if phase in TRIAL_PHASES
                         else []
                     ),
                     "current_trial_id": None,
@@ -290,12 +305,13 @@ class ExperimentController:
                 self._validate_progress(progress, participant)
                 changed = False
                 recovered_active = False
-                lot6_migrated = False
+                migrated_trial_phases = set()
                 for block in progress["blocks"]:
                     changed = self._ensure_lot5_fields(block) or changed
-                    migrated = self._ensure_lot6_fields(block)
+                    migrated = self._ensure_trial_fields(block)
                     changed = migrated or changed
-                    lot6_migrated = migrated or lot6_migrated
+                    if migrated and block.get("phase") in TRIAL_PHASES:
+                        migrated_trial_phases.add(block["phase"])
                     if block["status"] in ("starting", "running"):
                         if block.get("current_segment"):
                             segment = self._segment(block, block["current_segment"])
@@ -303,7 +319,7 @@ class ExperimentController:
                             segment["stopped_at_utc"] = self._utc_clock()
                             segment["stop_reason"] = "interface_restart"
                             segment["valid"] = False
-                        if block["phase"] == "training":
+                        if block["phase"] in TRIAL_PHASES:
                             self._recover_training_attempt(
                                 block, folder, "interface_restart"
                             )
@@ -316,9 +332,10 @@ class ExperimentController:
                         changed = True
                         recovered_active = True
                 if changed:
-                    if lot6_migrated:
+                    for phase in sorted(migrated_trial_phases):
+                        lot = 6 if phase == "training" else 7
                         warning = (
-                            "LOT 6 training fields were initialised with the "
+                            f"LOT {lot} {phase} fields were initialised with the "
                             "effective development profile."
                         )
                         progress.setdefault("warnings", [])
@@ -432,9 +449,9 @@ class ExperimentController:
                     self._persist(folder)
                     self._write_block(folder, block)
                     raise ExperimentError(block["error"])
-            elif block["phase"] == "training":
-                if not self._training_can_end(block):
-                    block["error"] = "Resolve every training trial before ending the block."
+            elif block["phase"] in TRIAL_PHASES:
+                if not self._trial_can_end(block):
+                    block["error"] = "Resolve every trial before ending the block."
                     self._persist(folder)
                     self._write_block(folder, block)
                     raise ExperimentError(block["error"])
@@ -493,7 +510,7 @@ class ExperimentController:
                     self._stack.stop()
                 except Exception as error:
                     cleanup_errors.append(f"stack: {error}")
-            elif block["phase"] == "training":
+            elif block["phase"] in TRIAL_PHASES:
                 if block.get("training_workflow") in ("recording", "stopping_success"):
                     try:
                         self._finish_training_attempt(
@@ -546,12 +563,19 @@ class ExperimentController:
 
     def prepare_training_trial(self, block_id: str) -> dict:
         """Select the next unresolved training trial and begin start-pose checks."""
+        return self._prepare_trial(block_id, "training")
+
+    def prepare_recording_trial(self, block_id: str) -> dict:
+        """Select the next unresolved recording trial and begin pose checks."""
+        return self._prepare_trial(block_id, "recording")
+
+    def _prepare_trial(self, block_id: str, phase: str) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
-            block = self._training_block(block_id)
-            self._require_training_processes(block)
+            block = self._trial_block(block_id, phase)
+            self._require_trial_processes(block)
             if block["training_workflow"] != "awaiting_prepare":
-                raise ExperimentError("Finish the current training step first.")
+                raise ExperimentError("Finish the current trial step first.")
             trial = next(
                 (
                     item
@@ -561,7 +585,7 @@ class ExperimentController:
                 None,
             )
             if trial is None:
-                raise ExperimentError("No unresolved training trial remains.")
+                raise ExperimentError("No unresolved trial remains.")
             block["current_trial_id"] = trial["id"]
             block["training_workflow"] = "awaiting_start_pose"
             trial["status"] = "positioning"
@@ -574,12 +598,19 @@ class ExperimentController:
 
     def training_participant_ready(self, block_id: str) -> dict:
         """Record participant readiness after a valid calibrated start pose."""
+        return self._trial_participant_ready(block_id, "training")
+
+    def recording_participant_ready(self, block_id: str) -> dict:
+        """Record participant readiness for an official recording trial."""
+        return self._trial_participant_ready(block_id, "recording")
+
+    def _trial_participant_ready(self, block_id: str, phase: str) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
-            block = self._training_block(block_id)
-            self._require_training_processes(block)
+            block = self._trial_block(block_id, phase)
+            self._require_trial_processes(block)
             if block["training_workflow"] != "awaiting_start_pose":
-                raise ExperimentError("Prepare a training trial before confirming readiness.")
+                raise ExperimentError("Prepare a trial before confirming readiness.")
             self._refresh_training_live(block)
             if not block["training_live"].get("start_within_thresholds"):
                 raise ExperimentError("Move the robot to the calibrated start pose first.")
@@ -592,10 +623,17 @@ class ExperimentController:
 
     def start_training_attempt(self, block_id: str) -> dict:
         """Start one owned MCAP attempt after rechecking the start pose."""
+        return self._start_trial_attempt(block_id, "training")
+
+    def start_recording_attempt(self, block_id: str) -> dict:
+        """Start one owned official MCAP attempt after the pose check."""
+        return self._start_trial_attempt(block_id, "recording")
+
+    def _start_trial_attempt(self, block_id: str, phase: str) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
-            block = self._training_block(block_id)
-            self._require_training_processes(block)
+            block = self._trial_block(block_id, phase)
+            self._require_trial_processes(block)
             if block["training_workflow"] != "ready":
                 raise ExperimentError("Confirm participant readiness before recording.")
             self._refresh_training_live(block)
@@ -645,7 +683,7 @@ class ExperimentController:
                 attempt["metadata_error"] = str(error)
                 trial["status"] = "decision_required"
                 block["training_workflow"] = "decision_required"
-                block["error"] = f"Unable to start training recorder: {error}"
+                block["error"] = f"Unable to start trial recorder: {error}"
                 self._persist_training(folder, block, trial, attempt)
                 raise ExperimentError(block["error"]) from error
             attempt["status"] = "recording"
@@ -658,11 +696,18 @@ class ExperimentController:
 
     def stop_training_attempt(self, block_id: str) -> dict:
         """Stop and invalidate the active attempt at the operator's request."""
+        return self._stop_trial_attempt(block_id, "training")
+
+    def stop_recording_attempt(self, block_id: str) -> dict:
+        """Stop and invalidate the active official recording attempt."""
+        return self._stop_trial_attempt(block_id, "recording")
+
+    def _stop_trial_attempt(self, block_id: str, phase: str) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
-            block = self._training_block(block_id)
+            block = self._trial_block(block_id, phase)
             if block["training_workflow"] != "recording":
-                raise ExperimentError("No training attempt is currently recording.")
+                raise ExperimentError("No trial attempt is currently recording.")
             self._finish_training_attempt(
                 block, folder, "operator_stop", successful=False
             )
@@ -670,9 +715,16 @@ class ExperimentController:
 
     def add_training_incident(self, block_id: str, text: str) -> dict:
         """Append a non-invalidating, timestamped incident to the active attempt."""
+        return self._add_trial_incident(block_id, text, "training")
+
+    def add_recording_incident(self, block_id: str, text: str) -> dict:
+        """Append an incident to the active official recording attempt."""
+        return self._add_trial_incident(block_id, text, "recording")
+
+    def _add_trial_incident(self, block_id: str, text: str, phase: str) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
-            block = self._training_block(block_id)
+            block = self._trial_block(block_id, phase)
             if block["training_workflow"] != "recording":
                 raise ExperimentError("Incidents can be recorded only during acquisition.")
             value = str(text).strip()
@@ -693,11 +745,20 @@ class ExperimentController:
 
     def resolve_training_attempt(self, block_id: str, decision: str) -> dict:
         """Retry an invalid trial or accept it as a protocol deviation."""
+        return self._resolve_trial_attempt(block_id, decision, "training")
+
+    def resolve_recording_attempt(self, block_id: str, decision: str) -> dict:
+        """Resolve an invalid official recording attempt."""
+        return self._resolve_trial_attempt(block_id, decision, "recording")
+
+    def _resolve_trial_attempt(
+        self, block_id: str, decision: str, phase: str
+    ) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
-            block = self._training_block(block_id)
+            block = self._trial_block(block_id, phase)
             if block["training_workflow"] != "decision_required":
-                raise ExperimentError("No invalid training attempt requires a decision.")
+                raise ExperimentError("No invalid trial attempt requires a decision.")
             if decision not in ("retry", "advance_with_deviation"):
                 raise ExperimentError("Unknown training resolution decision.")
             trial = self._current_training_trial(block)
@@ -713,7 +774,7 @@ class ExperimentController:
                     block["training_deviations"].append(trial["id"])
             block["current_trial_id"] = None
             block["training_workflow"] = (
-                "ready_to_end" if self._training_can_end(block) else "awaiting_prepare"
+                "ready_to_end" if self._trial_can_end(block) else "awaiting_prepare"
             )
             block["training_live"] = self._empty_training_live()
             block["error"] = None
@@ -736,7 +797,7 @@ class ExperimentController:
             ):
                 return
             block = self._block(self._progress["current_block"])
-            if block["phase"] != "training":
+            if block["phase"] not in TRIAL_PHASES:
                 return
             self._refresh_training_live(block)
             if block["training_workflow"] != "recording":
@@ -792,7 +853,7 @@ class ExperimentController:
             progress, folder = self._require_prepared()
             block = self._running_block(block_id)
             was_active = bool(block["control_active"])
-            restore_control = was_active or block["phase"] == "training"
+            restore_control = was_active or block["phase"] in TRIAL_PHASES
             block["restart"] = {"status": "restarting", "error": None}
             block["updated_at_utc"] = self._utc_clock()
             self._persist(folder)
@@ -801,7 +862,7 @@ class ExperimentController:
                 if block["phase"] == "discovery":
                     if was_active:
                         self._deactivate_discovery(block, folder, "restart_stack")
-                elif block["phase"] == "training":
+                elif block["phase"] in TRIAL_PHASES:
                     if block.get("training_workflow") in (
                         "recording",
                         "stopping_success",
@@ -875,7 +936,7 @@ class ExperimentController:
                     block, folder, "success_threshold", successful=True
                 )
             except Exception as error:
-                block["error"] = f"Unable to finalise successful training attempt: {error}"
+                block["error"] = f"Unable to finalise successful trial attempt: {error}"
                 self._error = block["error"]
                 self._persist(folder)
                 self._write_block(folder, block)
@@ -916,14 +977,14 @@ class ExperimentController:
             trial["decision"] = "automatic_success"
             block["current_trial_id"] = None
             block["training_workflow"] = (
-                "ready_to_end" if self._training_can_end(block) else "awaiting_prepare"
+                "ready_to_end" if self._trial_can_end(block) else "awaiting_prepare"
             )
             block["error"] = None
         else:
             trial["status"] = "decision_required"
             block["training_workflow"] = "decision_required"
             block["error"] = (
-                "Training attempt is invalid. Retry it or continue with a deviation."
+                "The attempt is invalid. Retry it or continue with a deviation."
             )
         block["training_live"] = self._empty_training_live()
         self._persist_training(folder, block, trial, attempt)
@@ -1036,13 +1097,16 @@ class ExperimentController:
             raise ExperimentError(f"Invalid participant calibration: {error}") from error
         return calibration
 
-    def _training_block(self, block_id: str) -> dict:
+    def _trial_block(self, block_id: str, expected_phase: str) -> dict:
         block = self._running_block(block_id)
-        if block["phase"] != "training":
-            raise ExperimentError("Training actions are available only on Panel F.")
+        if block["phase"] != expected_phase or expected_phase not in TRIAL_PHASES:
+            panel = PHASE_PANELS.get(expected_phase, "F/G")
+            raise ExperimentError(
+                f"{expected_phase.title()} actions are available only on Panel {panel}."
+            )
         return block
 
-    def _require_training_processes(self, block: dict) -> None:
+    def _require_trial_processes(self, block: dict) -> None:
         stack = self._stack.snapshot()
         mapper = self._modes.snapshot()
         if (
@@ -1050,10 +1114,10 @@ class ExperimentController:
             or mapper.get("status") != "active"
             or mapper.get("active_mode") != block["mode"]
         ):
-            raise ExperimentError("Restart the stack before continuing training.")
+            raise ExperimentError("Restart the stack before continuing this trial block.")
 
     @staticmethod
-    def _training_can_end(block: dict) -> bool:
+    def _trial_can_end(block: dict) -> bool:
         trials = block.get("training_trials", [])
         return bool(trials) and all(
             trial.get("status") in ("completed", "completed_with_deviation")
@@ -1066,12 +1130,12 @@ class ExperimentController:
         for trial in block.get("training_trials", []):
             if trial.get("id") == trial_id:
                 return trial
-        raise ExperimentError("No training trial is currently selected.")
+        raise ExperimentError("No trial is currently selected.")
 
     @staticmethod
     def _current_training_attempt(trial: dict) -> dict:
         if not trial.get("attempts"):
-            raise ExperimentError("No training attempt exists for the current trial.")
+            raise ExperimentError("No attempt exists for the current trial.")
         return trial["attempts"][-1]
 
     def _persist_training(
@@ -1241,6 +1305,7 @@ class ExperimentController:
                     "can_end": False,
                     "restart": {"status": "idle", "error": None},
                     "training": None,
+                    "recording": None,
                 }
             stack_state = self._stack.snapshot()
             mapper_state = self._modes.snapshot()
@@ -1276,7 +1341,7 @@ class ExperimentController:
                         mapper_state = self._modes.snapshot()
                         recorder_state = self._rosbag.snapshot()
                     process_failed = False
-                elif block["phase"] == "training":
+                elif block["phase"] in TRIAL_PHASES:
                     stack_or_mapper_failed = (
                         stack_state.get("status") != "active"
                         or mapper_state.get("status") != "active"
@@ -1343,16 +1408,16 @@ class ExperimentController:
             active_block = None
             if self._progress.get("current_block"):
                 active_block = self._block(self._progress["current_block"])
-                if active_block["phase"] == "training":
+                if active_block["phase"] in TRIAL_PHASES:
                     self._refresh_training_live(active_block)
             can_end = False
             if active_block:
                 if active_block["phase"] == "discovery":
                     can_end = self._can_end(active_block)
-                elif active_block["phase"] == "training":
-                    can_end = self._training_can_end(active_block)
+                elif active_block["phase"] in TRIAL_PHASES:
+                    can_end = self._trial_can_end(active_block)
             training_state = None
-            if active_block and active_block["phase"] == "training":
+            if active_block and active_block["phase"] in TRIAL_PHASES:
                 trials = active_block.get("training_trials", [])
                 current_trial = next(
                     (
@@ -1434,7 +1499,16 @@ class ExperimentController:
                     if active_block
                     else {"status": "idle", "error": None}
                 ),
-                "training": training_state,
+                "training": (
+                    training_state
+                    if active_block and active_block["phase"] == "training"
+                    else None
+                ),
+                "recording": (
+                    training_state
+                    if active_block and active_block["phase"] == "recording"
+                    else None
+                ),
             }
 
     def shutdown(self) -> None:
@@ -1449,7 +1523,7 @@ class ExperimentController:
                         )
                     except Exception:
                         pass
-                if block["phase"] == "training" and block.get(
+                if block["phase"] in TRIAL_PHASES and block.get(
                     "training_workflow"
                 ) in ("recording", "stopping_success"):
                     try:
@@ -1507,12 +1581,13 @@ class ExperimentController:
                 changed = True
         return changed
 
-    def _ensure_lot6_fields(self, block: dict) -> bool:
-        if block.get("phase") != "training":
+    def _ensure_trial_fields(self, block: dict) -> bool:
+        phase = block.get("phase")
+        if phase not in TRIAL_PHASES:
             return False
         changed = False
         settings = block.setdefault("settings", {})
-        for key, value in self._profile.data["phases"]["training"].items():
+        for key, value in self._profile.data["phases"][phase].items():
             if key not in settings:
                 settings[key] = json.loads(json.dumps(value))
                 changed = True
@@ -1532,7 +1607,11 @@ class ExperimentController:
             "training_live": self._empty_training_live(),
         }
         for key, value in defaults.items():
-            if key not in block:
+            is_empty_placeholder = (
+                (key == "training_workflow" and block.get(key) is None)
+                or (key == "training_trials" and not block.get(key))
+            )
+            if key not in block or is_empty_placeholder:
                 block[key] = value
                 changed = True
         return changed

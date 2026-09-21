@@ -140,6 +140,24 @@ class FakeExperiment:
     def resolve_training_attempt(self, block_id, decision):
         self.calls.append(("training_resolve", block_id, decision))
 
+    def prepare_recording_trial(self, block_id):
+        self.calls.append(("recording_prepare", block_id))
+
+    def recording_participant_ready(self, block_id):
+        self.calls.append(("recording_ready", block_id))
+
+    def start_recording_attempt(self, block_id):
+        self.calls.append(("recording_start", block_id))
+
+    def stop_recording_attempt(self, block_id):
+        self.calls.append(("recording_stop", block_id))
+
+    def add_recording_incident(self, block_id, text):
+        self.calls.append(("recording_incident", block_id, text))
+
+    def resolve_recording_attempt(self, block_id, decision):
+        self.calls.append(("recording_resolve", block_id, decision))
+
 
 @unittest.skipIf(httpx is None, "FastAPI test dependencies are not installed")
 class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
@@ -278,6 +296,39 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_recording_routes(self):
+        self.checkup.workflow = "validated"
+        self.enrollment.panel = "D"
+        block = "mode_1_recording"
+        for action in ("prepare", "ready", "start", "stop"):
+            response = await self.request(
+                "POST", f"/api/experiment/blocks/{block}/recording/{action}"
+            )
+            self.assertEqual(response.status_code, 200)
+        response = await self.request(
+            "POST",
+            f"/api/experiment/blocks/{block}/recording/incidents",
+            json={"text": "Tracking issue"},
+        )
+        self.assertEqual(response.status_code, 200)
+        response = await self.request(
+            "POST",
+            f"/api/experiment/blocks/{block}/recording/resolve",
+            json={"decision": "advance_with_deviation"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.experiment.calls,
+            [
+                ("recording_prepare", block),
+                ("recording_ready", block),
+                ("recording_start", block),
+                ("recording_stop", block),
+                ("recording_incident", block, "Tracking issue"),
+                ("recording_resolve", block, "advance_with_deviation"),
+            ],
+        )
+
 
 class SessionTemplateTest(unittest.TestCase):
     def test_participant_fields_use_explicit_choices_without_defaults(self):
@@ -312,8 +363,10 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("data-block-abort", script)
         self.assertIn("data-block-control", script)
         self.assertIn("data-restart-stack", script)
-        self.assertIn("data-training-action", script)
-        self.assertIn("data-training-incident-form", script)
+        self.assertIn("data-trial-action", script)
+        self.assertIn("data-trial-incident-form", script)
+        self.assertIn("renderRecording", script)
+        self.assertIn("End recordings", script)
         self.assertIn("Continue with deviation", script)
 
 
