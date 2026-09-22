@@ -13,11 +13,11 @@ from typing import Callable, Iterable, Optional
 MODES = {
     "baseline": {
         "launch_file": "joystick_mapper_baseline.launch.py",
-        "mode_request": "geometric/jaco",
+        "mode_request": "geometric/both",
     },
     "snake": {
         "launch_file": "joystick_mapper_snake.launch.py",
-        "mode_request": "geometric/snake",
+        "mode_request": "geometric/both",
     },
 }
 
