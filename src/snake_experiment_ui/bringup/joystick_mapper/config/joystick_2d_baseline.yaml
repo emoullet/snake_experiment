@@ -4,9 +4,6 @@ joystick_mapper:
     output_topic: /joystick_cartesian_command
     mode_request_topic: /mode_request
     deadzone: 0.2
-    debug: false
-    local_mode_button_index: 1
-    local_mode_button_mode: toggle
     modes:
       names: [b1, b2, b3]
       b1:
@@ -36,4 +33,11 @@ joystick_mapper:
           angular_x: {index: 0, scale: 1.0}
           angular_y: {index: 1, scale: 1.0}
           angular_z: {index: -1, scale: 1.0}
-
+    local_mode_button_index: 11
+    local_mode_button_mode: toggle
+    gripper_button_index: 0
+    gripper_button_mode: toggle
+    gripper_command_topic: "/gripper_controller/commands"
+    gripper_open_position: 0.2
+    gripper_close_position: 1.1
+    debug: false
