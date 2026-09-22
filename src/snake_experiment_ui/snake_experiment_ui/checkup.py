@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
 import platform
 import threading
 import time
@@ -10,6 +13,7 @@ from typing import Callable, Optional
 import uuid
 
 from .diagnostics import evaluate_provenance
+from .go_to import GoToError
 
 
 class CheckupError(RuntimeError):
@@ -33,6 +37,8 @@ class CheckupController:
         ros_distro: str,
         monotonic_clock: Callable[[], float] = time.monotonic,
         utc_clock: Callable[[], str] = _utc_now,
+        go_to_controller=None,
+        calibration_file: Optional[Path] = None,
     ) -> None:
         self._stack = stack_manager
         self._modes = mode_manager
@@ -42,6 +48,10 @@ class CheckupController:
         self._ros_distro = ros_distro
         self._clock = monotonic_clock
         self._utc_clock = utc_clock
+        self._go_to = go_to_controller
+        self._calibration_file = (
+            Path(calibration_file).resolve() if calibration_file is not None else None
+        )
         self._lock = threading.RLock()
         self._reset_state()
 
@@ -53,6 +63,9 @@ class CheckupController:
         self._error: Optional[str] = None
         self._pending_report: Optional[dict] = None
         self._provenance: Optional[dict] = None
+        self._go_to_calibration: Optional[dict] = None
+        self._go_to_calibration_sha256: Optional[str] = None
+        self._go_to_history = []
         self._mode_results = {
             mode: {
                 "status": "not_tested",
@@ -68,6 +81,8 @@ class CheckupController:
         with self._lock:
             if self._workflow == "validated":
                 raise CheckupError("Reset the completed check-up before starting again.")
+            if self._go_to is not None and self._go_to_calibration is None:
+                self._load_go_to_calibration()
             self._stack.start()
             if self._started_at_utc is None:
                 self._started_at_utc = self._utc_clock()
@@ -78,6 +93,8 @@ class CheckupController:
 
     def stop_stack(self) -> dict:
         with self._lock:
+            if self._go_to is not None:
+                self._go_to.cancel_if_active("stack_stop")
             self._stop_active_mode()
             self._stack.stop()
             if self._workflow != "validated":
@@ -88,6 +105,8 @@ class CheckupController:
         if mode not in self._mode_results:
             raise CheckupError(f"Unknown check-up mode: {mode}")
         with self._lock:
+            if self._go_to is not None and self._go_to.active():
+                raise CheckupError("Stop the active Go-to before testing a mode.")
             if self._stack.snapshot()["status"] != "active":
                 raise CheckupError("Start the experiment stack before testing a mode.")
             self._diagnostics.reset_mode_observation()
@@ -152,6 +171,17 @@ class CheckupController:
                 for result in self._mode_results.values()
             ):
                 raise CheckupError("Baseline and Snake must both pass before validation.")
+            missing_go_to = [
+                pose_id
+                for pose_id in ("target_1", "target_2", "target_3", "starting_point")
+                if not self._go_to_succeeded(pose_id)
+            ]
+            if missing_go_to:
+                raise CheckupError(
+                    "Complete every Go-to before validation: "
+                    + ", ".join(missing_go_to)
+                    + "."
+                )
             provenance = self._provenance or self._provenance_provider()
             constraints = evaluate_provenance(
                 provenance, self._diagnostics.profile.expected_revisions
@@ -188,10 +218,12 @@ class CheckupController:
                 "revision_constraints": constraints,
                 "modes": self._mode_results,
                 "go_to": {
-                    "available": False,
-                    "blocking": False,
-                    "warning": "Go-to functions are not implemented yet.",
+                    "available": True,
+                    "blocking": True,
                     "targets": ["target_1", "target_2", "target_3", "starting_point"],
+                    "calibration_file": str(self._calibration_file),
+                    "calibration_sha256": self._go_to_calibration_sha256,
+                    "history": json.loads(json.dumps(self._go_to_history)),
                 },
             }
             self._stop_active_mode()
@@ -202,10 +234,95 @@ class CheckupController:
 
     def reset(self) -> dict:
         with self._lock:
+            if self._go_to is not None:
+                self._go_to.cancel_if_active("checkup_reset")
             self._stop_active_mode()
             self._stack.stop()
             self._reset_state()
             return self.snapshot()
+
+    def start_go_to(self, pose_id: str) -> dict:
+        """Command one required Panel B calibration pose."""
+        allowed = ("target_1", "target_2", "target_3", "starting_point")
+        if pose_id not in allowed:
+            raise CheckupError(f"Unknown check-up Go-to pose: {pose_id}")
+        with self._lock:
+            if self._go_to is None:
+                raise CheckupError("Cartesian Go-to is not configured.")
+            if self._stack.snapshot().get("status") != "active":
+                raise CheckupError("Start the experiment stack before using Go-to.")
+            if self._active_mode is not None:
+                raise CheckupError("Finish the active mode check before using Go-to.")
+            if self._workflow in (
+                "mode_checking",
+                "awaiting_joystick",
+                "awaiting_confirmation",
+                "validated",
+            ):
+                raise CheckupError("Go-to is unavailable during the current check-up step.")
+            if self._go_to_calibration is None:
+                self._load_go_to_calibration()
+            pose = self._go_to_calibration["poses"][pose_id]
+            try:
+                self._go_to.start(
+                    pose_id,
+                    pose,
+                    context={"scope": "checkup"},
+                    on_finish=self._record_go_to_result,
+                )
+            except GoToError as error:
+                raise CheckupError(str(error)) from error
+            return self.snapshot()
+
+    def stop_go_to(self) -> dict:
+        with self._lock:
+            if self._go_to is None:
+                raise CheckupError("Cartesian Go-to is not configured.")
+            try:
+                self._go_to.stop("operator_stop")
+            except GoToError as error:
+                raise CheckupError(str(error)) from error
+            return self.snapshot()
+
+    def update_ee_pose(self, message) -> None:
+        if self._go_to is not None:
+            self._go_to.update_pose(message)
+
+    def browser_disconnected(self) -> None:
+        if self._go_to is not None:
+            self._go_to.cancel_if_active("browser_disconnect")
+
+    def _load_go_to_calibration(self) -> None:
+        if self._calibration_file is None:
+            raise CheckupError("No calibration file is configured for Go-to.")
+        try:
+            raw = self._calibration_file.read_bytes()
+            calibration = json.loads(raw)
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise CheckupError(f"Unable to read Go-to calibration: {error}") from error
+        poses = calibration.get("poses") if isinstance(calibration, dict) else None
+        required = ("target_1", "target_2", "target_3", "starting_point")
+        if (
+            not isinstance(calibration, dict)
+            or calibration.get("schema_version") != 1
+            or not isinstance(poses, dict)
+        ):
+            raise CheckupError("Go-to calibration must use schema_version 1.")
+        missing = [pose_id for pose_id in required if pose_id not in poses]
+        if missing:
+            raise CheckupError("Go-to calibration is missing: " + ", ".join(missing))
+        self._go_to_calibration = calibration
+        self._go_to_calibration_sha256 = hashlib.sha256(raw).hexdigest()
+
+    def _record_go_to_result(self, record: dict) -> None:
+        with self._lock:
+            self._go_to_history.append(json.loads(json.dumps(record)))
+
+    def _go_to_succeeded(self, pose_id: str) -> bool:
+        return any(
+            item.get("pose_id") == pose_id and item.get("status") == "succeeded"
+            for item in self._go_to_history
+        )
 
     def _stop_active_mode(self) -> None:
         active = self._modes.active_mode()
@@ -250,6 +367,15 @@ class CheckupController:
     def snapshot(self) -> dict:
         with self._lock:
             self._refresh()
+            go_to_state = self._go_to.snapshot() if self._go_to is not None else {
+                "active": False,
+                "current": None,
+                "configuration": None,
+            }
+            go_to_results = {
+                pose_id: self._go_to_succeeded(pose_id)
+                for pose_id in ("target_1", "target_2", "target_3", "starting_point")
+            }
             return {
                 "workflow": self._workflow,
                 "current_panel": "C" if self._workflow == "validated" else "B",
@@ -261,11 +387,20 @@ class CheckupController:
                 "can_validate": all(
                     result["status"] == "passed"
                     for result in self._mode_results.values()
-                ),
+                ) and all(go_to_results.values()),
                 "go_to": {
-                    "available": False,
-                    "blocking": False,
+                    "available": bool(
+                        self._go_to is not None
+                        and self._go_to_calibration is not None
+                        and self._stack.snapshot().get("status") == "active"
+                        and self._active_mode is None
+                    ),
+                    "blocking": True,
                     "targets": ["target_1", "target_2", "target_3", "starting_point"],
+                    "results": go_to_results,
+                    "motion": go_to_state,
+                    "history": json.loads(json.dumps(self._go_to_history)),
+                    "calibration_sha256": self._go_to_calibration_sha256,
                 },
                 "pending_report": self._pending_report,
                 "diagnostic_profile": {
@@ -279,5 +414,7 @@ class CheckupController:
 
     def shutdown(self) -> None:
         with self._lock:
+            if self._go_to is not None:
+                self._go_to.cancel_if_active("backend_shutdown")
             self._stop_active_mode()
             self._stack.shutdown()

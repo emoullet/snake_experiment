@@ -15,6 +15,7 @@ from typing import Callable, Optional
 
 import yaml
 
+from .go_to import GoToError
 from .training import (
     TrainingError,
     build_trials,
@@ -218,6 +219,7 @@ class ExperimentProfile:
                     "current_segment": None,
                     "segments": [],
                     "restart": {"status": "idle", "error": None},
+                    "go_to_history": [],
                     # Schema 1 retains the training_* storage keys for backward
                     # compatibility; they carry the shared trial workflow for G.
                     "training_workflow": (
@@ -247,6 +249,7 @@ class ExperimentController:
         utc_clock: Callable[[], str] = _utc_now,
         monotonic_clock: Callable[[], float] = time.monotonic,
         thread_factory: Callable[..., threading.Thread] = threading.Thread,
+        go_to_controller=None,
     ) -> None:
         self._source_profile = profile
         self._profile = profile
@@ -256,6 +259,7 @@ class ExperimentController:
         self._utc_clock = utc_clock
         self._monotonic_clock = monotonic_clock
         self._thread_factory = thread_factory
+        self._go_to = go_to_controller
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
         self._progress: Optional[dict] = None
@@ -308,6 +312,9 @@ class ExperimentController:
                 migrated_trial_phases = set()
                 for block in progress["blocks"]:
                     changed = self._ensure_lot5_fields(block) or changed
+                    if "go_to_history" not in block:
+                        block["go_to_history"] = []
+                        changed = True
                     migrated = self._ensure_trial_fields(block)
                     changed = migrated or changed
                     if migrated and block.get("phase") in TRIAL_PHASES:
@@ -432,12 +439,118 @@ class ExperimentController:
             self._write_block(folder, block)
             return self.snapshot()
 
+    def start_go_to(self, block_id: str, pose_id: str) -> dict:
+        """Suspend trial control and command a calibrated start pose."""
+        allowed = ("target_out_1", "target_out_2", "target_out_3", "starting_point")
+        if pose_id not in allowed:
+            raise ExperimentError(f"Unknown trial Go-to pose: {pose_id}")
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._running_block(block_id)
+            if block["phase"] not in TRIAL_PHASES:
+                raise ExperimentError("Go-to is available only on Panels F and G.")
+            if self._go_to is None:
+                raise ExperimentError("Cartesian Go-to is not configured.")
+            if block.get("training_workflow") in ("recording", "stopping_success"):
+                raise ExperimentError("Go-to is unavailable during an MCAP acquisition.")
+            if self._stack.snapshot().get("status") != "active":
+                raise ExperimentError("Restart the stack before using Go-to.")
+            if self._modes.active_mode() != block["mode"]:
+                raise ExperimentError("The block mapper is not active.")
+            try:
+                pose = self._calibration_pose(pose_id)
+                self._modes.deactivate(block["mode"])
+                block["control_active"] = False
+                motion = self._go_to.start(
+                    pose_id,
+                    pose,
+                    context={"scope": "experiment", "block_id": block_id},
+                    on_finish=lambda record: self._finish_go_to(block_id, record),
+                )
+            except Exception as error:
+                try:
+                    if self._stack.snapshot().get("status") == "active":
+                        self._modes.activate(block["mode"])
+                        block["control_active"] = True
+                except Exception as restore_error:
+                    block["error"] = f"Unable to restore mapper: {restore_error}"
+                self._persist(folder)
+                self._write_block(folder, block)
+                if isinstance(error, (ExperimentError, TrainingError, GoToError)):
+                    raise ExperimentError(str(error)) from error
+                raise
+            current = motion["current"]
+            block["go_to_history"].append(json.loads(json.dumps(current)))
+            block["error"] = None
+            self._persist(folder)
+            self._write_block(folder, block)
+            return self.snapshot()
+
+    def stop_go_to(self, block_id: str) -> dict:
+        with self._lock:
+            self._running_block(block_id)
+            if self._go_to is None:
+                raise ExperimentError("Cartesian Go-to is not configured.")
+            try:
+                self._go_to.stop("operator_stop")
+            except GoToError as error:
+                raise ExperimentError(str(error)) from error
+            return self.snapshot()
+
+    def browser_disconnected(self) -> None:
+        if self._go_to is not None:
+            self._go_to.cancel_if_active("browser_disconnect")
+
+    def _finish_go_to(self, block_id: str, record: dict) -> None:
+        with self._lock:
+            if self._progress is None or self._participant is None:
+                return
+            block = self._block(block_id)
+            history = block.setdefault("go_to_history", [])
+            replacement = json.loads(json.dumps(record))
+            history_index = None
+            for index, item in enumerate(history):
+                if item.get("motion_id") == record.get("motion_id"):
+                    history[index] = replacement
+                    history_index = index
+                    break
+            else:
+                history.append(replacement)
+                history_index = len(history) - 1
+            no_restore_reasons = {
+                "backend_shutdown",
+                "block_abort",
+                "block_end",
+                "restart_stack",
+                "stack_stop",
+            }
+            if (
+                record.get("stop_reason") not in no_restore_reasons
+                and self._progress.get("current_block") == block_id
+                and block.get("status") == "running"
+                and self._stack.snapshot().get("status") == "active"
+            ):
+                try:
+                    self._modes.activate(block["mode"])
+                    block["control_active"] = True
+                except Exception as error:
+                    replacement["mapper_restore_error"] = str(error)
+                    history[history_index] = replacement
+                    block["control_active"] = False
+                    block["error"] = f"Unable to restore mapper after Go-to: {error}"
+                    self._error = block["error"]
+            folder = Path(self._participant["folder"])
+            self._persist(folder)
+            self._write_block(folder, block)
+
     def end(self, block_id: str, confirmed: bool) -> dict:
         with self._lock:
             if not confirmed:
                 raise ExperimentError("Explicit confirmation is required to end a block.")
             progress, folder = self._require_prepared()
             block = self._running_block(block_id)
+            if self._go_to is not None:
+                self._go_to.cancel_if_active("block_end")
             if block["phase"] == "discovery":
                 if block["control_active"]:
                     self._deactivate_discovery(block, folder, "end_block")
@@ -499,6 +612,8 @@ class ExperimentController:
         with self._lock:
             progress, folder = self._require_prepared()
             block = self._running_block(block_id)
+            if self._go_to is not None:
+                self._go_to.cancel_if_active("block_abort")
             cleanup_errors = []
             if block["phase"] == "discovery":
                 if block["control_active"]:
@@ -785,6 +900,8 @@ class ExperimentController:
         """Update live training errors and schedule success finalisation."""
         worker = None
         with self._lock:
+            if self._go_to is not None:
+                self._go_to.update_pose(message)
             try:
                 self._latest_pose = self._pose_document(message)
             except (AttributeError, TypeError, ValueError):
@@ -852,6 +969,8 @@ class ExperimentController:
         with self._lock:
             progress, folder = self._require_prepared()
             block = self._running_block(block_id)
+            if self._go_to is not None:
+                self._go_to.cancel_if_active("restart_stack")
             was_active = bool(block["control_active"])
             restore_control = was_active or block["phase"] in TRIAL_PHASES
             block["restart"] = {"status": "restarting", "error": None}
@@ -1107,6 +1226,8 @@ class ExperimentController:
         return block
 
     def _require_trial_processes(self, block: dict) -> None:
+        if self._go_to is not None and self._go_to.active():
+            raise ExperimentError("Wait for the active Go-to to finish or stop it first.")
         stack = self._stack.snapshot()
         mapper = self._modes.snapshot()
         if (
@@ -1306,6 +1427,7 @@ class ExperimentController:
                     "restart": {"status": "idle", "error": None},
                     "training": None,
                     "recording": None,
+                    "go_to": {"available": False, "motion": None, "history": []},
                 }
             stack_state = self._stack.snapshot()
             mapper_state = self._modes.snapshot()
@@ -1342,10 +1464,18 @@ class ExperimentController:
                         recorder_state = self._rosbag.snapshot()
                     process_failed = False
                 elif block["phase"] in TRIAL_PHASES:
+                    go_to_active = bool(self._go_to and self._go_to.active())
+                    if not go_to_active:
+                        mapper_state = self._modes.snapshot()
                     stack_or_mapper_failed = (
                         stack_state.get("status") != "active"
-                        or mapper_state.get("status") != "active"
-                        or mapper_state.get("active_mode") != block["mode"]
+                        or (
+                            not go_to_active
+                            and (
+                                mapper_state.get("status") != "active"
+                                or mapper_state.get("active_mode") != block["mode"]
+                            )
+                        )
                     )
                     recorder_failed = (
                         block.get("training_workflow") == "recording"
@@ -1463,7 +1593,11 @@ class ExperimentController:
                     "thresholds": effective_thresholds(
                         active_block["success_thresholds"]
                     ),
-                    "go_to_available": False,
+                    "go_to_available": bool(
+                        self._go_to
+                        and active_block.get("training_workflow")
+                        not in ("recording", "stopping_success")
+                    ),
                 }
             return {
                 "workflow": self._progress["workflow"],
@@ -1499,6 +1633,27 @@ class ExperimentController:
                     if active_block
                     else {"status": "idle", "error": None}
                 ),
+                "go_to": {
+                    "available": bool(
+                        active_block
+                        and active_block["phase"] in TRIAL_PHASES
+                        and active_block.get("training_workflow")
+                        not in ("recording", "stopping_success")
+                        and stack_state.get("status") == "active"
+                    ),
+                    "motion": self._go_to.snapshot() if self._go_to else None,
+                    "history": (
+                        json.loads(json.dumps(active_block.get("go_to_history", [])))
+                        if active_block
+                        else []
+                    ),
+                    "targets": [
+                        "target_out_1",
+                        "target_out_2",
+                        "target_out_3",
+                        "starting_point",
+                    ],
+                },
                 "training": (
                     training_state
                     if active_block and active_block["phase"] == "training"
@@ -1513,6 +1668,8 @@ class ExperimentController:
 
     def shutdown(self) -> None:
         with self._lock:
+            if self._go_to is not None:
+                self._go_to.cancel_if_active("backend_shutdown")
             if self._progress is not None and self._progress.get("current_block"):
                 folder = Path(self._participant["folder"])
                 block = self._block(self._progress["current_block"])
@@ -1574,6 +1731,7 @@ class ExperimentController:
             "current_segment": None,
             "segments": [],
             "restart": {"status": "idle", "error": None},
+            "go_to_history": [],
         }
         for key, value in defaults.items():
             if key not in block:

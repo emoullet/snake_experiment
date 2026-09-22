@@ -54,7 +54,7 @@ class ModeManagerTest(unittest.TestCase):
                 "joystick_mapper_baseline.launch.py",
             ],
         )
-        self.assertEqual(requests, ["geometric/jaco", "geometric/jaco"])
+        self.assertEqual(requests, ["geometric/both", "geometric/both"])
         self.assertEqual(mapper_transitions, ["reset"])
 
     def test_external_mapper_is_rejected(self):

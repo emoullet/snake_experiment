@@ -55,6 +55,7 @@ cartesian_manager:
       joystick_command: /joystick_cartesian_command
       visual_servoing_command: /visual_servoing_cartesian_command
       mode_request: /mode_request
+      pose_target: /pose_target
       ee_pose: /ee_pose
       ee_vel: /ee_velocity
       ee_jac: /ee_jac
@@ -97,3 +98,10 @@ cartesian_manager:
           - 2.97
           - 1.2
           - -0.5
+      pose_targets:
+        linear_kp: 1.0
+        angular_kp: 1.0
+        max_linear_velocity: 0.1
+        max_angular_velocity: 0.2
+        position_tolerance: 0.005
+        orientation_tolerance: 0.08726646259971647

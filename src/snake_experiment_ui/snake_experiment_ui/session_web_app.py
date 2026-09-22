@@ -63,6 +63,10 @@ class TrainingResolutionRequest(BaseModel):
     decision: str
 
 
+class GoToRequest(BaseModel):
+    pose_id: str
+
+
 def create_session_app(
     checkup,
     static_directory: Path,
@@ -72,6 +76,7 @@ def create_session_app(
 ):
     """Create the Panel B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
+    websocket_clients = 0
     app.mount(
         "/session-static",
         StaticFiles(directory=static_directory, follow_symlink=True),
@@ -164,6 +169,16 @@ def create_session_app(
     async def reset():
         require_panel_b()
         return action(checkup.reset)
+
+    @app.post("/api/checkup/go-to")
+    async def start_checkup_go_to(request: GoToRequest):
+        require_panel_b()
+        return action(lambda: checkup.start_go_to(request.pose_id))
+
+    @app.post("/api/checkup/go-to/stop")
+    async def stop_checkup_go_to():
+        require_panel_b()
+        return action(checkup.stop_go_to)
 
     @app.get("/api/session/browse")
     async def browse(path: str = ""):
@@ -263,6 +278,16 @@ def create_session_app(
     async def restart_experiment_stack(block_id: str):
         return experiment_action(lambda: experiment.restart_stack(block_id))
 
+    @app.post("/api/experiment/blocks/{block_id}/go-to")
+    async def start_experiment_go_to(block_id: str, request: GoToRequest):
+        return experiment_action(
+            lambda: experiment.start_go_to(block_id, request.pose_id)
+        )
+
+    @app.post("/api/experiment/blocks/{block_id}/go-to/stop")
+    async def stop_experiment_go_to(block_id: str):
+        return experiment_action(lambda: experiment.stop_go_to(block_id))
+
     @app.post("/api/experiment/blocks/{block_id}/training/prepare")
     async def prepare_training_trial(block_id: str):
         return experiment_action(lambda: experiment.prepare_training_trial(block_id))
@@ -333,7 +358,9 @@ def create_session_app(
 
     @app.websocket("/ws")
     async def state_websocket(websocket: WebSocket):
+        nonlocal websocket_clients
         await websocket.accept()
+        websocket_clients += 1
         previous = None
         try:
             while True:
@@ -345,5 +372,17 @@ def create_session_app(
                 await asyncio.sleep(0.25)
         except (WebSocketDisconnect, RuntimeError):
             return
+        finally:
+            websocket_clients = max(0, websocket_clients - 1)
+            if websocket_clients == 0:
+                try:
+                    checkup.browser_disconnected()
+                except Exception:
+                    pass
+                if experiment is not None:
+                    try:
+                        experiment.browser_disconnected()
+                    except Exception:
+                        pass
 
     return app

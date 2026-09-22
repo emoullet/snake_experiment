@@ -23,6 +23,8 @@ def generate_launch_description():
         DeclareLaunchArgument("stack_shutdown_timeout_sec", default_value="10.0"),
         DeclareLaunchArgument("rosbag_startup_timeout_sec", default_value="5.0"),
         DeclareLaunchArgument("rosbag_shutdown_timeout_sec", default_value="10.0"),
+        DeclareLaunchArgument("go_to_timeout_sec", default_value="30.0"),
+        DeclareLaunchArgument("go_to_dwell_sec", default_value="0.5"),
     ]
     node = Node(
         package="snake_experiment_ui",
@@ -62,6 +64,8 @@ def generate_launch_description():
                 "rosbag_shutdown_timeout_sec": LaunchConfiguration(
                     "rosbag_shutdown_timeout_sec"
                 ),
+                "go_to_timeout_sec": LaunchConfiguration("go_to_timeout_sec"),
+                "go_to_dwell_sec": LaunchConfiguration("go_to_dwell_sec"),
             }
         ],
     )

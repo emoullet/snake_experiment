@@ -38,11 +38,11 @@ mode_topics:
 
 modes:
   baseline:
-    mode_request: geometric/jaco
+    mode_request: geometric/both
     mapper_modes: [b1, b2, b3]
     mapper_config: ../bringup/joystick_mapper/config/joystick_2d_baseline.yaml
   snake:
-    mode_request: geometric/snake
+    mode_request: geometric/both
     mapper_modes: [b1, b2]
     mapper_config: ../bringup/joystick_mapper/config/joystick_2d_snake.yaml
 

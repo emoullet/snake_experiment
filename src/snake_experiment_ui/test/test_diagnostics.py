@@ -47,7 +47,7 @@ def messages():
                 angular=vector(x=0.0, y=0.0, z=0.0),
             )
         ),
-        "/mode_request": SimpleNamespace(data="geometric/jaco"),
+        "/mode_request": SimpleNamespace(data="geometric/both"),
     }
 
 
@@ -87,7 +87,7 @@ class DiagnosticMonitorTest(unittest.TestCase):
             self.profile.modes["baseline"].mapper_parameters
         )
 
-    def record_passing_rates(self, mode_request="geometric/jaco"):
+    def record_passing_rates(self, mode_request="geometric/both"):
         topic_messages = messages()
         topic_messages["/mode_request"].data = mode_request
         counts = {
@@ -117,7 +117,7 @@ class DiagnosticMonitorTest(unittest.TestCase):
         self.graph["mapper_parameters"] = dict(
             self.profile.modes["snake"].mapper_parameters
         )
-        self.record_passing_rates("geometric/snake")
+        self.record_passing_rates("geometric/both")
         result = self.monitor.evaluate("snake")
         self.assertTrue(result["passed"])
         mapper_check = next(

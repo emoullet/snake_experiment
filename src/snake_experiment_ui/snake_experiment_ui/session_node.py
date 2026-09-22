@@ -21,6 +21,7 @@ from .checkup import CheckupController
 from .diagnostics import DiagnosticMonitor, DiagnosticProfile, collect_git_provenance
 from .enrollment import EnrollmentController
 from .experiment import ExperimentController, ExperimentProfile
+from .go_to import GoToController
 from .mode_manager import ModeManager
 from .rosbag_manager import RosbagManager
 from .session_web_app import create_session_app
@@ -47,6 +48,8 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("stack_shutdown_timeout_sec", 10.0)
         self.declare_parameter("rosbag_startup_timeout_sec", 5.0)
         self.declare_parameter("rosbag_shutdown_timeout_sec", 10.0)
+        self.declare_parameter("go_to_timeout_sec", 30.0)
+        self.declare_parameter("go_to_dwell_sec", 0.5)
 
         share = Path(get_package_share_directory("snake_experiment_ui"))
         configured_profile = str(self.get_parameter("diagnostic_profile").value)
@@ -82,6 +85,9 @@ class SessionInterfaceNode(Node):
         self._mapper_client_reset_requested = threading.Event()
 
         self._mode_publisher = self.create_publisher(String, "/mode_request", 10)
+        self._pose_target_publisher = self.create_publisher(
+            PoseStamped, "/pose_target", 10
+        )
         self._active_mode_request = None
         self._mode_manager = ModeManager(
             node_names=self._node_names,
@@ -115,6 +121,15 @@ class SessionInterfaceNode(Node):
             ),
         )
         self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
+        go_to_options = {
+            "publish_target": self._publish_pose_target,
+            "publish_passthrough": self._publish_passthrough,
+            "preflight": self._go_to_preflight,
+            "timeout_sec": float(self.get_parameter("go_to_timeout_sec").value),
+            "dwell_sec": float(self.get_parameter("go_to_dwell_sec").value),
+        }
+        self._checkup_go_to = GoToController(**go_to_options)
+        self._experiment_go_to = GoToController(**go_to_options)
 
         self._subscriptions = [
             self.create_subscription(
@@ -169,6 +184,12 @@ class SessionInterfaceNode(Node):
         self._service_timer = self.create_timer(1.0, self._refresh_services)
         self._mode_refresh_timer = self.create_timer(1.0, self._refresh_mode_request)
 
+        configured_calibration = str(self.get_parameter("calibration_file").value)
+        calibration_file = (
+            Path(configured_calibration)
+            if configured_calibration
+            else Path.cwd() / "calibrations/latest_calib.json"
+        )
         self._checkup = CheckupController(
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
@@ -176,15 +197,11 @@ class SessionInterfaceNode(Node):
             provenance_provider=lambda: collect_git_provenance(self._repository_root),
             use_simulation=use_simulation,
             ros_distro=os.environ.get("ROS_DISTRO", "unknown"),
+            go_to_controller=self._checkup_go_to,
+            calibration_file=calibration_file,
         )
         configured_sessions_root = str(self.get_parameter("sessions_root").value)
         sessions_root = Path(configured_sessions_root) if configured_sessions_root else Path.cwd()
-        configured_calibration = str(self.get_parameter("calibration_file").value)
-        calibration_file = (
-            Path(configured_calibration)
-            if configured_calibration
-            else Path.cwd() / "calibrations/latest_calib.json"
-        )
         configured_experiment = str(self.get_parameter("experiment_profile").value)
         experiment_profile_path = (
             Path(configured_experiment)
@@ -197,6 +214,7 @@ class SessionInterfaceNode(Node):
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
             rosbag_manager=self._rosbag_manager,
+            go_to_controller=self._experiment_go_to,
         )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
@@ -235,6 +253,9 @@ class SessionInterfaceNode(Node):
 
     def _record_ee_pose(self, message: PoseStamped) -> None:
         self._diagnostics.record("/ee_pose", message)
+        checkup = getattr(self, "_checkup", None)
+        if checkup is not None:
+            checkup.update_ee_pose(message)
         experiment = getattr(self, "_experiment", None)
         if experiment is not None:
             experiment.update_ee_pose(message)
@@ -388,6 +409,33 @@ class SessionInterfaceNode(Node):
         message.data = request
         self._mode_publisher.publish(message)
         self.get_logger().info(f"Published control mode request: {request}")
+
+    def _publish_pose_target(self, pose: dict) -> None:
+        message = PoseStamped()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = pose["frame_id"]
+        for key in ("x", "y", "z"):
+            setattr(message.pose.position, key, float(pose["position"][key]))
+        for key in ("x", "y", "z", "w"):
+            setattr(message.pose.orientation, key, float(pose["orientation"][key]))
+        self._pose_target_publisher.publish(message)
+        self.get_logger().info("Published Cartesian pose target")
+
+    def _publish_passthrough(self) -> None:
+        message = String()
+        message.data = "behaviour/passthrough"
+        self._mode_publisher.publish(message)
+        self.get_logger().info("Cancelled Cartesian pose behaviour")
+
+    def _go_to_preflight(self):
+        graph = self._graph_snapshot()
+        nodes = {"/" + str(name).strip("/") for name in graph.get("nodes", [])}
+        if "/cartesian_manager" not in nodes:
+            return "The /cartesian_manager node is not available."
+        topic_types = graph.get("topics", {}).get("/pose_target", [])
+        if "geometry_msgs/msg/PoseStamped" not in topic_types:
+            return "The /pose_target PoseStamped topic is not available."
+        return None
 
     def _refresh_mode_request(self) -> None:
         if self._active_mode_request is None or self._mode_manager.active_mode() is None:

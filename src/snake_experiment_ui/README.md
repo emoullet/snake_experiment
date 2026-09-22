@@ -99,8 +99,16 @@ different terminal or interface.
 The check-up requires both Baseline and Snake in either order. It verifies the
 ROS graph, active controllers, topic types and rates, message validity, mapper
 parameters, joystick activity, and an operator confirmation. Baseline loads
-`b1`, `b2`, and `b3`; Snake loads only `b1` and `b2`. The current go-to controls
-are shown as unavailable and do not block validation.
+`b1`, `b2`, and `b3`; Snake loads only `b1` and `b2`.
+
+Panel B also requires one successful Cartesian motion to each of `target_1`,
+`target_2`, `target_3`, and `starting_point`. The interface freezes and hashes
+the global `calibration_file` when the stack first starts, asks for confirmation
+before every motion, and exposes a permanent emergency `Stop motion` action.
+Validation remains blocked until all four poses have been reached within 5 mm
+and 5 degrees for 0.5 seconds. A motion is cancelled after 30 seconds, when the
+stack stops, or when the last browser disconnects. Every attempt is retained in
+the in-memory Panel B report.
 
 Diagnostic expectations live in `config/system_checkup.yaml`. Commit
 constraints are optional: Git provenance is always recorded, while a mismatch
@@ -129,6 +137,8 @@ and marks it as the active report.
 | `stack_shutdown_timeout_sec` | `10.0` | Stack shutdown timeout. |
 | `rosbag_startup_timeout_sec` | `5.0` | Recorder startup timeout. |
 | `rosbag_shutdown_timeout_sec` | `10.0` | Recorder shutdown timeout. |
+| `go_to_timeout_sec` | `30.0` | Maximum duration of a Cartesian motion. |
+| `go_to_dwell_sec` | `0.5` | Continuous time required inside the pose tolerances. |
 
 ## Panel C: enrolment and session resume
 
@@ -198,8 +208,13 @@ continue with a recorded protocol deviation. Informational incidents may be
 added without invalidating an attempt.
 
 The packaged 5 mm and 5 degree thresholds are explicitly provisional
-development values. Automatic Go-to controls remain visible but disabled until
-a dedicated and validated ROS motion interface is available.
+development values. The Go-to controls command `target_out_1`, `target_out_2`,
+or `target_out_3` from the participant's snapshotted calibration. Before a
+motion, the interface asks for confirmation, stops the current mapper, and
+publishes the requested pose to `/pose_target`. The same mapper is restored
+after arrival, an operator stop, a timeout, or an error. A Go-to is unavailable
+while an MCAP acquisition is active and is cancelled when the last browser
+disconnects. All outcomes are persisted in the block history.
 
 ## Panel G: official recordings
 
@@ -213,6 +228,20 @@ stored below it as a new `attempt_###`. The mapper and stack remain active betwe
 trials. Completing the final recording block stops both owned processes and marks
 the six-block sequence complete. Questionnaires, pause timing, and final manifest
 locking remain outside this lot.
+
+Panel G exposes the same confirmed Go-to, Stop motion, mapper suspension, timeout,
+disconnect cancellation, and persistent motion history as Panel F.
+
+## Cartesian Go-to API
+
+Panel B exposes `POST /api/checkup/go-to` and
+`POST /api/checkup/go-to/stop`. Panels F and G expose
+`POST /api/experiment/blocks/{block_id}/go-to` and
+`POST /api/experiment/blocks/{block_id}/go-to/stop`. The live HTTP and WebSocket
+state includes the current motion, terminal result, available targets, and full
+history. The Cartesian manager is configured for 0.10 m/s linear and 0.20 rad/s
+angular maximum velocity, unit proportional gains, and 5 mm / 5 degree
+tolerances.
 
 ## JSON contract
 

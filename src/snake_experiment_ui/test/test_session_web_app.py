@@ -48,6 +48,17 @@ class FakeCheckup:
         self.workflow = "idle"
         return self.snapshot()
 
+    def start_go_to(self, pose_id):
+        self.confirmations.append(("go_to", pose_id))
+        return self.snapshot()
+
+    def stop_go_to(self):
+        self.confirmations.append(("go_to", "stop"))
+        return self.snapshot()
+
+    def browser_disconnected(self):
+        pass
+
 
 class FakeEnrollment:
     def __init__(self):
@@ -121,6 +132,15 @@ class FakeExperiment:
 
     def restart_stack(self, block_id):
         self.calls.append(("restart", block_id))
+
+    def start_go_to(self, block_id, pose_id):
+        self.calls.append(("go_to", block_id, pose_id))
+
+    def stop_go_to(self, block_id):
+        self.calls.append(("go_to_stop", block_id))
+
+    def browser_disconnected(self):
+        pass
 
     def prepare_training_trial(self, block_id):
         self.calls.append(("training_prepare", block_id))
@@ -206,6 +226,17 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request("GET", "/api/session/browse")
         self.assertEqual(response.status_code, 409)
 
+    async def test_checkup_go_to_routes(self):
+        response = await self.request(
+            "POST", "/api/checkup/go-to", json={"pose_id": "target_1"}
+        )
+        self.assertEqual(response.status_code, 200)
+        response = await self.request("POST", "/api/checkup/go-to/stop")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.checkup.confirmations,
+            [("go_to", "target_1"), ("go_to", "stop")],
+        )
     async def test_panel_c_routes_and_transition_to_d(self):
         self.checkup.workflow = "validated"
         response = await self.request("GET", "/api/session/browse")
@@ -296,6 +327,25 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_experiment_go_to_routes(self):
+        self.checkup.workflow = "validated"
+        self.enrollment.panel = "D"
+        block = "mode_1_training"
+        response = await self.request(
+            "POST",
+            f"/api/experiment/blocks/{block}/go-to",
+            json={"pose_id": "target_out_1"},
+        )
+        self.assertEqual(response.status_code, 200)
+        response = await self.request(
+            "POST", f"/api/experiment/blocks/{block}/go-to/stop"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.experiment.calls,
+            [("go_to", block, "target_out_1"), ("go_to_stop", block)],
+        )
+
     async def test_recording_routes(self):
         self.checkup.workflow = "validated"
         self.enrollment.panel = "D"
@@ -365,6 +415,9 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("data-restart-stack", script)
         self.assertIn("data-trial-action", script)
         self.assertIn("data-trial-incident-form", script)
+        self.assertIn("data-checkup-go-to", html)
+        self.assertIn("data-block-go-to", script)
+        self.assertIn("Stop motion", script)
         self.assertIn("renderRecording", script)
         self.assertIn("End recordings", script)
         self.assertIn("Continue with deviation", script)

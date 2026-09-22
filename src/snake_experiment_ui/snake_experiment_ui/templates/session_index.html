@@ -87,13 +87,16 @@
         <section class="card" aria-labelledby="goto-heading">
           <div class="section-heading">
             <div><p class="step-number">03</p><h2 id="goto-heading">Go-to verification</h2></div>
-            <span class="pill pill--warning">Not available · non-blocking</span>
+            <span id="goto-status" class="pill pill--neutral">Four poses required</span>
           </div>
-          <p class="supporting-copy">These robot functions are not implemented yet. The omission will be recorded in the check-up report.</p>
+          <p id="goto-help" class="supporting-copy">The four calibrated poses must be reached before validation.</p>
           <div class="goto-grid">
-            <button disabled>Go to target 1</button><button disabled>Go to target 2</button>
-            <button disabled>Go to target 3</button><button disabled>Go to starting point</button>
+            <button class="secondary-button" data-checkup-go-to="target_1" type="button">Go to target 1</button>
+            <button class="secondary-button" data-checkup-go-to="target_2" type="button">Go to target 2</button>
+            <button class="secondary-button" data-checkup-go-to="target_3" type="button">Go to target 3</button>
+            <button class="secondary-button" data-checkup-go-to="starting_point" type="button">Go to starting point</button>
           </div>
+          <button id="checkup-stop-motion" class="reject-button" data-checkup-go-to-stop type="button" hidden>Stop motion</button>
         </section>
 
         <section class="validation-card">

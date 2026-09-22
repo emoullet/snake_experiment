@@ -33,6 +33,14 @@ class SessionInterface {
           accepted: confirm.dataset.accepted === "true",
         });
       }
+      const checkupGoTo = event.target.closest("[data-checkup-go-to]");
+      if (checkupGoTo) {
+        if (!window.confirm(`Move the robot to ${checkupGoTo.dataset.checkupGoTo.replaceAll("_", " ")}?`)) return;
+        return this.post("/api/checkup/go-to", { pose_id: checkupGoTo.dataset.checkupGoTo });
+      }
+      if (event.target.closest("[data-checkup-go-to-stop]")) {
+        return this.post("/api/checkup/go-to/stop");
+      }
       const folder = event.target.closest("[data-folder-path]");
       if (folder) return this.browse(folder.dataset.folderPath);
       const resume = event.target.closest("[data-resume]");
@@ -67,6 +75,16 @@ class SessionInterface {
       if (restart) {
         if (!window.confirm("Restart the experiment stack and restore the current control state?")) return;
         return this.post(`/api/experiment/blocks/${restart.dataset.restartStack}/restart-stack`);
+      }
+      const blockGoTo = event.target.closest("[data-block-go-to]");
+      if (blockGoTo) {
+        const poseId = blockGoTo.dataset.blockGoTo;
+        if (!window.confirm(`Suspend manual control and move the robot to ${poseId.replaceAll("_", " ")}?`)) return;
+        return this.post(`/api/experiment/blocks/${blockGoTo.dataset.blockId}/go-to`, { pose_id: poseId });
+      }
+      const blockGoToStop = event.target.closest("[data-block-go-to-stop]");
+      if (blockGoToStop) {
+        return this.post(`/api/experiment/blocks/${blockGoToStop.dataset.blockId}/go-to/stop`);
       }
       const trialAction = event.target.closest("[data-trial-action]");
       if (trialAction) {
@@ -293,10 +311,32 @@ class SessionInterface {
     document.getElementById("stack-help").textContent = `${stack.use_simulation ? "Simulation" : "Hardware"} profile · launch ownership remains with this interface.`;
 
     for (const mode of ["baseline", "snake"]) this.renderMode(mode);
+    const goTo = this.state.go_to || {};
+    const goToMotion = goTo.motion?.current;
+    const goToActive = !!goTo.motion?.active;
+    const goToResults = goTo.results || {};
+    const completedGoTo = Object.values(goToResults).filter(Boolean).length;
+    const goToPill = document.getElementById("goto-status");
+    goToPill.textContent = goToActive
+      ? `${this.title(goToMotion?.status)} · ${this.title(goToMotion?.pose_id)}`
+      : `${completedGoTo}/4 poses reached`;
+    goToPill.className = `pill ${completedGoTo === 4 ? "pill--active" : goToActive ? "pill--warning" : "pill--neutral"}`;
+    document.getElementById("goto-help").textContent = goToMotion?.error
+      ? goToMotion.error
+      : goToActive
+        ? `Linear error: ${goToMotion.linear_error_mm === null ? "—" : Number(goToMotion.linear_error_mm).toFixed(1) + " mm"} · Angular error: ${goToMotion.angular_error_deg === null ? "—" : Number(goToMotion.angular_error_deg).toFixed(1) + "°"}`
+        : "The four calibrated poses must be reached before validation.";
+    document.querySelectorAll("[data-checkup-go-to]").forEach((button) => {
+      button.disabled = this.busy || !goTo.available || goToActive;
+      button.classList.toggle("confirm-button", !!goToResults[button.dataset.checkupGoTo]);
+    });
+    const stopMotion = document.getElementById("checkup-stop-motion");
+    stopMotion.hidden = !goToActive;
+    stopMotion.disabled = this.busy || !goToActive;
     document.getElementById("validate-button").disabled = this.busy || !this.state.can_validate;
     document.getElementById("validation-help").textContent = this.state.can_validate
       ? "Both modes passed. Validation will stop the stack and continue to Panel C."
-      : "Both modes must pass before validation.";
+      : "Both modes and all four Go-to checks must pass before validation.";
     document.getElementById("reset-button").disabled = this.busy;
     const error = document.getElementById("global-error");
     error.hidden = !this.state.error;
@@ -479,7 +519,7 @@ class SessionInterface {
         ${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Timestamped incidents</h2></div></div><form class="incident-form" data-trial-incident-form data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}"><textarea maxlength="2000" placeholder="Describe the issue observed during this attempt" ${recording ? "" : "disabled"}></textarea><button class="secondary-button" type="submit" ${this.busy || !recording ? "disabled" : ""}>Signal trial issue</button></form>${incidentRows}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Protocol progress</p><h2>${title} trials</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--neutral"}">${completed}/${trials.length}</span></div><div class="segment-list">${trialRows}</div></section>
-      <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Automatic positioning unavailable</h2></div></div><div class="go-to-grid">${[1, 2, 3].map((target) => `<button class="secondary-button" type="button" disabled>Go to target ${target}</button>`).join("")}<button class="secondary-button" type="button" disabled>Go to starting point</button></div></section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Calibrated start positioning</h2></div><span class="pill ${experiment.go_to?.motion?.active ? "pill--warning" : "pill--neutral"}">${experiment.go_to?.motion?.active ? this.escape(this.title(experiment.go_to.motion.current?.status)) : "Ready"}</span></div><p class="supporting-copy">Manual control is suspended during motion and restored afterwards. Target buttons use the calibrated target_out poses.</p><div class="go-to-grid">${[1, 2, 3].map((target) => `<button class="secondary-button" data-block-go-to="target_out_${target}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to target ${target}</button>`).join("")}<button class="secondary-button" data-block-go-to="starting_point" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to starting point</button></div>${experiment.go_to?.motion?.active ? `<button class="reject-button" data-block-go-to-stop data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop motion</button>` : ""}</section>
       <section class="validation-card"><div><p class="step-number">Complete ${phase}</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">Every trial must succeed or be explicitly accepted with a deviation.</p></div><div class="validation-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${phase}" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>${phase === "recording" ? "End recordings" : "End training"}</button></div></section>`;
   }
 

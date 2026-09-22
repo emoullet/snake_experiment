@@ -11,6 +11,7 @@ from snake_experiment_ui.experiment import (
     ExperimentError,
     ExperimentProfile,
 )
+from snake_experiment_ui.go_to import GoToController
 
 
 class FakeStack:
@@ -149,6 +150,11 @@ class ExperimentControllerTest(unittest.TestCase):
                 for name in (f"target_{index}", f"target_out_{index}")
             },
         }
+        self.calibration["poses"]["starting_point"] = {
+            "frame_id": "base_link",
+            "position": {"x": 0.0, "y": 0.0, "z": 0.4},
+            "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+        }
         (calibration_folder / "latest_calib.json").write_text(
             json.dumps(self.calibration), encoding="utf-8"
         )
@@ -158,6 +164,14 @@ class ExperimentControllerTest(unittest.TestCase):
         self.rosbag = FakeRosbag()
         self.clock_tick = 0
         self.monotonic_value = 10.0
+        self.pose_targets = []
+        self.passthrough_requests = 0
+        self.go_to = GoToController(
+            publish_target=self.pose_targets.append,
+            publish_passthrough=self.record_passthrough,
+            monotonic_clock=lambda: self.monotonic_value,
+            utc_clock=self.clock,
+        )
         self.controller = ExperimentController(
             ExperimentProfile(self.source_profile),
             self.stack,
@@ -166,6 +180,7 @@ class ExperimentControllerTest(unittest.TestCase):
             utc_clock=self.clock,
             monotonic_clock=lambda: self.monotonic_value,
             thread_factory=ImmediateThread,
+            go_to_controller=self.go_to,
         )
         self.participant = {
             "pseudonym": "A1B2C3",
@@ -179,6 +194,9 @@ class ExperimentControllerTest(unittest.TestCase):
     def clock(self):
         self.clock_tick += 1
         return f"2026-09-16T10:00:{self.clock_tick:02d}Z"
+
+    def record_passthrough(self):
+        self.passthrough_requests += 1
 
     def pose(self, name):
         return self.calibration["poses"][name]
@@ -394,6 +412,44 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.update_ee_pose(self.pose("target_out_1"))
         state = self.controller.training_participant_ready("mode_1_training")
         self.assertEqual(state["training"]["workflow"], "ready")
+
+    def test_training_go_to_suspends_and_restores_mapper(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        state = self.controller.start_go_to(
+            "mode_1_training", "target_out_1"
+        )
+        self.assertTrue(state["go_to"]["motion"]["active"])
+        self.assertIsNone(self.modes.active)
+        with self.assertRaisesRegex(ExperimentError, "active Go-to"):
+            self.controller.prepare_training_trial("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        state = self.controller.snapshot()
+        self.assertFalse(state["go_to"]["motion"]["active"])
+        self.assertEqual(state["go_to"]["history"][0]["status"], "succeeded")
+        self.assertEqual(self.modes.active, "snake")
+        self.assertEqual(self.passthrough_requests, 1)
+        progress = json.loads(
+            (self.participant_folder / "experiment_progress.json").read_text()
+        )
+        self.assertEqual(progress["blocks"][2]["go_to_history"][0]["status"], "succeeded")
+
+    def test_training_go_to_is_blocked_during_recording(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        block_id = "mode_1_training"
+        self.controller.start(block_id)
+        self.controller.prepare_training_trial(block_id)
+        self.controller.update_ee_pose(self.pose("target_out_1"))
+        self.controller.training_participant_ready(block_id)
+        self.controller.start_training_attempt(block_id)
+        with self.assertRaisesRegex(ExperimentError, "MCAP"):
+            self.controller.start_go_to(block_id, "target_out_1")
 
     def test_training_success_stops_recorder_after_stable_pose(self):
         self.controller.prepare(self.participant)
