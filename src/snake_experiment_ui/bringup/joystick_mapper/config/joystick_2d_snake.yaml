@@ -5,6 +5,8 @@ joystick_mapper:
     mode_request_topic: /mode_request
     deadzone: 0.2
     debug: false
+    snake_button_index: 0
+    snake_button_mode: hold
     local_mode_button_index: 1
     local_mode_button_mode: toggle
     modes:
@@ -27,9 +29,3 @@ joystick_mapper:
           angular_x: {index: -1, scale: 1.0}
           angular_y: {index: -1, scale: 1.0}
           angular_z: {index: 1, scale: 1.0}
-    jaco_button_index: 11
-    jaco_button_mode: toggle
-    snake_button_index: 10
-    snake_button_mode: hold
-    home_button_index: 4
-    home_button_mode: hold
