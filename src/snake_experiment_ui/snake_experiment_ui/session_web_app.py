@@ -21,6 +21,22 @@ from .stack_manager import StackError
 from .training import TrainingError
 
 
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Serve operator assets without retaining stale mixed UI versions."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.update(NO_CACHE_HEADERS)
+        return response
+
+
 class Confirmation(BaseModel):
     accepted: bool
 
@@ -77,9 +93,10 @@ def create_session_app(
     """Create the Panel B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
     websocket_clients = 0
+
     app.mount(
         "/session-static",
-        StaticFiles(directory=static_directory, follow_symlink=True),
+        NoCacheStaticFiles(directory=static_directory, follow_symlink=True),
         name="session-static",
     )
 
@@ -102,7 +119,9 @@ def create_session_app(
 
     @app.get("/", include_in_schema=False)
     async def session_interface():
-        return FileResponse(template_directory / "session_index.html")
+        return FileResponse(
+            template_directory / "session_index.html", headers=NO_CACHE_HEADERS
+        )
 
     @app.get("/api/state")
     async def state():

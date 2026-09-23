@@ -327,8 +327,33 @@ class SessionInterface {
         ? `Linear error: ${goToMotion.linear_error_mm === null ? "—" : Number(goToMotion.linear_error_mm).toFixed(1) + " mm"} · Angular error: ${goToMotion.angular_error_deg === null ? "—" : Number(goToMotion.angular_error_deg).toFixed(1) + "°"}`
         : "The four calibrated poses must be reached before validation.";
     document.querySelectorAll("[data-checkup-go-to]").forEach((button) => {
+      const succeeded = !!goToResults[button.dataset.checkupGoTo];
+      const latestAttempt = [...(goTo.history || [])]
+        .reverse()
+        .find((attempt) => attempt.pose_id === button.dataset.checkupGoTo);
+      const timedOut = !succeeded && latestAttempt?.status === "timed_out";
+      const label = button.dataset.checkupGoTo === "starting_point"
+        ? "Go to starting point"
+        : `Go to target ${button.dataset.checkupGoTo.replace("target_", "")}`;
+      const reachedLabel = button.dataset.checkupGoTo === "starting_point"
+        ? "starting point reached"
+        : `target ${button.dataset.checkupGoTo.replace("target_", "")} reached`;
       button.disabled = this.busy || !goTo.available || goToActive;
-      button.classList.toggle("confirm-button", !!goToResults[button.dataset.checkupGoTo]);
+      button.classList.toggle("is-complete", succeeded);
+      button.classList.toggle("is-timed-out", timedOut);
+      button.textContent = succeeded
+        ? reachedLabel
+        : timedOut
+          ? `! ${label} · timeout`
+          : label;
+      button.setAttribute(
+        "aria-label",
+        succeeded
+          ? `${label}, successfully reached`
+          : timedOut
+            ? `${label}, not reached before timeout`
+            : label,
+      );
     });
     const stopMotion = document.getElementById("checkup-stop-motion");
     stopMotion.hidden = !goToActive;

@@ -84,6 +84,11 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
 .confirmation span { color: var(--muted); font-size: .8rem; }
 .goto-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 18px; }
 .goto-grid button { padding: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; background: #f4f6f8; }
+.goto-grid button.is-complete { color: white; border-color: var(--green); background: var(--green); box-shadow: 0 8px 20px rgb(22 131 91 / 18%); }
+.goto-grid button.is-complete:hover:not(:disabled) { background: #106d4a; }
+.goto-grid button.is-timed-out { color: #7a4300; border-color: #e5a446; background: var(--amber-soft); box-shadow: 0 8px 20px rgb(166 95 0 / 14%); }
+.goto-grid button.is-timed-out:hover:not(:disabled) { background: #ffe8b8; }
+.goto-grid button.is-complete:disabled, .goto-grid button.is-timed-out:disabled { opacity: 1; }
 .validation-card { margin-top: 18px; border-color: #bfd3ee; }
 .validation-actions { gap: 10px; }
 .inline-error { margin: 18px 0 0; padding: 12px 14px; color: var(--red); border-radius: 10px; background: var(--red-soft); }

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Snake experiment · Session</title>
-    <link rel="stylesheet" href="/session-static/session_style.css" />
+    <link rel="stylesheet" href="/session-static/session_style.css?v=goto-status-2" />
   </head>
   <body>
     <main class="workspace">
@@ -91,10 +91,10 @@
           </div>
           <p id="goto-help" class="supporting-copy">The four calibrated poses must be reached before validation.</p>
           <div class="goto-grid">
+            <button class="secondary-button" data-checkup-go-to="starting_point" type="button">Go to starting point</button>
             <button class="secondary-button" data-checkup-go-to="target_1" type="button">Go to target 1</button>
             <button class="secondary-button" data-checkup-go-to="target_2" type="button">Go to target 2</button>
             <button class="secondary-button" data-checkup-go-to="target_3" type="button">Go to target 3</button>
-            <button class="secondary-button" data-checkup-go-to="starting_point" type="button">Go to starting point</button>
           </div>
           <button id="checkup-stop-motion" class="reject-button" data-checkup-go-to-stop type="button" hidden>Stop motion</button>
         </section>
@@ -179,6 +179,6 @@
       </section>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/session-static/session_app.js"></script>
+    <script src="/session-static/session_app.js?v=goto-status-2"></script>
   </body>
 </html>

@@ -422,6 +422,36 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("End recordings", script)
         self.assertIn("Continue with deviation", script)
 
+    def test_successful_checkup_go_to_has_explicit_visual_feedback(self):
+        package_root = Path(__file__).resolve().parents[1]
+        html = (package_root / "snake_experiment_ui/templates/session_index.html").read_text(
+            encoding="utf-8"
+        )
+        script = (package_root / "snake_experiment_ui/static/session_app.js").read_text(
+            encoding="utf-8"
+        )
+        style = (package_root / "snake_experiment_ui/static/session_style.css").read_text(
+            encoding="utf-8"
+        )
+        web_app = (package_root / "snake_experiment_ui/session_web_app.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('button.classList.toggle("is-complete", succeeded)', script)
+        self.assertIn('button.classList.toggle("is-timed-out", timedOut)', script)
+        self.assertIn('"starting point reached"', script)
+        self.assertIn("target ${button.dataset.checkupGoTo.replace", script)
+        self.assertIn("successfully reached", script)
+        self.assertIn(".goto-grid button.is-complete", style)
+        self.assertIn(".goto-grid button.is-timed-out", style)
+        self.assertIn("session_style.css?v=goto-status-2", html)
+        self.assertIn("session_app.js?v=goto-status-2", html)
+        self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
+        self.assertIn("NoCacheStaticFiles", web_app)
+        self.assertLess(
+            html.index('data-checkup-go-to="starting_point"'),
+            html.index('data-checkup-go-to="target_1"'),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
