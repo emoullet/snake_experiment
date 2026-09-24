@@ -99,9 +99,9 @@ cartesian_manager:
           - 1.2
           - -0.5
       pose_targets:
-        linear_kp: 15.0
+        linear_kp: 25.0
         angular_kp: 1.0
-        max_linear_velocity: 0.1
+        max_linear_velocity: 0.4
         max_angular_velocity: 0.2
         position_tolerance: 0.005
         orientation_tolerance: 0.08726646259971647

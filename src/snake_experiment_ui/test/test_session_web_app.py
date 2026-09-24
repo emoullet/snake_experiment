@@ -443,14 +443,44 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("successfully reached", script)
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
-        self.assertIn("session_style.css?v=goto-status-2", html)
-        self.assertIn("session_app.js?v=goto-status-2", html)
+        self.assertIn("session_style.css?v=trial-layout-1", html)
+        self.assertIn("session_app.js?v=trial-layout-1", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(
             html.index('data-checkup-go-to="starting_point"'),
             html.index('data-checkup-go-to="target_1"'),
         )
+
+    def test_trial_panels_use_sticky_two_column_layout_and_starting_point_first(self):
+        package_root = Path(__file__).parents[1] / "snake_experiment_ui"
+        script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
+        style = (package_root / "static/session_style.css").read_text(encoding="utf-8")
+        trial_render = script[
+            script.index("  renderTrialPanel(") : script.index("\n  title(value)")
+        ]
+        self.assertIn('class="trial-workspace"', trial_render)
+        self.assertIn('class="trial-main-column"', trial_render)
+        self.assertIn('class="card trial-progress-card"', trial_render)
+        self.assertLess(
+            trial_render.index("Development configuration"),
+            trial_render.index("Current trial"),
+        )
+        self.assertLess(
+            trial_render.index("Current trial"),
+            trial_render.index("Calibrated start positioning"),
+        )
+        self.assertLess(
+            trial_render.index("Calibrated start positioning"),
+            trial_render.index("Timestamped incidents"),
+        )
+        self.assertLess(
+            trial_render.index('data-block-go-to="starting_point"'),
+            trial_render.index('data-block-go-to="target_out_${target}"'),
+        )
+        self.assertIn(".trial-progress-card { position: sticky", style)
+        self.assertIn(".trial-progress-card .segment-list", style)
+        self.assertIn("@media (max-width: 900px)", style)
 
 
 if __name__ == "__main__":

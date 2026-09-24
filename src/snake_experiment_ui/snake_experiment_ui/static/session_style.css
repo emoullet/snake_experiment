@@ -147,6 +147,11 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
 .segment-entry { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 11px; background: #fbfdff; }
 .segment-entry div { display: grid; gap: 4px; }
 .segment-entry span:not(.pill) { color: var(--muted); font-size: .78rem; }
+.trial-workspace { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr); align-items: start; gap: 18px; }
+.trial-main-column { min-width: 0; }
+.trial-progress-card { position: sticky; top: 18px; display: flex; min-width: 0; max-height: calc(100vh - 36px); flex-direction: column; overflow: hidden; }
+.trial-progress-card .section-heading { flex: 0 0 auto; }
+.trial-progress-card .segment-list { min-height: 0; padding-right: 4px; overflow-y: auto; scrollbar-gutter: stable; }
 .training-actions, .go-to-grid, .incident-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 18px; }
 .training-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 18px 0; }
 .training-metrics article { padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: #f7f9fc; }
@@ -169,6 +174,12 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
 .toast { position: fixed; right: 24px; bottom: 24px; max-width: 420px; padding: 13px 16px; color: white; font-weight: 650; border-radius: 11px; background: var(--ink); box-shadow: var(--shadow); }
 .toast--error { background: var(--red); }
 @keyframes pulse { 50% { opacity: .35; } }
+
+@media (max-width: 900px) {
+  .trial-workspace { grid-template-columns: 1fr; }
+  .trial-progress-card { position: static; max-height: none; overflow: visible; }
+  .trial-progress-card .segment-list { padding-right: 0; overflow: visible; }
+}
 
 @media (max-width: 780px) {
   .stepper { grid-template-columns: repeat(2, 1fr); }
