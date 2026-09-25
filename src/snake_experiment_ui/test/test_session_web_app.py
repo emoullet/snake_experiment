@@ -414,6 +414,11 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("data-block-control", script)
         self.assertIn("data-restart-stack", script)
         self.assertIn("data-trial-action", script)
+        self.assertIn("Prepare next trial and move to start", script)
+        self.assertIn(
+            "Prepare the next trial and move the robot to its calibrated start pose?",
+            script,
+        )
         self.assertIn("data-trial-incident-form", script)
         self.assertIn("data-checkup-go-to", html)
         self.assertIn("data-block-go-to", script)

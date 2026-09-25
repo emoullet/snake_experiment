@@ -677,11 +677,11 @@ class ExperimentController:
             return self.snapshot()
 
     def prepare_training_trial(self, block_id: str) -> dict:
-        """Select the next unresolved training trial and begin start-pose checks."""
+        """Select the next training trial and move to its calibrated start pose."""
         return self._prepare_trial(block_id, "training")
 
     def prepare_recording_trial(self, block_id: str) -> dict:
-        """Select the next unresolved recording trial and begin pose checks."""
+        """Select the next recording trial and move to its calibrated start pose."""
         return self._prepare_trial(block_id, "recording")
 
     def _prepare_trial(self, block_id: str, phase: str) -> dict:
@@ -709,7 +709,13 @@ class ExperimentController:
             block["training_live"] = self._empty_training_live()
             self._refresh_training_live(block)
             self._persist_training(folder, block, trial)
-            return self.snapshot()
+            # Preparing a trial also performs the manual repositioning step that
+            # used to follow it.  start_go_to() owns mapper suspension/restoration
+            # and records the motion in the block history.
+            return self.start_go_to(
+                block_id,
+                f"target_out_{trial['target_start']}",
+            )
 
     def training_participant_ready(self, block_id: str) -> dict:
         """Record participant readiness after a valid calibrated start pose."""
