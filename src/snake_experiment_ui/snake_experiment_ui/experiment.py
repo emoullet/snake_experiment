@@ -395,6 +395,10 @@ class ExperimentController:
                 raise ExperimentError(f"The next required block is {expected['id']}.")
             if block["status"] not in ("not_started", "interrupted", "error"):
                 raise ExperimentError(f"Block {block_id} cannot be started from {block['status']}.")
+            if block["status"] == "interrupted" and block["phase"] in TRIAL_PHASES:
+                # Recover sessions interrupted by older versions while a trial
+                # was selected but before any acquisition had started.
+                self._reset_unstarted_trial(block, folder)
             block_folder = folder / block["folder"]
             if block["status"] == "not_started" and block_folder.exists():
                 raise ExperimentError(f"Block folder already exists unexpectedly: {block['folder']}")
@@ -643,6 +647,7 @@ class ExperimentController:
                     self._stack.stop()
                 except Exception as error:
                     cleanup_errors.append(f"stack: {error}")
+                self._reset_unstarted_trial(block, folder)
             else:
                 try:
                     self._modes.deactivate(block["mode"])
@@ -1806,6 +1811,23 @@ class ExperimentController:
         trial["status"] = "pending"
         block["current_trial_id"] = None
         block["training_workflow"] = "awaiting_prepare"
+
+    def _reset_unstarted_trial(self, block: dict, folder: Path) -> bool:
+        """Requeue a selected trial when no acquisition needs resolution."""
+        if block.get("training_workflow") not in ("awaiting_start_pose", "ready"):
+            return False
+        trial_id = block.get("current_trial_id")
+        if trial_id is not None:
+            trial = self._current_training_trial(block)
+            if trial.get("status") in ("positioning", "ready"):
+                trial["status"] = "pending"
+                trial["prepared_at_utc"] = None
+                trial["ready_at_utc"] = None
+                self._write_trial(folder, block, trial)
+        block["current_trial_id"] = None
+        block["training_workflow"] = "awaiting_prepare"
+        block["training_live"] = self._empty_training_live()
+        return True
 
     def _next_block(self) -> Optional[dict]:
         if self._progress is None:

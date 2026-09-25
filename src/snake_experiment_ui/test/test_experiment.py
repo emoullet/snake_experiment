@@ -465,6 +465,46 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(state["training"]["workflow"], "recording")
         self.controller.stop_training_attempt(block_id)
 
+    def test_abort_before_recording_requeues_trial_for_resume(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        block_id = "mode_1_training"
+        self.controller.start(block_id)
+        self.controller.prepare_training_trial(block_id)
+
+        state = self.controller.abort(block_id)
+        block = state["progress"]["blocks"][2]
+        self.assertEqual(block["training_workflow"], "awaiting_prepare")
+        self.assertIsNone(block["current_trial_id"])
+        self.assertEqual(block["training_trials"][0]["status"], "pending")
+
+        state = self.controller.start(block_id)
+        self.assertEqual(state["training"]["workflow"], "awaiting_prepare")
+        resumed = self.controller.prepare_training_trial(block_id)
+        self.assertTrue(resumed["go_to"]["motion"]["active"])
+        self.assertEqual(
+            resumed["go_to"]["motion"]["current"]["pose_id"],
+            "target_out_1",
+        )
+
+    def test_abort_during_recording_preserves_required_decision(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        block_id = "mode_1_training"
+        self.controller.start(block_id)
+        self.controller.prepare_training_trial(block_id)
+        self.complete_go_to("target_out_1")
+        self.controller.start_training_attempt(block_id)
+
+        state = self.controller.abort(block_id)
+        block = state["progress"]["blocks"][2]
+        self.assertEqual(block["training_workflow"], "decision_required")
+        self.assertEqual(block["training_trials"][0]["status"], "decision_required")
+        resumed = self.controller.start(block_id)
+        self.assertEqual(resumed["training"]["workflow"], "decision_required")
+
     def test_training_go_to_is_blocked_during_recording(self):
         self.controller.prepare(self.participant)
         self.complete_discovery("mode_1_discovery")
