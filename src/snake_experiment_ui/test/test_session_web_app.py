@@ -419,6 +419,12 @@ class SessionTemplateTest(unittest.TestCase):
             "Prepare the next trial and move the robot to its calibrated start pose?",
             script,
         )
+        self.assertNotIn('data-trial-action="ready"', script)
+        self.assertIn(
+            '["awaiting_start_pose", "ready"].includes(workflow)',
+            script,
+        )
+        self.assertIn('<h2 id="participant-heading">Participant ready</h2>', html)
         self.assertIn("data-trial-incident-form", script)
         self.assertIn("data-checkup-go-to", html)
         self.assertIn("data-block-go-to", script)

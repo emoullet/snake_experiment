@@ -755,12 +755,15 @@ class ExperimentController:
             _, folder = self._require_prepared()
             block = self._trial_block(block_id, phase)
             self._require_trial_processes(block)
-            if block["training_workflow"] != "ready":
-                raise ExperimentError("Confirm participant readiness before recording.")
+            workflow = block["training_workflow"]
+            if workflow not in ("awaiting_start_pose", "ready"):
+                raise ExperimentError("Prepare a trial before recording.")
             self._refresh_training_live(block)
             if not block["training_live"].get("start_within_thresholds"):
                 raise ExperimentError("The robot left the calibrated start pose.")
             trial = self._current_training_trial(block)
+            if workflow == "awaiting_start_pose":
+                trial["ready_at_utc"] = self._utc_clock()
             attempt_number = len(trial["attempts"]) + 1
             attempt_name = block["settings"]["attempt_pattern"].format(
                 attempt=attempt_number

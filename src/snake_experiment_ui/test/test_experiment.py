@@ -221,7 +221,6 @@ class ExperimentControllerTest(unittest.TestCase):
 
     def complete_trials(self, block_id, phase):
         prepare = getattr(self.controller, f"prepare_{phase}_trial")
-        ready = getattr(self.controller, f"{phase}_participant_ready")
         start = getattr(self.controller, f"start_{phase}_attempt")
         state_key = phase
         count = len(self.controller.snapshot()[state_key]["trials"])
@@ -233,7 +232,6 @@ class ExperimentControllerTest(unittest.TestCase):
                 if trial["id"] == state[state_key]["current_trial_id"]
             )
             self.complete_go_to(f"target_out_{trial['target_start']}")
-            ready(block_id)
             start(block_id)
             self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
             self.monotonic_value += 0.6
@@ -416,13 +414,17 @@ class ExperimentControllerTest(unittest.TestCase):
             "target_out_1",
         )
         self.assertIsNone(self.modes.active)
+        with self.assertRaisesRegex(ExperimentError, "active Go-to"):
+            self.controller.start_training_attempt("mode_1_training")
         self.complete_go_to("target_out_1")
         self.controller.update_ee_pose(self.pose("target_3"))
-        with self.assertRaisesRegex(ExperimentError, "calibrated start pose"):
-            self.controller.training_participant_ready("mode_1_training")
+        with self.assertRaisesRegex(ExperimentError, "left the calibrated start pose"):
+            self.controller.start_training_attempt("mode_1_training")
         self.controller.update_ee_pose(self.pose("target_out_1"))
-        state = self.controller.training_participant_ready("mode_1_training")
-        self.assertEqual(state["training"]["workflow"], "ready")
+        state = self.controller.start_training_attempt("mode_1_training")
+        self.assertEqual(state["training"]["workflow"], "recording")
+        self.assertIsNotNone(state["training"]["current_trial"]["ready_at_utc"])
+        self.controller.stop_training_attempt("mode_1_training")
 
     def test_training_go_to_suspends_and_restores_mapper(self):
         self.controller.prepare(self.participant)
@@ -449,6 +451,20 @@ class ExperimentControllerTest(unittest.TestCase):
         )
         self.assertEqual(progress["blocks"][2]["go_to_history"][0]["status"], "succeeded")
 
+    def test_legacy_participant_ready_transition_remains_supported(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        block_id = "mode_1_training"
+        self.controller.start(block_id)
+        self.controller.prepare_training_trial(block_id)
+        self.complete_go_to("target_out_1")
+        state = self.controller.training_participant_ready(block_id)
+        self.assertEqual(state["training"]["workflow"], "ready")
+        state = self.controller.start_training_attempt(block_id)
+        self.assertEqual(state["training"]["workflow"], "recording")
+        self.controller.stop_training_attempt(block_id)
+
     def test_training_go_to_is_blocked_during_recording(self):
         self.controller.prepare(self.participant)
         self.complete_discovery("mode_1_discovery")
@@ -457,7 +473,6 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start(block_id)
         self.controller.prepare_training_trial(block_id)
         self.complete_go_to("target_out_1")
-        self.controller.training_participant_ready(block_id)
         self.controller.start_training_attempt(block_id)
         with self.assertRaisesRegex(ExperimentError, "MCAP"):
             self.controller.start_go_to(block_id, "target_out_1")
@@ -469,7 +484,6 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start("mode_1_training")
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
-        self.controller.training_participant_ready("mode_1_training")
         self.controller.start_training_attempt("mode_1_training")
         self.controller.update_ee_pose(self.pose("target_2"))
         recording_state = self.controller.snapshot()
@@ -501,7 +515,6 @@ class ExperimentControllerTest(unittest.TestCase):
         with self.assertRaisesRegex(ExperimentError, "calibrated start pose"):
             self.controller.training_participant_ready("mode_1_training")
         self.controller.update_ee_pose(self.pose("target_out_1"))
-        self.controller.training_participant_ready("mode_1_training")
         self.monotonic_value += 0.6
         with self.assertRaisesRegex(ExperimentError, "left the calibrated start pose"):
             self.controller.start_training_attempt("mode_1_training")
@@ -513,7 +526,6 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start("mode_1_training")
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
-        self.controller.training_participant_ready("mode_1_training")
         self.controller.start_training_attempt("mode_1_training")
         self.rosbag.valid = False
         self.controller.update_ee_pose(self.pose("target_2"))
@@ -533,7 +545,6 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start("mode_1_training")
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
-        self.controller.training_participant_ready("mode_1_training")
         self.controller.start_training_attempt("mode_1_training")
         self.controller.shutdown()
         progress = json.loads(
@@ -611,7 +622,6 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start("mode_1_training")
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
-        self.controller.training_participant_ready("mode_1_training")
         self.controller.start_training_attempt("mode_1_training")
         self.controller.add_training_incident("mode_1_training", "Joystick slipped")
         state = self.controller.stop_training_attempt("mode_1_training")
@@ -621,7 +631,6 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.resolve_training_attempt("mode_1_training", "retry")
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
-        self.controller.training_participant_ready("mode_1_training")
         self.controller.start_training_attempt("mode_1_training")
         self.controller.stop_training_attempt("mode_1_training")
         state = self.controller.resolve_training_attempt(
@@ -640,7 +649,6 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start("mode_1_training")
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
-        self.controller.training_participant_ready("mode_1_training")
         self.controller.start_training_attempt("mode_1_training")
         state = self.controller.restart_stack("mode_1_training")
         self.assertEqual(state["training"]["workflow"], "decision_required")
@@ -668,7 +676,6 @@ class ExperimentControllerTest(unittest.TestCase):
         block_id = "mode_1_recording"
         self.controller.prepare_recording_trial(block_id)
         self.complete_go_to("target_out_1")
-        self.controller.recording_participant_ready(block_id)
         self.controller.start_recording_attempt(block_id)
         self.controller.add_recording_incident(block_id, "Participant paused")
         stopped = self.controller.stop_recording_attempt(block_id)
@@ -677,7 +684,6 @@ class ExperimentControllerTest(unittest.TestCase):
 
         self.controller.prepare_recording_trial(block_id)
         self.complete_go_to("target_out_1")
-        self.controller.recording_participant_ready(block_id)
         self.controller.start_recording_attempt(block_id)
         self.controller.update_ee_pose(self.pose("target_2"))
         self.monotonic_value += 0.6
@@ -700,7 +706,6 @@ class ExperimentControllerTest(unittest.TestCase):
         block_id = "mode_1_recording"
         self.controller.prepare_recording_trial(block_id)
         self.complete_go_to("target_out_1")
-        self.controller.recording_participant_ready(block_id)
         self.controller.start_recording_attempt(block_id)
         state = self.controller.restart_stack(block_id)
         self.assertEqual(state["recording"]["workflow"], "decision_required")
@@ -717,7 +722,6 @@ class ExperimentControllerTest(unittest.TestCase):
         with self.assertRaisesRegex(ExperimentError, "calibrated start pose"):
             self.controller.recording_participant_ready(block_id)
         self.controller.update_ee_pose(self.pose("target_out_1"))
-        self.controller.recording_participant_ready(block_id)
         self.controller.start_recording_attempt(block_id)
         self.rosbag.valid = False
         self.controller.update_ee_pose(self.pose("target_2"))
@@ -734,7 +738,6 @@ class ExperimentControllerTest(unittest.TestCase):
         block_id = "mode_1_recording"
         self.controller.prepare_recording_trial(block_id)
         self.complete_go_to("target_out_1")
-        self.controller.recording_participant_ready(block_id)
         self.controller.start_recording_attempt(block_id)
         self.controller.shutdown()
         progress = json.loads(
