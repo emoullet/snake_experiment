@@ -7,27 +7,11 @@ class SessionInterface {
     this.reconnectDelay = 500;
     this.toastTimer = null;
     this.browser = null;
-    this.incidentDrafts = new Map();
-    this.pointerInteractionActive = false;
-    this.renderDeferred = false;
     this.bindActions();
     this.connect();
   }
 
   bindActions() {
-    const finishPointerInteraction = () => {
-      if (!this.pointerInteractionActive) return;
-      this.pointerInteractionActive = false;
-      if (!this.renderDeferred) return;
-      this.renderDeferred = false;
-      window.requestAnimationFrame(() => this.render());
-    };
-    document.addEventListener("pointerdown", () => {
-      this.pointerInteractionActive = true;
-    }, true);
-    document.addEventListener("pointerup", finishPointerInteraction, true);
-    document.addEventListener("pointercancel", finishPointerInteraction, true);
-    window.addEventListener("blur", finishPointerInteraction);
     document.addEventListener("click", async (event) => {
       const diagnosticSummary = event.target.closest(".diagnostic-list summary");
       if (diagnosticSummary) {
@@ -138,11 +122,6 @@ class SessionInterface {
         invalidates_attempt: invalidatesAttempt,
       });
     });
-    document.addEventListener("input", (event) => {
-      const input = event.target.closest("[data-incident-input]");
-      if (!input) return;
-      this.incidentDrafts.set(input.dataset.incidentKey, input.value);
-    });
     document.getElementById("validate-button").addEventListener("click", () =>
       this.post("/api/checkup/validate")
     );
@@ -232,12 +211,15 @@ class SessionInterface {
 
   renderBrowser(payload) {
     this.browser = payload;
-    document.getElementById("folder-dialog").hidden = false;
-    document.getElementById("browser-path").textContent = payload.path;
-    document.getElementById("browser-up-button").disabled = !payload.parent;
-    document.getElementById("browser-directories").innerHTML = payload.directories.length
-        ? payload.directories.map((item) => `<button class="folder-entry" data-folder-path="${this.escape(item.path)}" type="button"><span>📁</span>${this.escape(item.name)}</button>`).join("")
-        : '<p class="supporting-copy">No subfolders.</p>';
+    this.setHidden(document.getElementById("folder-dialog"), false);
+    this.setText(document.getElementById("browser-path"), payload.path);
+    this.setDisabled(document.getElementById("browser-up-button"), !payload.parent);
+    this.patchMarkup(
+      document.getElementById("browser-directories"),
+      payload.directories.length
+        ? payload.directories.map((item) => `<button class="folder-entry" data-dom-key="folder:${this.escape(item.path)}" data-folder-path="${this.escape(item.path)}" type="button"><span>📁</span>${this.escape(item.name)}</button>`).join("")
+        : '<p class="supporting-copy">No subfolders.</p>',
+    );
   }
 
   async createFolder(event) {
@@ -261,7 +243,7 @@ class SessionInterface {
   }
 
   closeBrowser() {
-    document.getElementById("folder-dialog").hidden = true;
+    this.setHidden(document.getElementById("folder-dialog"), true);
     document.getElementById("new-folder-name").value = "";
   }
 
@@ -299,27 +281,106 @@ class SessionInterface {
     this.render();
   }
 
+  setText(element, value) {
+    const next = String(value);
+    if (element.textContent !== next) element.textContent = next;
+  }
+
+  setClass(element, value) {
+    if (element.className !== value) element.className = value;
+  }
+
+  setHidden(element, value) {
+    const next = Boolean(value);
+    if (element.hidden !== next) element.hidden = next;
+  }
+
+  setDisabled(element, value) {
+    const next = Boolean(value);
+    if (element.disabled !== next) element.disabled = next;
+  }
+
+  setAttribute(element, name, value) {
+    if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+  }
+
+  domKey(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+    if (node.id) return `id:${node.id}`;
+    const key = node.getAttribute("data-dom-key");
+    return key === null ? null : `item:${key}`;
+  }
+
+  sameNodeKind(current, desired) {
+    return current.nodeType === desired.nodeType
+      && (current.nodeType !== Node.ELEMENT_NODE || current.tagName === desired.tagName);
+  }
+
+  patchElement(current, desired) {
+    if (current.nodeType === Node.TEXT_NODE) {
+      if (current.nodeValue !== desired.nodeValue) current.nodeValue = desired.nodeValue;
+      return;
+    }
+    if (current.nodeType !== Node.ELEMENT_NODE) return;
+    for (const attribute of [...current.attributes]) {
+      if (current.tagName === "DETAILS" && attribute.name === "open") continue;
+      if (!desired.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+    }
+    for (const attribute of [...desired.attributes]) {
+      if (current.tagName === "DETAILS" && attribute.name === "open") continue;
+      this.setAttribute(current, attribute.name, attribute.value);
+    }
+    // The operator owns a review field's value until the form is submitted.
+    if (current.tagName === "TEXTAREA") return;
+    this.patchChildren(current, desired);
+  }
+
+  patchChildren(parent, desiredParent) {
+    let cursor = parent.firstChild;
+    for (const desired of [...desiredParent.childNodes]) {
+      const key = this.domKey(desired);
+      const matching = key === null
+        ? (cursor && this.domKey(cursor) === null && this.sameNodeKind(cursor, desired) ? cursor : null)
+        : [...parent.childNodes].find((node) =>
+            this.domKey(node) === key && this.sameNodeKind(node, desired));
+      const current = matching || desired.cloneNode(true);
+      if (current !== cursor) parent.insertBefore(current, cursor);
+      if (matching) this.patchElement(current, desired);
+      cursor = current.nextSibling;
+    }
+    while (cursor) {
+      const next = cursor.nextSibling;
+      parent.removeChild(cursor);
+      cursor = next;
+    }
+  }
+
+  patchMarkup(container, markup, scope = null) {
+    if (scope !== null && container.dataset.renderScope !== scope) {
+      container.replaceChildren();
+      container.dataset.renderScope = scope;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    this.patchChildren(container, range.createContextualFragment(markup));
+  }
+
   renderConnection(connected) {
-    document.getElementById("connection-dot").className = `status-dot ${connected ? "status-dot--ok" : "status-dot--error"}`;
-    document.getElementById("connection-label").textContent = connected ? "Connected" : "Disconnected";
+    this.setClass(document.getElementById("connection-dot"), `status-dot ${connected ? "status-dot--ok" : "status-dot--error"}`);
+    this.setText(document.getElementById("connection-label"), connected ? "Connected" : "Disconnected");
   }
 
   render() {
     if (!this.state) return;
-    if (this.pointerInteractionActive) {
-      this.renderDeferred = true;
-      return;
-    }
-    this.renderDeferred = false;
     const currentPanel = this.state.current_panel;
     const onPanelC = currentPanel === "C";
     const onPanelD = currentPanel === "D";
     const onBlockPanel = ["E", "F", "G"].includes(currentPanel);
-    document.getElementById("panel-b").hidden = currentPanel !== "B";
-    document.getElementById("panel-c").hidden = !onPanelC;
-    document.getElementById("panel-d").hidden = !onPanelD;
+    this.setHidden(document.getElementById("panel-b"), currentPanel !== "B");
+    this.setHidden(document.getElementById("panel-c"), !onPanelC);
+    this.setHidden(document.getElementById("panel-d"), !onPanelD);
     for (const panel of ["E", "F", "G"]) {
-      document.getElementById(`panel-${panel.toLowerCase()}`).hidden = currentPanel !== panel;
+      this.setHidden(document.getElementById(`panel-${panel.toLowerCase()}`), currentPanel !== panel);
     }
     document.querySelectorAll("[data-panel-step]").forEach((step) => {
       const current = step.dataset.panelStep === currentPanel;
@@ -335,20 +396,20 @@ class SessionInterface {
 
     const workflow = this.state.workflow.replaceAll("_", " ");
     const workflowPill = document.getElementById("workflow-status");
-    workflowPill.textContent = workflow[0].toUpperCase() + workflow.slice(1);
-    workflowPill.className = `pill ${this.state.error ? "pill--error" : this.state.can_validate ? "pill--active" : "pill--neutral"}`;
+    this.setText(workflowPill, workflow[0].toUpperCase() + workflow.slice(1));
+    this.setClass(workflowPill, `pill ${this.state.error ? "pill--error" : this.state.can_validate ? "pill--active" : "pill--neutral"}`);
 
     const stack = this.state.stack;
     const stackPill = document.getElementById("stack-status");
-    stackPill.textContent = stack.status[0].toUpperCase() + stack.status.slice(1);
-    stackPill.className = `pill ${stack.status === "active" ? "pill--active" : stack.status === "error" ? "pill--error" : "pill--neutral"}`;
+    this.setText(stackPill, stack.status[0].toUpperCase() + stack.status.slice(1));
+    this.setClass(stackPill, `pill ${stack.status === "active" ? "pill--active" : stack.status === "error" ? "pill--error" : "pill--neutral"}`);
     const stackButton = document.getElementById("stack-button");
     const active = stack.status === "active";
-    stackButton.dataset.stack = active ? "stop" : "start";
-    stackButton.textContent = active ? "Stop experiment stack" : "Start experiment stack";
+    this.setAttribute(stackButton, "data-stack", active ? "stop" : "start");
+    this.setText(stackButton, active ? "Stop experiment stack" : "Start experiment stack");
     stackButton.classList.toggle("is-danger", active);
-    stackButton.disabled = this.busy || ["starting", "stopping"].includes(stack.status);
-    document.getElementById("stack-help").textContent = `${stack.use_simulation ? "Simulation" : "Hardware"} profile · launch ownership remains with this interface.`;
+    this.setDisabled(stackButton, this.busy || ["starting", "stopping"].includes(stack.status));
+    this.setText(document.getElementById("stack-help"), `${stack.use_simulation ? "Simulation" : "Hardware"} profile · launch ownership remains with this interface.`);
 
     for (const mode of ["baseline", "snake"]) this.renderMode(mode);
     const goTo = this.state.go_to || {};
@@ -357,15 +418,15 @@ class SessionInterface {
     const goToResults = goTo.results || {};
     const completedGoTo = Object.values(goToResults).filter(Boolean).length;
     const goToPill = document.getElementById("goto-status");
-    goToPill.textContent = goToActive
+    this.setText(goToPill, goToActive
       ? `${this.title(goToMotion?.status)} · ${this.title(goToMotion?.pose_id)}`
-      : `${completedGoTo}/4 poses reached`;
-    goToPill.className = `pill ${completedGoTo === 4 ? "pill--active" : goToActive ? "pill--warning" : "pill--neutral"}`;
-    document.getElementById("goto-help").textContent = goToMotion?.error
+      : `${completedGoTo}/4 poses reached`);
+    this.setClass(goToPill, `pill ${completedGoTo === 4 ? "pill--active" : goToActive ? "pill--warning" : "pill--neutral"}`);
+    this.setText(document.getElementById("goto-help"), goToMotion?.error
       ? goToMotion.error
       : goToActive
         ? `Linear error: ${goToMotion.linear_error_mm === null ? "—" : Number(goToMotion.linear_error_mm).toFixed(1) + " mm"} · Angular error: ${goToMotion.angular_error_deg === null ? "—" : Number(goToMotion.angular_error_deg).toFixed(1) + "°"}`
-        : "The four calibrated poses must be reached before validation.";
+        : "The four calibrated poses must be reached before validation.");
     document.querySelectorAll("[data-checkup-go-to]").forEach((button) => {
       const succeeded = !!goToResults[button.dataset.checkupGoTo];
       const latestAttempt = [...(goTo.history || [])]
@@ -378,15 +439,16 @@ class SessionInterface {
       const reachedLabel = button.dataset.checkupGoTo === "starting_point"
         ? "starting point reached"
         : `target ${button.dataset.checkupGoTo.replace("target_", "")} reached`;
-      button.disabled = this.busy || !goTo.available || goToActive;
+      this.setDisabled(button, this.busy || !goTo.available || goToActive);
       button.classList.toggle("is-complete", succeeded);
       button.classList.toggle("is-timed-out", timedOut);
-      button.textContent = succeeded
+      this.setText(button, succeeded
         ? reachedLabel
         : timedOut
           ? `! ${label} · timeout`
-          : label;
-      button.setAttribute(
+          : label);
+      this.setAttribute(
+        button,
         "aria-label",
         succeeded
           ? `${label}, successfully reached`
@@ -396,16 +458,16 @@ class SessionInterface {
       );
     });
     const stopMotion = document.getElementById("checkup-stop-motion");
-    stopMotion.hidden = !goToActive;
-    stopMotion.disabled = this.busy || !goToActive;
-    document.getElementById("validate-button").disabled = this.busy || !this.state.can_validate;
-    document.getElementById("validation-help").textContent = this.state.can_validate
+    this.setHidden(stopMotion, !goToActive);
+    this.setDisabled(stopMotion, this.busy || !goToActive);
+    this.setDisabled(document.getElementById("validate-button"), this.busy || !this.state.can_validate);
+    this.setText(document.getElementById("validation-help"), this.state.can_validate
       ? "Both modes passed. Validation will stop the stack and continue to Panel C."
-      : "Both modes and all four Go-to checks must pass before validation.";
-    document.getElementById("reset-button").disabled = this.busy;
+      : "Both modes and all four Go-to checks must pass before validation.");
+    this.setDisabled(document.getElementById("reset-button"), this.busy);
     const error = document.getElementById("global-error");
-    error.hidden = !this.state.error;
-    error.textContent = this.state.error || "";
+    this.setHidden(error, !this.state.error);
+    this.setText(error, this.state.error || "");
   }
 
   renderEnrollment() {
@@ -416,41 +478,41 @@ class SessionInterface {
       participant_ready: "Participant ready", launching: "Launching", error: "Error",
     };
     const pill = document.getElementById("enrollment-status");
-    pill.textContent = labels[enrollment.workflow] || enrollment.workflow;
-    pill.className = `pill ${enrollment.error ? "pill--error" : enrollment.participant ? "pill--active" : "pill--neutral"}`;
-    document.getElementById("selected-parent").textContent = enrollment.selected_parent || `Root: ${enrollment.sessions_root}`;
-    document.getElementById("change-parent-button").hidden = !enrollment.selected_parent;
-    document.getElementById("participant-selection").hidden = !enrollment.selected_parent || !!enrollment.participant;
-    document.getElementById("participant-ready").hidden = !enrollment.participant;
+    this.setText(pill, labels[enrollment.workflow] || enrollment.workflow);
+    this.setClass(pill, `pill ${enrollment.error ? "pill--error" : enrollment.participant ? "pill--active" : "pill--neutral"}`);
+    this.setText(document.getElementById("selected-parent"), enrollment.selected_parent || `Root: ${enrollment.sessions_root}`);
+    this.setHidden(document.getElementById("change-parent-button"), !enrollment.selected_parent);
+    this.setHidden(document.getElementById("participant-selection"), !enrollment.selected_parent || !!enrollment.participant);
+    this.setHidden(document.getElementById("participant-ready"), !enrollment.participant);
 
     const warnings = document.getElementById("session-warnings");
-    warnings.hidden = !enrollment.warnings.length;
-    warnings.innerHTML = enrollment.warnings.length
-      ? `<strong>Folder warnings</strong><ul>${enrollment.warnings.map((item) => `<li>${this.escape(item)}</li>`).join("")}</ul>` : "";
+    this.setHidden(warnings, !enrollment.warnings.length);
+    this.patchMarkup(warnings, enrollment.warnings.length
+      ? `<strong>Folder warnings</strong><ul>${enrollment.warnings.map((item, index) => `<li data-dom-key="warning:${index}">${this.escape(item)}</li>`).join("")}</ul>` : "");
 
     const resumeList = document.getElementById("resume-list");
-    resumeList.innerHTML = enrollment.resume_candidates.length
-      ? enrollment.resume_candidates.map((item) => `<article class="resume-entry"><div><strong>${this.escape(item.pseudonym)}</strong><span>${this.escape(item.session_date)} · ${this.escape(item.experimental_plan)}</span></div><button class="secondary-button" data-resume="${this.escape(item.pseudonym)}" type="button">Resume</button></article>`).join("")
-      : '<p class="supporting-copy">No resumable session.</p>';
+    this.patchMarkup(resumeList, enrollment.resume_candidates.length
+      ? enrollment.resume_candidates.map((item) => `<article class="resume-entry" data-dom-key="participant:${this.escape(item.pseudonym)}"><div><strong>${this.escape(item.pseudonym)}</strong><span>${this.escape(item.session_date)} · ${this.escape(item.experimental_plan)}</span></div><button class="secondary-button" data-resume="${this.escape(item.pseudonym)}" type="button">Resume</button></article>`).join("")
+      : '<p class="supporting-copy">No resumable session.</p>');
 
     const mismatch = document.getElementById("mismatch-warning");
-    mismatch.hidden = !enrollment.mismatches.length;
-    document.getElementById("mismatch-list").innerHTML = enrollment.mismatches.map((item) => `<li>${this.escape(item.path)}</li>`).join("");
+    this.setHidden(mismatch, !enrollment.mismatches.length);
+    this.patchMarkup(document.getElementById("mismatch-list"), enrollment.mismatches.map((item) => `<li data-dom-key="mismatch:${this.escape(item.path)}">${this.escape(item.path)}</li>`).join(""));
 
     if (enrollment.participant) {
       const participant = enrollment.participant;
-      document.getElementById("participant-heading").textContent = `${participant.pseudonym} is ready`;
-      document.getElementById("participant-summary").innerHTML = [
+      this.setText(document.getElementById("participant-heading"), `${participant.pseudonym} is ready`);
+      this.patchMarkup(document.getElementById("participant-summary"), [
         ["Session", participant.resumed ? "Resumed" : "New"],
         ["Plan", participant.experimental_plan], ["Handedness", participant.handedness],
         ["Started", participant.starting_time], ["Folder", participant.folder],
-      ].map(([term, value]) => `<div><dt>${this.escape(term)}</dt><dd>${this.escape(value)}</dd></div>`).join("");
+      ].map(([term, value]) => `<div data-dom-key="summary:${term}"><dt>${this.escape(term)}</dt><dd>${this.escape(value)}</dd></div>`).join(""));
     }
-    document.getElementById("launch-experiment-button").disabled = this.busy || !enrollment.can_launch;
-    document.getElementById("cancel-participant-button").disabled = this.busy;
+    this.setDisabled(document.getElementById("launch-experiment-button"), this.busy || !enrollment.can_launch);
+    this.setDisabled(document.getElementById("cancel-participant-button"), this.busy);
     const error = document.getElementById("enrollment-error");
-    error.hidden = !enrollment.error;
-    error.textContent = enrollment.error || "";
+    this.setHidden(error, !enrollment.error);
+    this.setText(error, enrollment.error || "");
   }
 
   renderExperiment() {
@@ -462,33 +524,33 @@ class SessionInterface {
       sequence_completed: "Sequence complete", starting_block: "Starting",
     };
     const status = document.getElementById("experiment-status");
-    status.textContent = statusLabels[progress.workflow] || progress.workflow.replaceAll("_", " ");
-    status.className = `pill ${progress.workflow === "sequence_completed" ? "pill--active" : ["interrupted", "error"].includes(progress.workflow) ? "pill--warning" : "pill--neutral"}`;
-    document.getElementById("experiment-plan").textContent = experiment.participant.experimental_plan.replace("->", " → ");
+    this.setText(status, statusLabels[progress.workflow] || progress.workflow.replaceAll("_", " "));
+    this.setClass(status, `pill ${progress.workflow === "sequence_completed" ? "pill--active" : ["interrupted", "error"].includes(progress.workflow) ? "pill--warning" : "pill--neutral"}`);
+    this.setText(document.getElementById("experiment-plan"), experiment.participant.experimental_plan.replace("->", " → "));
     const next = progress.blocks.find((block) => block.status !== "completed");
-    document.getElementById("block-list").innerHTML = progress.blocks.map((block) => {
+    this.patchMarkup(document.getElementById("block-list"), progress.blocks.map((block) => {
       const isNext = next?.id === block.id;
       const labels = { not_started: "Locked", starting: "Starting", running: "Running", completed: "Complete", interrupted: "Interrupted", error: "Error" };
       const pillClass = block.status === "completed" ? "pill--active" : ["interrupted", "error"].includes(block.status) ? "pill--warning" : "pill--neutral";
       const startable = isNext && ["not_started", "interrupted", "error"].includes(block.status) && progress.workflow !== "sequence_completed";
       const verb = block.status === "interrupted" ? "Resume" : block.status === "error" ? "Retry" : "Start";
-      return `<article class="block-entry${isNext ? " is-next" : ""}">
+      return `<article class="block-entry${isNext ? " is-next" : ""}" data-dom-key="block:${this.escape(block.id)}">
         <span class="block-order">${block.order}</span>
         <div class="block-copy"><strong>${this.escape(this.title(block.mode))} · ${this.escape(this.title(block.phase))}</strong><span>${this.escape(block.mode_role.replace("_", " "))} · folder ${this.escape(block.folder)}${block.attempts ? ` · ${block.attempts} attempt${block.attempts === 1 ? "" : "s"}` : ""}</span></div>
         <span class="pill ${pillClass}">${labels[block.status] || this.escape(block.status)}</span>
         <button class="secondary-button" data-block-start="${this.escape(block.id)}" type="button" ${this.busy || !startable ? "disabled" : ""}>${verb} ${this.escape(block.phase)}</button>
       </article>`;
-    }).join("");
+    }).join(""));
     const warnings = document.getElementById("experiment-warning");
-    warnings.hidden = !progress.warnings.length;
-    warnings.innerHTML = progress.warnings.length ? `<strong>Session warning</strong><ul>${progress.warnings.map((warning) => `<li>${this.escape(warning)}</li>`).join("")}</ul>` : "";
-    document.getElementById("process-summary").innerHTML = [
+    this.setHidden(warnings, !progress.warnings.length);
+    this.patchMarkup(warnings, progress.warnings.length ? `<strong>Session warning</strong><ul>${progress.warnings.map((warning, index) => `<li data-dom-key="warning:${index}">${this.escape(warning)}</li>`).join("")}</ul>` : "");
+    this.patchMarkup(document.getElementById("process-summary"), [
       ["Stack", experiment.stack.status], ["Mapper", experiment.mapper.status],
       ["Active mode", experiment.mapper.active_mode || "None"], ["Profile", experiment.profile.sha256.slice(0, 12)],
-    ].map(([term, value]) => `<div><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
+    ].map(([term, value]) => `<div data-dom-key="summary:${term}"><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join(""));
     const error = document.getElementById("experiment-error");
-    error.hidden = !experiment.error;
-    error.textContent = experiment.error || "";
+    this.setHidden(error, !experiment.error);
+    this.setText(error, experiment.error || "");
   }
 
   renderActiveBlock() {
@@ -504,11 +566,11 @@ class SessionInterface {
     const phase = this.title(block.phase);
     const settings = Object.entries(block.settings)
       .map(([key, value]) => `<div><dt>${this.escape(key.replaceAll("_", " "))}</dt><dd>${this.escape(JSON.stringify(value))}</dd></div>`).join("");
-    panel.innerHTML = `<p class="step-number">Panel ${block.panel} · ${phase}</p>
+    this.patchMarkup(panel, `<p class="step-number">Panel ${block.panel} · ${phase}</p>
       <h2>${this.escape(this.title(block.mode))} ${this.escape(block.phase)}</h2>
       <p class="supporting-copy">The experiment stack and the ${this.escape(this.title(block.mode))} mapper are active. Detailed ${this.escape(block.phase)} logic will be implemented in its dedicated lot.</p>
       <dl class="participant-summary block-metadata"><div><dt>Block</dt><dd>${this.escape(block.id)}</dd></div><div><dt>Folder</dt><dd>${this.escape(block.folder)}</dd></div><div><dt>Attempt</dt><dd>${block.attempts}</dd></div>${settings}</dl>
-      <div class="block-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${this.escape(block.phase)}" type="button" ${this.busy ? "disabled" : ""}>End ${this.escape(block.phase)}</button></div>`;
+      <div class="block-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${this.escape(block.phase)}" type="button" ${this.busy ? "disabled" : ""}>End ${this.escape(block.phase)}</button></div>`, `${experiment.participant.folder}:${block.id}`);
   }
 
   renderDiscovery(panel, block, experiment) {
@@ -520,7 +582,7 @@ class SessionInterface {
       const countText = block.settings.rosbag_topics.map((topic) => `${topic}: ${counts[topic] || 0}`).join(" · ");
       const pillClass = segment.valid ? "pill--active" : segment.status === "recording" ? "pill--warning" : "pill--error";
       const label = segment.status === "recording" ? "Recording" : segment.valid ? "Valid" : this.title(segment.status);
-      return `<article class="segment-entry"><div><strong>${this.escape(segment.name)}</strong><span>${this.escape(countText)}</span></div><span class="pill ${pillClass}">${this.escape(label)}</span></article>`;
+      return `<article class="segment-entry" data-dom-key="segment:${this.escape(segment.name)}"><div><strong>${this.escape(segment.name)}</strong><span>${this.escape(countText)}</span></div><span class="pill ${pillClass}">${this.escape(label)}</span></article>`;
     }).join("") : '<p class="supporting-copy">No recording segment yet.</p>';
     const controlActive = experiment.control_active;
     const processItems = [
@@ -528,13 +590,13 @@ class SessionInterface {
       ["Mapper", experiment.mapper.status],
       ["Recorder", recorder.status],
       ["Storage", recorder.storage || "mcap"],
-    ].map(([term, value]) => `<div><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
-    panel.className = "panel-page";
-    panel.innerHTML = `<section class="hero-card"><div><p class="step-number">Panel E · Discovery</p><h2>${this.escape(this.title(block.mode))} discovery</h2><p class="supporting-copy">Free movement without specified or validated targets.</p></div><span class="pill ${controlActive ? "pill--active" : "pill--neutral"}">${controlActive ? "Control and recording active" : "Control inactive"}</span></section>
+    ].map(([term, value]) => `<div data-dom-key="summary:${term}"><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
+    this.setClass(panel, "panel-page");
+    this.patchMarkup(panel, `<section class="hero-card"><div><p class="step-number">Panel E · Discovery</p><h2>${this.escape(this.title(block.mode))} discovery</h2><p class="supporting-copy">Free movement without specified or validated targets.</p></div><span class="pill ${controlActive ? "pill--active" : "pill--neutral"}">${controlActive ? "Control and recording active" : "Control inactive"}</span></section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Instructions</p><h2>Standardised instructions</h2></div>${instructions.placeholder ? '<span class="pill pill--warning">Placeholder</span>' : ""}</div><p class="instruction-copy">${this.escape(instructions.text || "")}</p>${instructions.placeholder ? '<p class="inline-warning">Replace this placeholder before running participant sessions.</p>' : ""}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Control</p><h2>Mode and recording</h2></div><span class="supporting-copy">${this.escape(block.folder)}</span></div><dl class="participant-summary process-summary">${processItems}</dl><div class="discovery-controls"><button class="${controlActive ? "reject-button" : "primary-button"}" data-block-control="${this.escape(block.id)}" data-active="${controlActive ? "false" : "true"}" type="button" ${this.busy ? "disabled" : ""}>${controlActive ? "Deactivate mode and recording" : "Activate mode and recording"}</button><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button></div>${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Recordings</p><h2>MCAP segments</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--warning"}">${experiment.can_end ? "Required data verified" : "Valid segment required"}</span></div><div class="segment-list">${segmentRows}</div></section>
-      <section class="validation-card"><div><p class="step-number">Complete discovery</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">At least one segment must contain messages for all three expected topics.</p></div><div class="validation-actions"><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="discovery" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>End discovery</button></div></section>`;
+      <section class="validation-card"><div><p class="step-number">Complete discovery</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">At least one segment must contain messages for all three expected topics.</p></div><div class="validation-actions"><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="discovery" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>End discovery</button></div></section>`, `${experiment.participant.folder}:${block.id}`);
   }
 
   renderTraining(panel, block, experiment) {
@@ -558,57 +620,41 @@ class SessionInterface {
     const errorValue = (error, unit) => error ? `${Number(error[unit]).toFixed(2)} ${unit.endsWith("mm") ? "mm" : "deg"}` : "—";
     const trialRows = trials.map((trial) => {
       const statusClass = trial.status === "completed" ? "pill--active" : trial.status === "completed_with_deviation" ? "pill--warning" : trial.status === "decision_required" ? "pill--error" : "pill--neutral";
-      return `<article class="segment-entry"><div><strong>Trial ${trial.id} · cycle ${trial.cycle}</strong><span>Target ${trial.target_start} → ${trial.target_end} · ${trial.attempts.length} attempt${trial.attempts.length === 1 ? "" : "s"}</span></div><span class="pill ${statusClass}">${this.escape(this.title(trial.status))}</span></article>`;
+      return `<article class="segment-entry" data-dom-key="trial:${trial.id}"><div><strong>Trial ${trial.id} · cycle ${trial.cycle}</strong><span>Target ${trial.target_start} → ${trial.target_end} · ${trial.attempts.length} attempt${trial.attempts.length === 1 ? "" : "s"}</span></div><span class="pill ${statusClass}">${this.escape(this.title(trial.status))}</span></article>`;
     }).join("");
     const incidents = currentAttempt?.incidents || [];
     const reviewRequired = workflow === "incident_review_required";
     const incidentPrefix = `${block.id}:${phase}:${current?.id || "none"}:${currentAttempt?.number || "none"}`;
-    const activeInput = document.activeElement?.closest?.("[data-incident-input]");
-    const activeIncidentKey = activeInput?.dataset.incidentKey;
-    const restoreIncidentFocus = reviewRequired
-      && activeIncidentKey?.startsWith(`${incidentPrefix}:`);
-    if (restoreIncidentFocus) {
-      this.incidentDrafts.set(activeIncidentKey, activeInput.value);
-    }
-    if (!reviewRequired) {
-      [...this.incidentDrafts.keys()]
-        .filter((key) => key.startsWith(`${incidentPrefix}:`))
-        .forEach((key) => this.incidentDrafts.delete(key));
-    }
-    const incidentSelection = restoreIncidentFocus
-      ? [activeInput.selectionStart, activeInput.selectionEnd]
-      : null;
     const incidentRows = incidents.length
-      ? `<ul class="incident-list">${incidents.map((incident) => `<li><span>Occurrence ${incident.id} · ${this.escape(incident.at_utc)}</span>${incident.text ? this.escape(incident.text) : "Description pending"}</li>`).join("")}</ul>`
+      ? `<ul class="incident-list">${incidents.map((incident) => `<li data-dom-key="incident:${incidentPrefix}:${incident.id}"><span>Occurrence ${incident.id} · ${this.escape(incident.at_utc)}</span>${incident.text ? this.escape(incident.text) : "Description pending"}</li>`).join("")}</ul>`
       : '<p class="supporting-copy">No incident occurrence reported for this attempt.</p>';
     const reviewFields = incidents.map((incident) => {
       const key = `${incidentPrefix}:${incident.id}`;
-      const value = incident.text || this.incidentDrafts.get(key) || "";
-      return `<label class="incident-description"><span>Occurrence ${incident.id} · ${this.escape(incident.at_utc)}</span><textarea data-incident-input data-incident-id="${incident.id}" data-incident-key="${this.escape(key)}" maxlength="2000" required placeholder="Describe what happened">${this.escape(value)}</textarea></label>`;
+      return `<label class="incident-description" data-dom-key="description:${this.escape(key)}"><span>Occurrence ${incident.id} · ${this.escape(incident.at_utc)}</span><textarea data-incident-input data-incident-id="${incident.id}" maxlength="2000" required placeholder="Describe what happened">${this.escape(incident.text || "")}</textarea></label>`;
     }).join("");
     const technicalOutcome = currentAttempt?.technical_outcome;
     const technicalLabel = technicalOutcome?.completed
       ? "Technical result: successful"
       : "Technical result: invalid";
-    const incidentPanel = recording
-      ? `<p class="supporting-copy">Click once for every observed occurrence. Descriptions will be requested when the attempt ends.</p><button class="reject-button" data-incident-occurrence data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Signal incident occurrence</button>${incidentRows}`
-      : reviewRequired
-        ? `<p class="inline-warning">Describe every occurrence, then decide whether the incidents invalidate this attempt. ${this.escape(technicalLabel)}.</p><form class="incident-review-form" data-trial-incident-review-form data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}">${reviewFields}<div class="training-actions"><button class="secondary-button" data-incident-invalidates="false" type="submit" ${this.busy ? "disabled" : ""}>Validate attempt</button><button class="reject-button" data-incident-invalidates="true" type="submit" ${this.busy ? "disabled" : ""}>Invalidate attempt</button></div></form>`
-        : incidentRows;
+    const incidentPanel = `<p class="supporting-copy" ${recording ? "" : "hidden"}>Click once for every observed occurrence. Descriptions will be requested when the attempt ends.</p>
+      <button class="reject-button" data-incident-occurrence data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${recording ? "" : "hidden"} ${this.busy || !recording ? "disabled" : ""}>Signal incident occurrence</button>
+      <div data-dom-key="incident-history" ${reviewRequired ? "hidden" : ""}>${incidentRows}</div>
+      <p class="inline-warning" ${reviewRequired ? "" : "hidden"}>Describe every occurrence, then decide whether the incidents invalidate this attempt. ${this.escape(technicalLabel)}.</p>
+      <form class="incident-review-form" data-trial-incident-review-form data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" ${reviewRequired ? "" : "hidden"}>${reviewFields}<div class="training-actions"><button class="secondary-button" data-incident-invalidates="false" type="submit" ${this.busy || !reviewRequired ? "disabled" : ""}>Validate attempt</button><button class="reject-button" data-incident-invalidates="true" type="submit" ${this.busy || !reviewRequired ? "disabled" : ""}>Invalidate attempt</button></div></form>`;
     const processItems = [
       ["Stack", experiment.stack.status],
       ["Mapper", experiment.mapper.status],
       ["Recorder", experiment.recorder.status],
       ["Mode", block.mode],
-    ].map(([term, value]) => `<div><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
+    ].map(([term, value]) => `<div data-dom-key="summary:${term}"><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
     const canPrepare = workflow === "awaiting_prepare" && !experiment.can_end;
     const mapperReady = experiment.mapper?.status === "active" && experiment.mapper?.active_mode === block.mode;
     const canStart = ["awaiting_start_pose", "ready"].includes(workflow)
       && live.start_within_thresholds
       && !experiment.go_to?.motion?.active
       && mapperReady;
-    panel.className = "panel-page";
-    panel.innerHTML = `<section class="hero-card"><div><p class="step-number">Panel ${panelLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span></section>
+    this.setClass(panel, "panel-page");
+    this.patchMarkup(panel, `<section class="hero-card"><div><p class="step-number">Panel ${panelLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span></section>
       <div class="trial-workspace">
         <div class="trial-main-column">
           <section class="card"><div class="section-heading"><div><p class="step-number">Development configuration</p><h2>${Number(thresholds.linear_mm || 0).toFixed(1)} mm · ${Number(thresholds.angular_deg || 0).toFixed(1)}° thresholds</h2></div><span class="pill pill--warning">Provisional</span></div><p class="inline-warning">These thresholds are development values and must be scientifically approved before participant sessions. Success requires ${Number(thresholds.success_dwell_sec || 0).toFixed(1)} s continuously inside both limits.</p><dl class="participant-summary process-summary">${processItems}</dl></section>
@@ -616,22 +662,14 @@ class SessionInterface {
             <div class="training-metrics"><article><span>Start linear error</span><strong>${errorValue(live.start_error, "linear_mm")}</strong></article><article><span>Start angular error</span><strong>${errorValue(live.start_error, "angular_deg")}</strong></article><article><span>Target linear error</span><strong>${errorValue(live.target_error, "linear_mm")}</strong></article><article><span>Target angular error</span><strong>${errorValue(live.target_error, "angular_deg")}</strong></article></div>
             <p class="supporting-copy">${live.error ? this.escape(live.error) : current ? `Place the robot at target_out_${current.target_start}. Arrival success is measured at target_${current.target_end}.` : "The mapper remains active between trials."}</p>
             <div class="training-actions"><button class="secondary-button" data-trial-action="prepare" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canPrepare ? "disabled" : ""}>Prepare next trial and move to start</button><button class="primary-button" data-trial-action="start" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canStart ? "disabled" : ""}>Start recording</button><button class="reject-button" data-trial-action="stop" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !recording ? "disabled" : ""}>Stop recording</button></div>
-            ${workflow === "decision_required" ? `<div class="decision-card"><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-trial-resolve="retry" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-trial-resolve="advance_with_deviation" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Continue with deviation</button></div></div>` : ""}
-            ${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
+            <div class="decision-card" ${workflow === "decision_required" ? "" : "hidden"}><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-trial-resolve="retry" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-trial-resolve="advance_with_deviation" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Continue with deviation</button></div></div>
+            <p class="inline-error" ${block.error ? "" : "hidden"}>${this.escape(block.error || "")}</p></section>
           <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Incident occurrences</h2></div><span class="pill ${reviewRequired ? "pill--warning" : incidents.length ? "pill--error" : "pill--neutral"}">${incidents.length} occurrence${incidents.length === 1 ? "" : "s"}</span></div>${incidentPanel}</section>
-          <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Calibrated start positioning</h2></div><span class="pill ${experiment.go_to?.motion?.active ? "pill--warning" : "pill--neutral"}">${experiment.go_to?.motion?.active ? this.escape(this.title(experiment.go_to.motion.current?.status)) : reviewRequired ? "Review required" : "Ready"}</span></div><p class="supporting-copy">Manual control is suspended during motion and restored afterwards. Target buttons use the calibrated target_out poses.</p><div class="go-to-grid"><button class="secondary-button" data-block-go-to="starting_point" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to starting point</button>${[1, 2, 3].map((target) => `<button class="secondary-button" data-block-go-to="target_out_${target}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to target ${target}</button>`).join("")}</div>${experiment.go_to?.motion?.active ? `<button class="reject-button" data-block-go-to-stop data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop motion</button>` : ""}</section>
+          <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Calibrated start positioning</h2></div><span class="pill ${experiment.go_to?.motion?.active ? "pill--warning" : "pill--neutral"}">${experiment.go_to?.motion?.active ? this.escape(this.title(experiment.go_to.motion.current?.status)) : reviewRequired ? "Review required" : "Ready"}</span></div><p class="supporting-copy">Manual control is suspended during motion and restored afterwards. Target buttons use the calibrated target_out poses.</p><div class="go-to-grid"><button class="secondary-button" data-block-go-to="starting_point" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to starting point</button>${[1, 2, 3].map((target) => `<button class="secondary-button" data-block-go-to="target_out_${target}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to target ${target}</button>`).join("")}</div><button class="reject-button" data-block-go-to-stop data-block-id="${this.escape(block.id)}" type="button" ${experiment.go_to?.motion?.active ? "" : "hidden"} ${this.busy || !experiment.go_to?.motion?.active ? "disabled" : ""}>Stop motion</button></section>
         </div>
         <section class="card trial-progress-card"><div class="section-heading"><div><p class="step-number">Protocol progress</p><h2>${title} trials</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--neutral"}">${completed}/${trials.length}</span></div><div class="segment-list">${trialRows}</div></section>
       </div>
-      <section class="validation-card"><div><p class="step-number">Complete ${phase}</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">Every trial must succeed or be explicitly accepted with a deviation.</p></div><div class="validation-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${phase}" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>${phase === "recording" ? "End recordings" : "End training"}</button></div></section>`;
-    if (restoreIncidentFocus) {
-      const replacement = [...panel.querySelectorAll("[data-incident-input]")]
-        .find((input) => input.dataset.incidentKey === activeIncidentKey);
-      replacement?.focus({ preventScroll: true });
-      if (replacement && incidentSelection.every((value) => value !== null)) {
-        replacement.setSelectionRange(...incidentSelection);
-      }
-    }
+      <section class="validation-card"><div><p class="step-number">Complete ${phase}</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">Every trial must succeed or be explicitly accepted with a deviation.</p></div><div class="validation-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${phase}" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>${phase === "recording" ? "End recordings" : "End training"}</button></div></section>`, `${experiment.participant.folder}:${block.id}:${phase}`);
   }
 
   title(value) {
@@ -647,20 +685,20 @@ class SessionInterface {
       not_tested: "Not tested", checking: "Checking", awaiting_joystick: "Move joystick",
       awaiting_confirmation: "Confirm behaviour", passed: "Passed", failed: "Failed",
     };
-    pill.textContent = labels[result.status] || result.status;
-    pill.className = `pill mode-status ${result.status === "passed" ? "pill--active" : result.status === "failed" ? "pill--error" : ["checking", "awaiting_joystick", "awaiting_confirmation"].includes(result.status) ? "pill--warning" : "pill--neutral"}`;
+    this.setText(pill, labels[result.status] || result.status);
+    this.setClass(pill, `pill mode-status ${result.status === "passed" ? "pill--active" : result.status === "failed" ? "pill--error" : ["checking", "awaiting_joystick", "awaiting_confirmation"].includes(result.status) ? "pill--warning" : "pill--neutral"}`);
     const guidance = card.querySelector(".mode-guidance");
-    guidance.textContent = this.guidance(result);
+    this.setText(guidance, this.guidance(result));
     const start = card.querySelector(".mode-start");
-    start.textContent = result.status === "failed" ? `Retry ${MODE_LABELS[mode].toLowerCase()} mode` : `Check ${MODE_LABELS[mode].toLowerCase()} mode`;
+    this.setText(start, result.status === "failed" ? `Retry ${MODE_LABELS[mode].toLowerCase()} mode` : `Check ${MODE_LABELS[mode].toLowerCase()} mode`);
     const anotherModeRunning = this.state.active_mode && this.state.active_mode !== mode;
-    start.disabled = this.busy || this.state.stack.status !== "active" || anotherModeRunning || ["checking", "awaiting_joystick", "awaiting_confirmation", "passed"].includes(result.status);
-    card.querySelector(".confirmation").hidden = result.status !== "awaiting_confirmation";
+    this.setDisabled(start, this.busy || this.state.stack.status !== "active" || anotherModeRunning || ["checking", "awaiting_joystick", "awaiting_confirmation", "passed"].includes(result.status));
+    this.setHidden(card.querySelector(".confirmation"), result.status !== "awaiting_confirmation");
     const failures = result.evidence?.checks?.filter((check) => !check.passed) || [];
     const diagnosticList = card.querySelector(".diagnostic-list");
-    diagnosticList.innerHTML = failures.length
-      ? `<details open><summary>${failures.length} pending diagnostic${failures.length > 1 ? "s" : ""}</summary><ul>${failures.map((item) => `<li>${this.escape(item.name)} · expected ${this.escape(JSON.stringify(item.expected))}, observed ${this.escape(JSON.stringify(item.observed))}</li>`).join("")}</ul></details>`
-      : result.evidence ? `<p class="diagnostics-ok">Automatic diagnostics passed.</p>` : "";
+    this.patchMarkup(diagnosticList, failures.length
+      ? `<details open><summary>${failures.length} pending diagnostic${failures.length > 1 ? "s" : ""}</summary><ul>${failures.map((item) => `<li data-dom-key="diagnostic:${this.escape(item.name)}">${this.escape(item.name)} · expected ${this.escape(JSON.stringify(item.expected))}, observed ${this.escape(JSON.stringify(item.observed))}</li>`).join("")}</ul></details>`
+      : result.evidence ? `<p class="diagnostics-ok">Automatic diagnostics passed.</p>` : "");
   }
 
   guidance(result) {
@@ -679,10 +717,10 @@ class SessionInterface {
   showToast(message, error = false) {
     const toast = document.getElementById("toast");
     window.clearTimeout(this.toastTimer);
-    toast.textContent = message;
-    toast.className = `toast${error ? " toast--error" : ""}`;
-    toast.hidden = false;
-    this.toastTimer = window.setTimeout(() => { toast.hidden = true; }, 4500);
+    this.setText(toast, message);
+    this.setClass(toast, `toast${error ? " toast--error" : ""}`);
+    this.setHidden(toast, false);
+    this.toastTimer = window.setTimeout(() => this.setHidden(toast, true), 4500);
   }
 }
 
