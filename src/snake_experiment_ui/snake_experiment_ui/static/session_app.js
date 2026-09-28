@@ -8,11 +8,26 @@ class SessionInterface {
     this.toastTimer = null;
     this.browser = null;
     this.incidentDrafts = new Map();
+    this.pointerInteractionActive = false;
+    this.renderDeferred = false;
     this.bindActions();
     this.connect();
   }
 
   bindActions() {
+    const finishPointerInteraction = () => {
+      if (!this.pointerInteractionActive) return;
+      this.pointerInteractionActive = false;
+      if (!this.renderDeferred) return;
+      this.renderDeferred = false;
+      window.requestAnimationFrame(() => this.render());
+    };
+    document.addEventListener("pointerdown", () => {
+      this.pointerInteractionActive = true;
+    }, true);
+    document.addEventListener("pointerup", finishPointerInteraction, true);
+    document.addEventListener("pointercancel", finishPointerInteraction, true);
+    window.addEventListener("blur", finishPointerInteraction);
     document.addEventListener("click", async (event) => {
       const diagnosticSummary = event.target.closest(".diagnostic-list summary");
       if (diagnosticSummary) {
@@ -291,6 +306,11 @@ class SessionInterface {
 
   render() {
     if (!this.state) return;
+    if (this.pointerInteractionActive) {
+      this.renderDeferred = true;
+      return;
+    }
+    this.renderDeferred = false;
     const currentPanel = this.state.current_panel;
     const onPanelC = currentPanel === "C";
     const onPanelD = currentPanel === "D";
