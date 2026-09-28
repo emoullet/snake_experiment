@@ -71,8 +71,14 @@ class ControlRequest(BaseModel):
     active: bool
 
 
-class IncidentRequest(BaseModel):
+class IncidentDescription(BaseModel):
+    id: int
     text: str
+
+
+class IncidentReviewRequest(BaseModel):
+    descriptions: list[IncidentDescription]
+    invalidates_attempt: bool
 
 
 class TrainingResolutionRequest(BaseModel):
@@ -326,9 +332,19 @@ def create_session_app(
         return experiment_action(lambda: experiment.stop_training_attempt(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/training/incidents")
-    async def add_training_incident(block_id: str, request: IncidentRequest):
+    async def add_training_incident(block_id: str):
+        return experiment_action(lambda: experiment.add_training_incident(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/training/incidents/review")
+    async def review_training_incidents(
+        block_id: str, request: IncidentReviewRequest
+    ):
         return experiment_action(
-            lambda: experiment.add_training_incident(block_id, request.text)
+            lambda: experiment.review_training_incidents(
+                block_id,
+                [item.dict() for item in request.descriptions],
+                request.invalidates_attempt,
+            )
         )
 
     @app.post("/api/experiment/blocks/{block_id}/training/resolve")
@@ -360,9 +376,19 @@ def create_session_app(
         return experiment_action(lambda: experiment.stop_recording_attempt(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/recording/incidents")
-    async def add_recording_incident(block_id: str, request: IncidentRequest):
+    async def add_recording_incident(block_id: str):
+        return experiment_action(lambda: experiment.add_recording_incident(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/recording/incidents/review")
+    async def review_recording_incidents(
+        block_id: str, request: IncidentReviewRequest
+    ):
         return experiment_action(
-            lambda: experiment.add_recording_incident(block_id, request.text)
+            lambda: experiment.review_recording_incidents(
+                block_id,
+                [item.dict() for item in request.descriptions],
+                request.invalidates_attempt,
+            )
         )
 
     @app.post("/api/experiment/blocks/{block_id}/recording/resolve")

@@ -7,6 +7,7 @@ class SessionInterface {
     this.reconnectDelay = 500;
     this.toastTimer = null;
     this.browser = null;
+    this.incidentDrafts = new Map();
     this.bindActions();
     this.connect();
   }
@@ -86,6 +87,12 @@ class SessionInterface {
       if (blockGoToStop) {
         return this.post(`/api/experiment/blocks/${blockGoToStop.dataset.blockId}/go-to/stop`);
       }
+      const incidentOccurrence = event.target.closest("[data-incident-occurrence]");
+      if (incidentOccurrence) {
+        return this.post(
+          `/api/experiment/blocks/${incidentOccurrence.dataset.blockId}/${incidentOccurrence.dataset.trialPhase}/incidents`
+        );
+      }
       const trialAction = event.target.closest("[data-trial-action]");
       if (trialAction) {
         if (
@@ -102,15 +109,24 @@ class SessionInterface {
       }
     });
     document.addEventListener("submit", (event) => {
-      const form = event.target.closest("[data-trial-incident-form]");
+      const form = event.target.closest("[data-trial-incident-review-form]");
       if (!form) return;
       event.preventDefault();
-      const input = form.querySelector("textarea");
       const blockId = form.dataset.blockId;
       const phase = form.dataset.trialPhase;
-      const text = input.value;
-      input.value = "";
-      this.post(`/api/experiment/blocks/${blockId}/${phase}/incidents`, { text });
+      const descriptions = [...form.querySelectorAll("[data-incident-input]")].map(
+        (input) => ({ id: Number(input.dataset.incidentId), text: input.value })
+      );
+      const invalidatesAttempt = event.submitter?.dataset.incidentInvalidates === "true";
+      this.post(`/api/experiment/blocks/${blockId}/${phase}/incidents/review`, {
+        descriptions,
+        invalidates_attempt: invalidatesAttempt,
+      });
+    });
+    document.addEventListener("input", (event) => {
+      const input = event.target.closest("[data-incident-input]");
+      if (!input) return;
+      this.incidentDrafts.set(input.dataset.incidentKey, input.value);
     });
     document.getElementById("validate-button").addEventListener("click", () =>
       this.post("/api/checkup/validate")
@@ -516,6 +532,7 @@ class SessionInterface {
     const current = training.current_trial || trials.find((trial) => trial.id === training.current_trial_id) || null;
     const live = training.live || {};
     const thresholds = training.thresholds || {};
+    const recording = workflow === "recording";
     const completed = trials.filter((trial) => ["completed", "completed_with_deviation"].includes(trial.status)).length;
     const currentAttempt = current?.attempts?.length ? current.attempts[current.attempts.length - 1] : null;
     const errorValue = (error, unit) => error ? `${Number(error[unit]).toFixed(2)} ${unit.endsWith("mm") ? "mm" : "deg"}` : "—";
@@ -524,9 +541,40 @@ class SessionInterface {
       return `<article class="segment-entry"><div><strong>Trial ${trial.id} · cycle ${trial.cycle}</strong><span>Target ${trial.target_start} → ${trial.target_end} · ${trial.attempts.length} attempt${trial.attempts.length === 1 ? "" : "s"}</span></div><span class="pill ${statusClass}">${this.escape(this.title(trial.status))}</span></article>`;
     }).join("");
     const incidents = currentAttempt?.incidents || [];
+    const reviewRequired = workflow === "incident_review_required";
+    const incidentPrefix = `${block.id}:${phase}:${current?.id || "none"}:${currentAttempt?.number || "none"}`;
+    const activeInput = document.activeElement?.closest?.("[data-incident-input]");
+    const activeIncidentKey = activeInput?.dataset.incidentKey;
+    const restoreIncidentFocus = reviewRequired
+      && activeIncidentKey?.startsWith(`${incidentPrefix}:`);
+    if (restoreIncidentFocus) {
+      this.incidentDrafts.set(activeIncidentKey, activeInput.value);
+    }
+    if (!reviewRequired) {
+      [...this.incidentDrafts.keys()]
+        .filter((key) => key.startsWith(`${incidentPrefix}:`))
+        .forEach((key) => this.incidentDrafts.delete(key));
+    }
+    const incidentSelection = restoreIncidentFocus
+      ? [activeInput.selectionStart, activeInput.selectionEnd]
+      : null;
     const incidentRows = incidents.length
-      ? `<ul class="incident-list">${incidents.map((incident) => `<li><span>${this.escape(incident.at_utc)}</span>${this.escape(incident.text)}</li>`).join("")}</ul>`
-      : '<p class="supporting-copy">No incident reported for this attempt.</p>';
+      ? `<ul class="incident-list">${incidents.map((incident) => `<li><span>Occurrence ${incident.id} · ${this.escape(incident.at_utc)}</span>${incident.text ? this.escape(incident.text) : "Description pending"}</li>`).join("")}</ul>`
+      : '<p class="supporting-copy">No incident occurrence reported for this attempt.</p>';
+    const reviewFields = incidents.map((incident) => {
+      const key = `${incidentPrefix}:${incident.id}`;
+      const value = incident.text || this.incidentDrafts.get(key) || "";
+      return `<label class="incident-description"><span>Occurrence ${incident.id} · ${this.escape(incident.at_utc)}</span><textarea data-incident-input data-incident-id="${incident.id}" data-incident-key="${this.escape(key)}" maxlength="2000" required placeholder="Describe what happened">${this.escape(value)}</textarea></label>`;
+    }).join("");
+    const technicalOutcome = currentAttempt?.technical_outcome;
+    const technicalLabel = technicalOutcome?.completed
+      ? "Technical result: successful"
+      : "Technical result: invalid";
+    const incidentPanel = recording
+      ? `<p class="supporting-copy">Click once for every observed occurrence. Descriptions will be requested when the attempt ends.</p><button class="reject-button" data-incident-occurrence data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Signal incident occurrence</button>${incidentRows}`
+      : reviewRequired
+        ? `<p class="inline-warning">Describe every occurrence, then decide whether the incidents invalidate this attempt. ${this.escape(technicalLabel)}.</p><form class="incident-review-form" data-trial-incident-review-form data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}">${reviewFields}<div class="training-actions"><button class="secondary-button" data-incident-invalidates="false" type="submit" ${this.busy ? "disabled" : ""}>Validate attempt</button><button class="reject-button" data-incident-invalidates="true" type="submit" ${this.busy ? "disabled" : ""}>Invalidate attempt</button></div></form>`
+        : incidentRows;
     const processItems = [
       ["Stack", experiment.stack.status],
       ["Mapper", experiment.mapper.status],
@@ -539,7 +587,6 @@ class SessionInterface {
       && live.start_within_thresholds
       && !experiment.go_to?.motion?.active
       && mapperReady;
-    const recording = workflow === "recording";
     panel.className = "panel-page";
     panel.innerHTML = `<section class="hero-card"><div><p class="step-number">Panel ${panelLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span></section>
       <div class="trial-workspace">
@@ -551,12 +598,20 @@ class SessionInterface {
             <div class="training-actions"><button class="secondary-button" data-trial-action="prepare" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canPrepare ? "disabled" : ""}>Prepare next trial and move to start</button><button class="primary-button" data-trial-action="start" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canStart ? "disabled" : ""}>Start recording</button><button class="reject-button" data-trial-action="stop" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !recording ? "disabled" : ""}>Stop recording</button></div>
             ${workflow === "decision_required" ? `<div class="decision-card"><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-trial-resolve="retry" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-trial-resolve="advance_with_deviation" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Continue with deviation</button></div></div>` : ""}
             ${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
-          <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Calibrated start positioning</h2></div><span class="pill ${experiment.go_to?.motion?.active ? "pill--warning" : "pill--neutral"}">${experiment.go_to?.motion?.active ? this.escape(this.title(experiment.go_to.motion.current?.status)) : "Ready"}</span></div><p class="supporting-copy">Manual control is suspended during motion and restored afterwards. Target buttons use the calibrated target_out poses.</p><div class="go-to-grid"><button class="secondary-button" data-block-go-to="starting_point" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to starting point</button>${[1, 2, 3].map((target) => `<button class="secondary-button" data-block-go-to="target_out_${target}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to target ${target}</button>`).join("")}</div>${experiment.go_to?.motion?.active ? `<button class="reject-button" data-block-go-to-stop data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop motion</button>` : ""}</section>
-          <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Timestamped incidents</h2></div></div><form class="incident-form" data-trial-incident-form data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}"><textarea maxlength="2000" placeholder="Describe the issue observed during this attempt" ${recording ? "" : "disabled"}></textarea><button class="secondary-button" type="submit" ${this.busy || !recording ? "disabled" : ""}>Signal trial issue</button></form>${incidentRows}</section>
+          <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Incident occurrences</h2></div><span class="pill ${reviewRequired ? "pill--warning" : incidents.length ? "pill--error" : "pill--neutral"}">${incidents.length} occurrence${incidents.length === 1 ? "" : "s"}</span></div>${incidentPanel}</section>
+          <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Calibrated start positioning</h2></div><span class="pill ${experiment.go_to?.motion?.active ? "pill--warning" : "pill--neutral"}">${experiment.go_to?.motion?.active ? this.escape(this.title(experiment.go_to.motion.current?.status)) : reviewRequired ? "Review required" : "Ready"}</span></div><p class="supporting-copy">Manual control is suspended during motion and restored afterwards. Target buttons use the calibrated target_out poses.</p><div class="go-to-grid"><button class="secondary-button" data-block-go-to="starting_point" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to starting point</button>${[1, 2, 3].map((target) => `<button class="secondary-button" data-block-go-to="target_out_${target}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to target ${target}</button>`).join("")}</div>${experiment.go_to?.motion?.active ? `<button class="reject-button" data-block-go-to-stop data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop motion</button>` : ""}</section>
         </div>
         <section class="card trial-progress-card"><div class="section-heading"><div><p class="step-number">Protocol progress</p><h2>${title} trials</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--neutral"}">${completed}/${trials.length}</span></div><div class="segment-list">${trialRows}</div></section>
       </div>
       <section class="validation-card"><div><p class="step-number">Complete ${phase}</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">Every trial must succeed or be explicitly accepted with a deviation.</p></div><div class="validation-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${phase}" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>${phase === "recording" ? "End recordings" : "End training"}</button></div></section>`;
+    if (restoreIncidentFocus) {
+      const replacement = [...panel.querySelectorAll("[data-incident-input]")]
+        .find((input) => input.dataset.incidentKey === activeIncidentKey);
+      replacement?.focus({ preventScroll: true });
+      if (replacement && incidentSelection.every((value) => value !== null)) {
+        replacement.setSelectionRange(...incidentSelection);
+      }
+    }
   }
 
   title(value) {

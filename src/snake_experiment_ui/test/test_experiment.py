@@ -497,13 +497,24 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.prepare_training_trial(block_id)
         self.complete_go_to("target_out_1")
         self.controller.start_training_attempt(block_id)
+        self.controller.add_training_incident(block_id)
 
         state = self.controller.abort(block_id)
         block = state["progress"]["blocks"][2]
-        self.assertEqual(block["training_workflow"], "decision_required")
-        self.assertEqual(block["training_trials"][0]["status"], "decision_required")
+        self.assertEqual(block["training_workflow"], "incident_review_required")
+        self.assertEqual(
+            block["training_trials"][0]["status"], "incident_review_required"
+        )
         resumed = self.controller.start(block_id)
-        self.assertEqual(resumed["training"]["workflow"], "decision_required")
+        self.assertEqual(
+            resumed["training"]["workflow"], "incident_review_required"
+        )
+        reviewed = self.controller.review_training_incidents(
+            block_id,
+            [{"id": 1, "text": "Participant requested a stop"}],
+            False,
+        )
+        self.assertEqual(reviewed["training"]["workflow"], "decision_required")
 
     def test_training_go_to_is_blocked_during_recording(self):
         self.controller.prepare(self.participant)
@@ -514,7 +525,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.prepare_training_trial(block_id)
         self.complete_go_to("target_out_1")
         self.controller.start_training_attempt(block_id)
-        with self.assertRaisesRegex(ExperimentError, "MCAP"):
+        with self.assertRaisesRegex(ExperimentError, "acquisition"):
             self.controller.start_go_to(block_id, "target_out_1")
 
     def test_training_success_stops_recorder_after_stable_pose(self):
@@ -543,6 +554,64 @@ class ExperimentControllerTest(unittest.TestCase):
         )
         self.assertTrue((trial_folder / "trial.json").is_file())
         self.assertTrue((trial_folder / "attempt_001" / "attempt.json").is_file())
+
+    def test_successful_attempt_waits_for_incident_review(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        block_id = "mode_1_training"
+        self.controller.start(block_id)
+        self.controller.prepare_training_trial(block_id)
+        self.complete_go_to("target_out_1")
+        self.controller.start_training_attempt(block_id)
+        self.controller.add_training_incident(block_id)
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+
+        state = self.controller.snapshot()
+        training = state["training"]
+        attempt = training["current_attempt"]
+        self.assertEqual(training["workflow"], "incident_review_required")
+        self.assertTrue(training["incident_review_required"])
+        self.assertEqual(training["incident_descriptions_missing"], 1)
+        self.assertTrue(attempt["technical_outcome"]["completed"])
+        self.assertFalse(state["go_to"]["available"])
+        with self.assertRaisesRegex(ExperimentError, "incident review"):
+            self.controller.start_go_to(block_id, "target_out_1")
+
+        state = self.controller.review_training_incidents(
+            block_id,
+            [{"id": 1, "text": "Brief loss of visual contact"}],
+            False,
+        )
+        self.assertEqual(state["training"]["trials"][0]["status"], "completed")
+        self.assertEqual(state["training"]["workflow"], "awaiting_prepare")
+
+    def test_incident_can_invalidate_technically_successful_attempt(self):
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        block_id = "mode_1_training"
+        self.controller.start(block_id)
+        self.controller.prepare_training_trial(block_id)
+        self.complete_go_to("target_out_1")
+        self.controller.start_training_attempt(block_id)
+        self.controller.add_training_incident(block_id)
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+
+        state = self.controller.review_training_incidents(
+            block_id,
+            [{"id": 1, "text": "Protocol instruction was incorrect"}],
+            True,
+        )
+        attempt = state["training"]["current_attempt"]
+        self.assertEqual(state["training"]["workflow"], "decision_required")
+        self.assertEqual(attempt["status"], "invalid")
+        self.assertEqual(attempt["stop_reason"], "incident_invalidated")
+        self.assertTrue(attempt["technical_outcome"]["completed"])
 
     def test_training_stale_pose_blocks_readiness_and_recording(self):
         self.controller.prepare(self.participant)
@@ -586,6 +655,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
         self.controller.start_training_attempt("mode_1_training")
+        self.controller.add_training_incident("mode_1_training")
         self.controller.shutdown()
         progress = json.loads(
             (self.participant_folder / "experiment_progress.json").read_text()
@@ -593,9 +663,49 @@ class ExperimentControllerTest(unittest.TestCase):
         block = progress["blocks"][2]
         attempt = block["training_trials"][0]["attempts"][0]
         self.assertEqual(block["status"], "interrupted")
-        self.assertEqual(attempt["status"], "invalid")
+        self.assertEqual(attempt["status"], "incident_review_required")
         self.assertEqual(attempt["stop_reason"], "interface_shutdown")
         self.assertFalse(self.rosbag.active)
+
+        resumed_controller = ExperimentController(
+            ExperimentProfile(self.source_profile),
+            self.stack,
+            self.modes,
+            self.rosbag,
+            utc_clock=self.clock,
+            monotonic_clock=lambda: self.monotonic_value,
+            thread_factory=ImmediateThread,
+        )
+        resumed_controller.prepare(self.participant)
+        resumed = resumed_controller.start("mode_1_training")
+        self.assertEqual(
+            resumed["training"]["workflow"], "incident_review_required"
+        )
+
+    def test_legacy_described_incident_is_normalised_without_text_change(self):
+        attempt = {
+            "status": "invalid",
+            "valid": False,
+            "stopped_at_utc": "2026-01-01T00:00:02Z",
+            "stop_reason": "operator_stop",
+            "incidents": [
+                {
+                    "at_utc": "2026-01-01T00:00:01Z",
+                    "text": "Legacy operator description",
+                }
+            ],
+        }
+        changed = ExperimentController._ensure_attempt_incident_fields(attempt)
+        self.assertTrue(changed)
+        self.assertEqual(attempt["incidents"][0]["id"], 1)
+        self.assertEqual(
+            attempt["incidents"][0]["text"], "Legacy operator description"
+        )
+        self.assertEqual(
+            attempt["incidents"][0]["described_at_utc"],
+            "2026-01-01T00:00:01Z",
+        )
+        self.assertEqual(attempt["incident_review"]["status"], "complete")
 
     def test_trial_fields_are_migrated_from_legacy_profile(self):
         self.controller.prepare(self.participant)
@@ -663,11 +773,68 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
         self.controller.start_training_attempt("mode_1_training")
-        self.controller.add_training_incident("mode_1_training", "Joystick slipped")
+        self.controller.add_training_incident("mode_1_training")
+        self.controller.add_training_incident("mode_1_training")
         state = self.controller.stop_training_attempt("mode_1_training")
+        self.assertEqual(state["training"]["workflow"], "incident_review_required")
+        attempt = state["training"]["trials"][0]["attempts"][0]
+        self.assertEqual([item["id"] for item in attempt["incidents"]], [1, 2])
+        self.assertEqual([item["text"] for item in attempt["incidents"]], [None, None])
+        self.assertFalse(attempt["technical_outcome"]["completed"])
+        with self.assertRaisesRegex(ExperimentError, "Every incident"):
+            self.controller.review_training_incidents(
+                "mode_1_training",
+                [{"id": 1, "text": "Joystick slipped"}],
+                False,
+            )
+        with self.assertRaisesRegex(ExperimentError, "unique"):
+            self.controller.review_training_incidents(
+                "mode_1_training",
+                [
+                    {"id": 1, "text": "Joystick slipped"},
+                    {"id": 1, "text": "Duplicate identifier"},
+                ],
+                False,
+            )
+        with self.assertRaisesRegex(ExperimentError, "Every incident"):
+            self.controller.review_training_incidents(
+                "mode_1_training",
+                [
+                    {"id": 1, "text": "Joystick slipped"},
+                    {"id": 99, "text": "Unknown occurrence"},
+                ],
+                False,
+            )
+        with self.assertRaisesRegex(ExperimentError, "must not be empty"):
+            self.controller.review_training_incidents(
+                "mode_1_training",
+                [
+                    {"id": 1, "text": "Joystick slipped"},
+                    {"id": 2, "text": "   "},
+                ],
+                False,
+            )
+        with self.assertRaisesRegex(ExperimentError, "must not exceed"):
+            self.controller.review_training_incidents(
+                "mode_1_training",
+                [
+                    {"id": 1, "text": "Joystick slipped"},
+                    {"id": 2, "text": "x" * 2001},
+                ],
+                False,
+            )
+        state = self.controller.review_training_incidents(
+            "mode_1_training",
+            [
+                {"id": 1, "text": "Joystick slipped"},
+                {"id": 2, "text": "Participant paused"},
+            ],
+            False,
+        )
         self.assertEqual(state["training"]["workflow"], "decision_required")
         attempt = state["training"]["trials"][0]["attempts"][0]
         self.assertEqual(attempt["incidents"][0]["text"], "Joystick slipped")
+        self.assertEqual(attempt["incident_review"]["status"], "complete")
         self.controller.resolve_training_attempt("mode_1_training", "retry")
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
@@ -690,13 +857,20 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.prepare_training_trial("mode_1_training")
         self.complete_go_to("target_out_1")
         self.controller.start_training_attempt("mode_1_training")
+        self.controller.add_training_incident("mode_1_training")
         state = self.controller.restart_stack("mode_1_training")
-        self.assertEqual(state["training"]["workflow"], "decision_required")
+        self.assertEqual(state["training"]["workflow"], "incident_review_required")
         self.assertEqual(
             state["training"]["trials"][0]["attempts"][0]["stop_reason"],
             "restart_stack",
         )
         self.assertEqual(self.modes.active, "snake")
+        state = self.controller.review_training_incidents(
+            "mode_1_training",
+            [{"id": 1, "text": "Stack restart required"}],
+            False,
+        )
+        self.assertEqual(state["training"]["workflow"], "decision_required")
 
     def test_recording_generates_thirty_trials_with_official_names(self):
         state = self.start_first_recording_block()
@@ -717,9 +891,15 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.prepare_recording_trial(block_id)
         self.complete_go_to("target_out_1")
         self.controller.start_recording_attempt(block_id)
-        self.controller.add_recording_incident(block_id, "Participant paused")
+        self.controller.add_recording_incident(block_id)
         stopped = self.controller.stop_recording_attempt(block_id)
-        self.assertEqual(stopped["recording"]["workflow"], "decision_required")
+        self.assertEqual(stopped["recording"]["workflow"], "incident_review_required")
+        reviewed = self.controller.review_recording_incidents(
+            block_id,
+            [{"id": 1, "text": "Participant paused"}],
+            False,
+        )
+        self.assertEqual(reviewed["recording"]["workflow"], "decision_required")
         self.controller.resolve_recording_attempt(block_id, "retry")
 
         self.controller.prepare_recording_trial(block_id)
@@ -763,15 +943,25 @@ class ExperimentControllerTest(unittest.TestCase):
             self.controller.recording_participant_ready(block_id)
         self.controller.update_ee_pose(self.pose("target_out_1"))
         self.controller.start_recording_attempt(block_id)
+        self.controller.add_recording_incident(block_id)
         self.rosbag.valid = False
         self.controller.update_ee_pose(self.pose("target_2"))
         self.monotonic_value += 0.6
         self.controller.update_ee_pose(self.pose("target_2"))
         state = self.controller.snapshot()
         attempt = state["recording"]["trials"][0]["attempts"][0]
-        self.assertEqual(state["recording"]["workflow"], "decision_required")
+        self.assertEqual(
+            state["recording"]["workflow"], "incident_review_required"
+        )
         self.assertEqual(attempt["stop_reason"], "invalid_data")
         self.assertFalse(attempt["valid"])
+        state = self.controller.review_recording_incidents(
+            block_id,
+            [{"id": 1, "text": "A non-invalidating observation"}],
+            False,
+        )
+        self.assertEqual(state["recording"]["workflow"], "decision_required")
+        self.assertFalse(state["recording"]["current_attempt"]["valid"])
 
     def test_shutdown_invalidates_active_official_recording(self):
         self.start_first_recording_block()

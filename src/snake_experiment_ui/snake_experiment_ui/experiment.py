@@ -455,8 +455,14 @@ class ExperimentController:
                 raise ExperimentError("Go-to is available only on Panels F and G.")
             if self._go_to is None:
                 raise ExperimentError("Cartesian Go-to is not configured.")
-            if block.get("training_workflow") in ("recording", "stopping_success"):
-                raise ExperimentError("Go-to is unavailable during an MCAP acquisition.")
+            if block.get("training_workflow") in (
+                "recording",
+                "stopping_success",
+                "incident_review_required",
+            ):
+                raise ExperimentError(
+                    "Go-to is unavailable during acquisition or incident review."
+                )
             if self._stack.snapshot().get("status") != "active":
                 raise ExperimentError("Restart the stack before using Go-to.")
             if self._modes.active_mode() != block["mode"]:
@@ -790,6 +796,12 @@ class ExperimentController:
                 "success_dwell_sec": 0.0,
                 "success_dwell_started_monotonic": None,
                 "incidents": [],
+                "technical_outcome": None,
+                "incident_review": {
+                    "status": "not_required",
+                    "invalidates_attempt": None,
+                    "reviewed_at_utc": None,
+                },
                 "storage": self._profile.data["rosbag"]["storage"],
                 "topics": list(block["settings"]["rosbag_topics"]),
                 "message_counts": {},
@@ -842,32 +854,98 @@ class ExperimentController:
             )
             return self.snapshot()
 
-    def add_training_incident(self, block_id: str, text: str) -> dict:
-        """Append a non-invalidating, timestamped incident to the active attempt."""
-        return self._add_trial_incident(block_id, text, "training")
+    def add_training_incident(self, block_id: str) -> dict:
+        """Append a timestamped incident occurrence to the active attempt."""
+        return self._add_trial_incident(block_id, "training")
 
-    def add_recording_incident(self, block_id: str, text: str) -> dict:
-        """Append an incident to the active official recording attempt."""
-        return self._add_trial_incident(block_id, text, "recording")
+    def add_recording_incident(self, block_id: str) -> dict:
+        """Append an occurrence to the active official recording attempt."""
+        return self._add_trial_incident(block_id, "recording")
 
-    def _add_trial_incident(self, block_id: str, text: str, phase: str) -> dict:
+    def _add_trial_incident(self, block_id: str, phase: str) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
             block = self._trial_block(block_id, phase)
             if block["training_workflow"] != "recording":
                 raise ExperimentError("Incidents can be recorded only during acquisition.")
-            value = str(text).strip()
-            if not value:
-                raise ExperimentError("Incident text must not be empty.")
-            if len(value) > 2000:
-                raise ExperimentError("Incident text must not exceed 2000 characters.")
             trial = self._current_training_trial(block)
             attempt = self._current_training_attempt(trial)
+            occurrence_id = max(
+                (incident.get("id", 0) for incident in attempt["incidents"]),
+                default=0,
+            ) + 1
             attempt["incidents"].append(
                 {
+                    "id": occurrence_id,
                     "at_utc": self._utc_clock(),
-                    "text": value,
+                    "text": None,
+                    "described_at_utc": None,
                 }
+            )
+            self._persist_training(folder, block, trial, attempt)
+            return self.snapshot()
+
+    def review_training_incidents(
+        self, block_id: str, descriptions: list[dict], invalidates_attempt: bool
+    ) -> dict:
+        """Describe training incidents and resolve their global validity impact."""
+        return self._review_trial_incidents(
+            block_id, descriptions, invalidates_attempt, "training"
+        )
+
+    def review_recording_incidents(
+        self, block_id: str, descriptions: list[dict], invalidates_attempt: bool
+    ) -> dict:
+        """Describe recording incidents and resolve their validity impact."""
+        return self._review_trial_incidents(
+            block_id, descriptions, invalidates_attempt, "recording"
+        )
+
+    def _review_trial_incidents(
+        self,
+        block_id: str,
+        descriptions: list[dict],
+        invalidates_attempt: bool,
+        phase: str,
+    ) -> dict:
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._trial_block(block_id, phase)
+            if block["training_workflow"] != "incident_review_required":
+                raise ExperimentError("No incident review is currently required.")
+            trial = self._current_training_trial(block)
+            attempt = self._current_training_attempt(trial)
+            incidents = attempt.get("incidents", [])
+            expected_ids = {incident["id"] for incident in incidents}
+            observed_ids = [item.get("id") for item in descriptions]
+            if len(observed_ids) != len(set(observed_ids)):
+                raise ExperimentError("Incident description identifiers must be unique.")
+            if set(observed_ids) != expected_ids:
+                raise ExperimentError("Every incident occurrence must be described exactly once.")
+            values = {}
+            for item in descriptions:
+                value = str(item.get("text", "")).strip()
+                if not value:
+                    raise ExperimentError("Incident descriptions must not be empty.")
+                if len(value) > 2000:
+                    raise ExperimentError(
+                        "Incident descriptions must not exceed 2000 characters."
+                    )
+                values[item["id"]] = value
+            described_at = self._utc_clock()
+            for incident in incidents:
+                incident["text"] = values[incident["id"]]
+                incident["described_at_utc"] = described_at
+            attempt["incident_review"] = {
+                "status": "complete",
+                "invalidates_attempt": bool(invalidates_attempt),
+                "reviewed_at_utc": described_at,
+            }
+            self._apply_trial_attempt_outcome(
+                block,
+                trial,
+                attempt,
+                incident_invalidates=bool(invalidates_attempt),
             )
             self._persist_training(folder, block, trial, attempt)
             return self.snapshot()
@@ -1092,18 +1170,76 @@ class ExperimentController:
                 "valid": False,
             }
         data_valid = bool(result.get("valid"))
-        completed = bool(successful and data_valid)
-        attempt["status"] = "succeeded" if completed else "invalid"
+        technical_completed = bool(successful and data_valid)
         attempt["stopped_at_utc"] = self._utc_clock()
-        attempt["stop_reason"] = reason if not successful or data_valid else "invalid_data"
+        technical_stop_reason = (
+            reason if not successful or data_valid else "invalid_data"
+        )
+        attempt["stop_reason"] = technical_stop_reason
         attempt["storage"] = result.get("storage", attempt["storage"])
         attempt["message_counts"] = dict(result.get("message_counts", {}))
         attempt["missing_topics"] = list(
             result.get("missing_topics", attempt["topics"])
         )
         attempt["metadata_error"] = result.get("metadata_error")
-        attempt["valid"] = completed
+        attempt["valid"] = False
         attempt["success_dwell_started_monotonic"] = None
+        attempt["technical_outcome"] = {
+            "successful_motion": bool(successful),
+            "data_valid": data_valid,
+            "completed": technical_completed,
+            "stop_reason": technical_stop_reason,
+            "evaluated_at_utc": self._utc_clock(),
+        }
+        pending_incidents = [
+            incident
+            for incident in attempt.get("incidents", [])
+            if not str(incident.get("text") or "").strip()
+        ]
+        if pending_incidents:
+            attempt["status"] = "incident_review_required"
+            attempt["incident_review"] = {
+                "status": "required",
+                "invalidates_attempt": None,
+                "reviewed_at_utc": None,
+            }
+            trial["status"] = "incident_review_required"
+            block["training_workflow"] = "incident_review_required"
+            block["error"] = (
+                "Describe every incident occurrence and decide whether the "
+                "incidents invalidate this attempt."
+            )
+        else:
+            if attempt.get("incidents"):
+                attempt["incident_review"] = {
+                    "status": "complete",
+                    "invalidates_attempt": False,
+                    "reviewed_at_utc": attempt.get("stopped_at_utc"),
+                }
+            self._apply_trial_attempt_outcome(
+                block, trial, attempt, incident_invalidates=False
+            )
+        block["training_live"] = self._empty_training_live()
+        self._persist_training(folder, block, trial, attempt)
+
+    def _apply_trial_attempt_outcome(
+        self,
+        block: dict,
+        trial: dict,
+        attempt: dict,
+        *,
+        incident_invalidates: bool,
+    ) -> None:
+        technical = attempt.get("technical_outcome") or {}
+        completed = bool(technical.get("completed")) and not incident_invalidates
+        attempt["status"] = "succeeded" if completed else "invalid"
+        attempt["valid"] = completed
+        if incident_invalidates:
+            attempt["stop_reason"] = "incident_invalidated"
+        else:
+            attempt["stop_reason"] = technical.get(
+                "stop_reason", attempt.get("stop_reason")
+            )
         if completed:
             trial["status"] = "completed"
             trial["completed_at_utc"] = self._utc_clock()
@@ -1119,8 +1255,6 @@ class ExperimentController:
             block["error"] = (
                 "The attempt is invalid. Retry it or continue with a deviation."
             )
-        block["training_live"] = self._empty_training_live()
-        self._persist_training(folder, block, trial, attempt)
 
     def _refresh_training_live(self, block: dict) -> None:
         live = self._empty_training_live()
@@ -1587,6 +1721,25 @@ class ExperimentController:
                     "current_trial_id": active_block.get("current_trial_id"),
                     "current_trial": json.loads(json.dumps(current_trial)),
                     "current_attempt": json.loads(json.dumps(current_attempt)),
+                    "incident_review_required": bool(
+                        active_block.get("training_workflow")
+                        == "incident_review_required"
+                    ),
+                    "incident_descriptions_missing": sum(
+                        not str(incident.get("text") or "").strip()
+                        for incident in (
+                            current_attempt.get("incidents", [])
+                            if current_attempt
+                            else []
+                        )
+                    ),
+                    "technical_outcome": json.loads(
+                        json.dumps(
+                            current_attempt.get("technical_outcome")
+                            if current_attempt
+                            else None
+                        )
+                    ),
                     "live": json.loads(
                         json.dumps(active_block.get("training_live", {}))
                     ),
@@ -1610,7 +1763,11 @@ class ExperimentController:
                     "go_to_available": bool(
                         self._go_to
                         and active_block.get("training_workflow")
-                        not in ("recording", "stopping_success")
+                        not in (
+                            "recording",
+                            "stopping_success",
+                            "incident_review_required",
+                        )
                     ),
                 }
             return {
@@ -1652,7 +1809,11 @@ class ExperimentController:
                         active_block
                         and active_block["phase"] in TRIAL_PHASES
                         and active_block.get("training_workflow")
-                        not in ("recording", "stopping_success")
+                        not in (
+                            "recording",
+                            "stopping_success",
+                            "incident_review_required",
+                        )
                         and stack_state.get("status") == "active"
                     ),
                     "motion": self._go_to.snapshot() if self._go_to else None,
@@ -1786,6 +1947,65 @@ class ExperimentController:
             if key not in block or is_empty_placeholder:
                 block[key] = value
                 changed = True
+        for trial in block.get("training_trials", []):
+            for attempt in trial.get("attempts", []):
+                changed = self._ensure_attempt_incident_fields(attempt) or changed
+        return changed
+
+    @staticmethod
+    def _ensure_attempt_incident_fields(attempt: dict) -> bool:
+        """Normalise legacy incidents without changing their descriptions."""
+        changed = False
+        seen_ids = set()
+        for index, incident in enumerate(attempt.setdefault("incidents", []), start=1):
+            incident_id = incident.get("id")
+            if not isinstance(incident_id, int) or incident_id < 1 or incident_id in seen_ids:
+                incident_id = index
+                while incident_id in seen_ids:
+                    incident_id += 1
+                incident["id"] = incident_id
+                changed = True
+            seen_ids.add(incident_id)
+            if "text" not in incident:
+                incident["text"] = None
+                changed = True
+            if "described_at_utc" not in incident:
+                incident["described_at_utc"] = (
+                    incident.get("at_utc")
+                    if str(incident.get("text") or "").strip()
+                    else None
+                )
+                changed = True
+        if "technical_outcome" not in attempt:
+            completed = bool(
+                attempt.get("status") == "succeeded" and attempt.get("valid")
+            )
+            attempt["technical_outcome"] = (
+                {
+                    "successful_motion": completed,
+                    "data_valid": bool(attempt.get("valid")),
+                    "completed": completed,
+                    "stop_reason": attempt.get("stop_reason"),
+                    "evaluated_at_utc": attempt.get("stopped_at_utc"),
+                }
+                if attempt.get("stopped_at_utc")
+                else None
+            )
+            changed = True
+        if "incident_review" not in attempt:
+            incidents = attempt.get("incidents", [])
+            described = bool(incidents) and all(
+                str(incident.get("text") or "").strip() for incident in incidents
+            )
+            required = bool(incidents) and not described and attempt.get("stopped_at_utc")
+            attempt["incident_review"] = {
+                "status": "required" if required else "complete" if described else "not_required",
+                "invalidates_attempt": False if described else None,
+                "reviewed_at_utc": (
+                    attempt.get("stopped_at_utc") if described else None
+                ),
+            }
+            changed = True
         return changed
 
     def _recover_training_attempt(
@@ -1798,13 +2018,45 @@ class ExperimentController:
         trial = self._current_training_trial(block)
         if trial.get("attempts"):
             attempt = trial["attempts"][-1]
+            self._ensure_attempt_incident_fields(attempt)
+            if (
+                block.get("training_workflow") == "incident_review_required"
+                or attempt.get("status") == "incident_review_required"
+            ):
+                trial["status"] = "incident_review_required"
+                block["training_workflow"] = "incident_review_required"
+                self._write_attempt(folder, block, trial, attempt)
+                self._write_trial(folder, block, trial)
+                return
             if attempt.get("status") in ("starting", "recording", "stopping_success"):
-                attempt["status"] = "invalid"
                 attempt["stopped_at_utc"] = self._utc_clock()
                 attempt["stop_reason"] = reason
                 attempt["valid"] = False
-                trial["status"] = "decision_required"
-                block["training_workflow"] = "decision_required"
+                attempt["technical_outcome"] = {
+                    "successful_motion": False,
+                    "data_valid": False,
+                    "completed": False,
+                    "stop_reason": reason,
+                    "evaluated_at_utc": attempt["stopped_at_utc"],
+                }
+                pending_incidents = [
+                    incident
+                    for incident in attempt.get("incidents", [])
+                    if not str(incident.get("text") or "").strip()
+                ]
+                if pending_incidents:
+                    attempt["status"] = "incident_review_required"
+                    attempt["incident_review"] = {
+                        "status": "required",
+                        "invalidates_attempt": None,
+                        "reviewed_at_utc": None,
+                    }
+                    trial["status"] = "incident_review_required"
+                    block["training_workflow"] = "incident_review_required"
+                else:
+                    attempt["status"] = "invalid"
+                    trial["status"] = "decision_required"
+                    block["training_workflow"] = "decision_required"
                 self._write_attempt(folder, block, trial, attempt)
                 self._write_trial(folder, block, trial)
                 return

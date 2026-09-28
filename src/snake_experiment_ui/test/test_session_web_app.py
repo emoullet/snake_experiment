@@ -154,8 +154,13 @@ class FakeExperiment:
     def stop_training_attempt(self, block_id):
         self.calls.append(("training_stop", block_id))
 
-    def add_training_incident(self, block_id, text):
-        self.calls.append(("training_incident", block_id, text))
+    def add_training_incident(self, block_id):
+        self.calls.append(("training_incident", block_id))
+
+    def review_training_incidents(self, block_id, descriptions, invalidates_attempt):
+        self.calls.append(
+            ("training_incident_review", block_id, descriptions, invalidates_attempt)
+        )
 
     def resolve_training_attempt(self, block_id, decision):
         self.calls.append(("training_resolve", block_id, decision))
@@ -172,8 +177,13 @@ class FakeExperiment:
     def stop_recording_attempt(self, block_id):
         self.calls.append(("recording_stop", block_id))
 
-    def add_recording_incident(self, block_id, text):
-        self.calls.append(("recording_incident", block_id, text))
+    def add_recording_incident(self, block_id):
+        self.calls.append(("recording_incident", block_id))
+
+    def review_recording_incidents(self, block_id, descriptions, invalidates_attempt):
+        self.calls.append(
+            ("recording_incident_review", block_id, descriptions, invalidates_attempt)
+        )
 
     def resolve_recording_attempt(self, block_id, decision):
         self.calls.append(("recording_resolve", block_id, decision))
@@ -306,7 +316,13 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request(
             "POST",
             f"/api/experiment/blocks/{block}/training/incidents",
-            json={"text": "Minor issue"},
+        )
+        self.assertEqual(response.status_code, 200)
+        descriptions = [{"id": 1, "text": "Minor issue"}]
+        response = await self.request(
+            "POST",
+            f"/api/experiment/blocks/{block}/training/incidents/review",
+            json={"descriptions": descriptions, "invalidates_attempt": False},
         )
         self.assertEqual(response.status_code, 200)
         response = await self.request(
@@ -322,7 +338,8 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
                 ("training_ready", block),
                 ("training_start", block),
                 ("training_stop", block),
-                ("training_incident", block, "Minor issue"),
+                ("training_incident", block),
+                ("training_incident_review", block, descriptions, False),
                 ("training_resolve", block, "retry"),
             ],
         )
@@ -358,7 +375,13 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request(
             "POST",
             f"/api/experiment/blocks/{block}/recording/incidents",
-            json={"text": "Tracking issue"},
+        )
+        self.assertEqual(response.status_code, 200)
+        descriptions = [{"id": 1, "text": "Tracking issue"}]
+        response = await self.request(
+            "POST",
+            f"/api/experiment/blocks/{block}/recording/incidents/review",
+            json={"descriptions": descriptions, "invalidates_attempt": True},
         )
         self.assertEqual(response.status_code, 200)
         response = await self.request(
@@ -374,7 +397,8 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
                 ("recording_ready", block),
                 ("recording_start", block),
                 ("recording_stop", block),
-                ("recording_incident", block, "Tracking issue"),
+                ("recording_incident", block),
+                ("recording_incident_review", block, descriptions, True),
                 ("recording_resolve", block, "advance_with_deviation"),
             ],
         )
@@ -425,7 +449,19 @@ class SessionTemplateTest(unittest.TestCase):
             script,
         )
         self.assertIn('<h2 id="participant-heading">Participant ready</h2>', html)
-        self.assertIn("data-trial-incident-form", script)
+        self.assertIn("data-trial-incident-review-form", script)
+        self.assertIn("data-incident-occurrence", script)
+        self.assertIn("Signal incident occurrence", script)
+        self.assertIn("Validate attempt", script)
+        self.assertIn("Invalidate attempt", script)
+        self.assertLess(
+            script.index('<p class="step-number">Trial issue</p>'),
+            script.index('<p class="step-number">Go to</p>'),
+        )
+        self.assertIn("this.incidentDrafts = new Map();", script)
+        self.assertIn("data-incident-input", script)
+        self.assertIn("replacement?.focus({ preventScroll: true });", script)
+        self.assertIn("replacement.setSelectionRange(...incidentSelection);", script)
         self.assertIn("data-checkup-go-to", html)
         self.assertIn("data-block-go-to", script)
         self.assertIn("Stop motion", script)
@@ -479,11 +515,11 @@ class SessionTemplateTest(unittest.TestCase):
         )
         self.assertLess(
             trial_render.index("Current trial"),
-            trial_render.index("Calibrated start positioning"),
+            trial_render.index("Incident occurrences"),
         )
         self.assertLess(
+            trial_render.index("Incident occurrences"),
             trial_render.index("Calibrated start positioning"),
-            trial_render.index("Timestamped incidents"),
         )
         self.assertLess(
             trial_render.index('data-block-go-to="starting_point"'),
