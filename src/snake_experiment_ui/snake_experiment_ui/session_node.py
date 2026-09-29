@@ -225,6 +225,10 @@ class SessionInterfaceNode(Node):
         presentation_video = video_override or self._participant_profile.video_path(
             "experiment_presentation"
         )
+        mode_explanation_videos = {
+            mode: self._participant_profile.video_path("mode_explanation", mode)
+            for mode in ("baseline", "snake")
+        }
         self._experiment = ExperimentController(
             profile=self._experiment_profile,
             stack_manager=self._stack_manager,
@@ -232,6 +236,7 @@ class SessionInterfaceNode(Node):
             rosbag_manager=self._rosbag_manager,
             go_to_controller=self._experiment_go_to,
             presentation_video=presentation_video,
+            mode_explanation_videos=mode_explanation_videos,
         )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
@@ -251,6 +256,7 @@ class SessionInterfaceNode(Node):
             enrollment=self._enrollment,
             experiment=self._experiment,
             presentation_video=str(presentation_video or ""),
+            mode_explanation_videos=mode_explanation_videos,
         )
         config = uvicorn.Config(
             app,

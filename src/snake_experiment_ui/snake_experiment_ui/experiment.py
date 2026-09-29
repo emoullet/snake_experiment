@@ -216,6 +216,10 @@ class ExperimentProfile:
                     "completed_at_utc": None,
                     "error": None,
                     "control_active": False,
+                    "mode_explanation": {
+                        "status": "pending", "shown_at_utc": None,
+                        "completed_at_utc": None, "video_missing": None,
+                    },
                     "current_segment": None,
                     "segments": [],
                     "restart": {"status": "idle", "error": None},
@@ -251,6 +255,7 @@ class ExperimentController:
         thread_factory: Callable[..., threading.Thread] = threading.Thread,
         go_to_controller=None,
         presentation_video: Optional[Path] = None,
+        mode_explanation_videos: Optional[dict] = None,
     ) -> None:
         self._source_profile = profile
         self._profile = profile
@@ -262,6 +267,11 @@ class ExperimentController:
         self._thread_factory = thread_factory
         self._go_to = go_to_controller
         self._presentation_video = Path(presentation_video).expanduser().resolve() if presentation_video else None
+        self._mode_explanation_videos = {
+            mode: Path(path).expanduser().resolve() if path else None
+            for mode, path in (mode_explanation_videos or {}).items()
+            if mode in MODES
+        }
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
         self._progress: Optional[dict] = None
@@ -430,15 +440,85 @@ class ExperimentController:
 
         return video_is_available(self._presentation_video)
 
+    def mode_explanation_video_available(self, mode: str) -> bool:
+        from .participant_profile import video_is_available
+
+        return mode in MODES and video_is_available(
+            self._mode_explanation_videos.get(mode)
+        )
+
+    def show_mode_explanation(self, block_id: str) -> dict:
+        with self._lock:
+            _, folder = self._require_prepared()
+            block = self._running_block(block_id)
+            if block["phase"] != "discovery":
+                raise ExperimentError("Mode explanation is available only during discovery.")
+            explanation = block["mode_explanation"]
+            if explanation["status"] == "pending":
+                explanation["status"] = "showing"
+                explanation["shown_at_utc"] = self._utc_clock()
+                block["updated_at_utc"] = self._utc_clock()
+                self._persist(folder)
+                self._write_block(folder, block)
+            return self.snapshot()
+
+    def complete_mode_explanation(self, block_id: str) -> dict:
+        with self._lock:
+            progress, folder = self._require_prepared()
+            block = self._running_block(block_id)
+            if block["phase"] != "discovery":
+                raise ExperimentError("Mode explanation is available only during discovery.")
+            explanation = block["mode_explanation"]
+            if explanation["status"] != "showing":
+                raise ExperimentError("Show the mode explanation before validating it.")
+            explanation["status"] = "completed"
+            explanation["completed_at_utc"] = self._utc_clock()
+            explanation["video_missing"] = not self.mode_explanation_video_available(block["mode"])
+            if explanation["video_missing"]:
+                warning = f"{block['mode'].title()} explanation video was unavailable at manual validation."
+                if warning not in progress["warnings"]:
+                    progress["warnings"].append(warning)
+            block["updated_at_utc"] = self._utc_clock()
+            self._persist(folder)
+            self._write_block(folder, block)
+            return self.snapshot()
+
     def participant_snapshot(self) -> dict:
         """Public, read-only projection with no participant or session metadata."""
         with self._lock:
             presentation = self._progress.get("presentation", {}) if self._progress else {}
             status = presentation.get("status", "pending")
+            active = (
+                self._block(self._progress["current_block"])
+                if self._progress and self._progress.get("current_block")
+                else None
+            )
+            if active and active["phase"] == "discovery":
+                explanation = active["mode_explanation"]
+                visible = explanation["status"] in ("showing", "completed")
+                return {
+                    "panel": "B" if visible else "waiting",
+                    "presentation_status": status,
+                    "video_available": (
+                        self.mode_explanation_video_available(active["mode"])
+                        if visible else False
+                    ),
+                    "mode": active["mode"] if visible else None,
+                    "explanation_status": explanation["status"],
+                }
+            any_explanation = bool(
+                self._progress and any(
+                    block["phase"] == "discovery"
+                    and block["mode_explanation"]["status"] != "pending"
+                    for block in self._progress["blocks"]
+                )
+            )
             return {
-                "panel": "A" if status in ("showing", "completed") else "waiting",
+                "panel": "A" if status in ("showing", "completed") and not any_explanation else "waiting",
                 "presentation_status": status,
                 "video_available": self.presentation_video_available(),
+                "mode": None,
+                "explanation_status": "pending",
             }
 
     def start(self, block_id: str) -> dict:
@@ -623,6 +703,8 @@ class ExperimentController:
             if self._go_to is not None:
                 self._go_to.cancel_if_active("block_end")
             if block["phase"] == "discovery":
+                if block["mode_explanation"]["status"] != "completed":
+                    raise ExperimentError("Validate the mode explanation before ending discovery.")
                 if block["control_active"]:
                     self._deactivate_discovery(block, folder, "end_block")
                 if not self._can_end(block):
@@ -740,6 +822,8 @@ class ExperimentController:
             block = self._running_block(block_id)
             if block["phase"] != "discovery":
                 raise ExperimentError("Control toggling is available only during discovery.")
+            if active and block["mode_explanation"]["status"] != "completed":
+                raise ExperimentError("Validate the mode explanation before activating control.")
             if bool(block["control_active"]) == bool(active):
                 return self.snapshot()
             if active:
@@ -1752,7 +1836,10 @@ class ExperimentController:
             can_end = False
             if active_block:
                 if active_block["phase"] == "discovery":
-                    can_end = self._can_end(active_block)
+                    can_end = (
+                        active_block["mode_explanation"]["status"] == "completed"
+                        and self._can_end(active_block)
+                    )
                 elif active_block["phase"] in TRIAL_PHASES:
                     can_end = self._trial_can_end(active_block)
             training_state = None
@@ -1848,6 +1935,11 @@ class ExperimentController:
                 },
                 "progress": json.loads(json.dumps(self._progress)),
                 "presentation_video_available": self.presentation_video_available(),
+                "mode_explanation_video_available": (
+                    self.mode_explanation_video_available(active_block["mode"])
+                    if active_block and active_block["phase"] == "discovery"
+                    else False
+                ),
                 "stack": stack_state,
                 "mapper": mapper_state,
                 "recorder": recorder_state,

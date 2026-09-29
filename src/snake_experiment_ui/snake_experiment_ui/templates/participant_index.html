@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Snake experiment · Participant</title>
     <link rel="stylesheet" href="/session-static/session_style.css?v=participant-lot-1" />
-    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-lot-1" />
-    <script src="/session-static/participant_app.js?v=participant-mp4-1" defer></script>
+    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-lot-2" />
+    <script src="/session-static/participant_app.js?v=participant-lot-2" defer></script>
   </head>
   <body>
     <main class="participant-workspace">
@@ -14,7 +14,19 @@
       <section id="participant-waiting" class="participant-card" aria-live="polite">
         <p class="step-number">Participant screen</p>
         <h1>Waiting for the experimenter</h1>
-        <p class="supporting-copy">The presentation will appear here when the session begins.</p>
+        <p class="supporting-copy">Instructions will appear here when the experimenter is ready.</p>
+      </section>
+      <section id="participant-mode-explanation" class="participant-card" hidden>
+        <p class="step-number">Panel B</p>
+        <h1 id="participant-mode-title">Mode explanation</h1>
+        <div id="participant-mode-video-frame" class="participant-video-frame" hidden>
+          <video id="participant-mode-video" controls preload="metadata" playsinline aria-label="Mode explanation video"></video>
+        </div>
+        <p id="participant-mode-video-error" class="inline-error" role="alert" hidden>The configured mode video could not be prepared for playback. Please notify the experimenter.</p>
+        <div id="participant-mode-video-placeholder" class="participant-video-placeholder" hidden>
+          <strong>Mode explanation video unavailable</strong>
+          <p>The experimenter may continue for development only.</p>
+        </div>
       </section>
       <section id="participant-presentation" class="participant-card" hidden>
         <p class="step-number">Panel A</p>

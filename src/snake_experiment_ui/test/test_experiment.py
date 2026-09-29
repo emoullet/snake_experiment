@@ -225,9 +225,20 @@ class ExperimentControllerTest(unittest.TestCase):
 
     def complete_discovery(self, block_id):
         self.controller.start(block_id)
-        self.controller.set_control(block_id, True)
-        self.controller.set_control(block_id, False)
+        self.set_control(block_id, True)
+        self.set_control(block_id, False)
         self.controller.end(block_id, True)
+
+    def set_control(self, block_id, active):
+        if active:
+            block = next(
+                item for item in self.controller.snapshot()["progress"]["blocks"]
+                if item["id"] == block_id
+            )
+            if block["mode_explanation"]["status"] == "pending":
+                self.controller.show_mode_explanation(block_id)
+                self.controller.complete_mode_explanation(block_id)
+        return self.controller.set_control(block_id, active)
 
     def complete_training(self, block_id):
         self.complete_trials(block_id, "training")
@@ -316,6 +327,76 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(resumed.participant_snapshot()["panel"], "A")
         self.assertEqual(resumed.snapshot()["progress"]["presentation"]["status"], "completed")
 
+    def test_mode_explanation_gates_discovery_and_persists_across_resume(self):
+        self.prepare_session()
+        self.controller.start("mode_1_discovery")
+        with self.assertRaisesRegex(ExperimentError, "Show the mode explanation"):
+            self.controller.complete_mode_explanation("mode_1_discovery")
+        with self.assertRaisesRegex(ExperimentError, "mode explanation"):
+            self.controller.set_control("mode_1_discovery", True)
+        with self.assertRaisesRegex(ExperimentError, "mode explanation"):
+            self.controller.end("mode_1_discovery", True)
+        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        self.controller.show_mode_explanation("mode_1_discovery")
+        public = self.controller.participant_snapshot()
+        self.assertEqual((public["panel"], public["mode"]), ("B", "snake"))
+        self.assertNotIn("pseudonym", public)
+        self.assertNotIn("folder", public)
+        state = self.controller.complete_mode_explanation("mode_1_discovery")
+        explanation = state["progress"]["blocks"][0]["mode_explanation"]
+        self.assertEqual(explanation["status"], "completed")
+        self.assertTrue(explanation["shown_at_utc"])
+        self.assertTrue(explanation["completed_at_utc"])
+        self.assertTrue(explanation["video_missing"])
+        self.assertEqual(self.controller.participant_snapshot()["panel"], "B")
+        self.controller.abort("mode_1_discovery")
+        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        resumed = ExperimentController(
+            ExperimentProfile(self.source_profile), self.stack, self.modes,
+            self.rosbag, utc_clock=self.clock,
+        )
+        resumed.prepare(self.participant)
+        resumed.start("mode_1_discovery")
+        self.assertEqual(resumed.participant_snapshot()["panel"], "B")
+        resumed.set_control("mode_1_discovery", True)
+        resumed.set_control("mode_1_discovery", False)
+        resumed.end("mode_1_discovery", True)
+        self.assertEqual(resumed.participant_snapshot()["panel"], "waiting")
+        resumed.start("mode_2_discovery")
+        self.assertEqual(resumed.participant_snapshot()["panel"], "waiting")
+        with self.assertRaisesRegex(ExperimentError, "mode explanation"):
+            resumed.set_control("mode_2_discovery", True)
+        resumed.show_mode_explanation("mode_2_discovery")
+        self.assertEqual(resumed.participant_snapshot()["mode"], "baseline")
+
+    def test_mode_explanation_uses_configured_video_per_mode(self):
+        videos = {}
+        for mode in ("snake", "baseline"):
+            path = self.root / f"{mode}.mp4"
+            path.write_bytes(b"test video")
+            videos[mode] = path
+        controller = ExperimentController(
+            ExperimentProfile(self.source_profile), self.stack, self.modes,
+            self.rosbag, utc_clock=self.clock, mode_explanation_videos=videos,
+        )
+        controller.prepare(self.participant)
+        controller.start("mode_1_discovery")
+        controller.show_mode_explanation("mode_1_discovery")
+        self.assertTrue(controller.participant_snapshot()["video_available"])
+        self.assertTrue(controller.snapshot()["mode_explanation_video_available"])
+        controller.complete_mode_explanation("mode_1_discovery")
+        self.assertFalse(controller.snapshot()["progress"]["blocks"][0]["mode_explanation"]["video_missing"])
+        controller.set_control("mode_1_discovery", True)
+        controller.set_control("mode_1_discovery", False)
+        controller.end("mode_1_discovery", True)
+        controller.start("mode_2_discovery")
+        controller.show_mode_explanation("mode_2_discovery")
+        public = controller.participant_snapshot()
+        self.assertEqual((public["panel"], public["mode"]), ("B", "baseline"))
+        self.assertTrue(public["video_available"])
+        controller.complete_mode_explanation("mode_2_discovery")
+        self.assertFalse(controller.snapshot()["progress"]["blocks"][1]["mode_explanation"]["video_missing"])
+
     def test_existing_progress_without_presentation_is_not_blocked(self):
         self.controller.prepare(self.participant)
         path = self.participant_folder / "experiment_progress.json"
@@ -386,8 +467,10 @@ class ExperimentControllerTest(unittest.TestCase):
             with self.assertRaisesRegex(ExperimentError, "confirmation"):
                 self.controller.end(block_id, False)
             if "discovery" in block_id:
-                self.controller.set_control(block_id, True)
-                self.controller.set_control(block_id, False)
+                self.controller.show_mode_explanation(block_id)
+                self.controller.complete_mode_explanation(block_id)
+                self.set_control(block_id, True)
+                self.set_control(block_id, False)
             if "training" in block_id:
                 self.complete_training(block_id)
             if "recording" in block_id:
@@ -409,13 +492,15 @@ class ExperimentControllerTest(unittest.TestCase):
     def test_discovery_segments_are_numbered_and_gate_completion(self):
         self.prepare_session()
         self.controller.start("mode_1_discovery")
+        self.controller.show_mode_explanation("mode_1_discovery")
+        self.controller.complete_mode_explanation("mode_1_discovery")
         with self.assertRaisesRegex(ExperimentError, "valid segment"):
             self.controller.end("mode_1_discovery", True)
-        self.controller.set_control("mode_1_discovery", True)
+        self.set_control("mode_1_discovery", True)
         self.assertEqual(self.modes.active, "snake")
-        self.controller.set_control("mode_1_discovery", False)
-        self.controller.set_control("mode_1_discovery", True)
-        state = self.controller.set_control("mode_1_discovery", False)
+        self.set_control("mode_1_discovery", False)
+        self.set_control("mode_1_discovery", True)
+        state = self.set_control("mode_1_discovery", False)
         self.assertEqual(self.rosbag.starts, ["rosbag_001", "rosbag_002"])
         self.assertTrue(state["can_end"])
         self.assertEqual(len(state["segments"]), 2)
@@ -424,8 +509,8 @@ class ExperimentControllerTest(unittest.TestCase):
         self.prepare_session()
         self.controller.start("mode_1_discovery")
         self.rosbag.valid = False
-        self.controller.set_control("mode_1_discovery", True)
-        state = self.controller.set_control("mode_1_discovery", False)
+        self.set_control("mode_1_discovery", True)
+        state = self.set_control("mode_1_discovery", False)
         self.assertFalse(state["can_end"])
         self.assertEqual(state["segments"][0]["status"], "incomplete")
 
@@ -434,7 +519,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start("mode_1_discovery")
         self.controller.restart_stack("mode_1_discovery")
         self.assertFalse(self.controller.snapshot()["control_active"])
-        self.controller.set_control("mode_1_discovery", True)
+        self.set_control("mode_1_discovery", True)
         state = self.controller.restart_stack("mode_1_discovery")
         self.assertTrue(state["control_active"])
         self.assertEqual(self.rosbag.starts, ["rosbag_001", "rosbag_002"])
@@ -455,7 +540,7 @@ class ExperimentControllerTest(unittest.TestCase):
     def test_shutdown_closes_active_segment_before_interrupting_block(self):
         self.prepare_session()
         self.controller.start("mode_1_discovery")
-        self.controller.set_control("mode_1_discovery", True)
+        self.set_control("mode_1_discovery", True)
         self.controller.shutdown()
         progress = json.loads(
             (self.participant_folder / "experiment_progress.json").read_text()

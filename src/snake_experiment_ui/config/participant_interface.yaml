@@ -5,5 +5,5 @@ schema_version: 1
 videos:
   experiment_presentation: "/home/emoullet/Vidéos/Captures vidéo/expe_placeholder.mp4"
   mode_explanation:
-    baseline: ""
-    snake: ""
+    baseline: "/home/emoullet/Vidéos/Captures vidéo/baseline_placeholder.mp4"
+    snake: "/home/emoullet/Vidéos/Captures vidéo/snake_placeholder.mp4"

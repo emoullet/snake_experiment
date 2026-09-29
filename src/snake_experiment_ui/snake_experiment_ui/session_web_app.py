@@ -97,6 +97,7 @@ def create_session_app(
     enrollment=None,
     experiment=None,
     presentation_video="",
+    mode_explanation_videos=None,
 ):
     """Create the Panel B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
@@ -150,6 +151,19 @@ def create_session_app(
         video = Path(presentation_video).expanduser().resolve() if presentation_video else None
         if experiment is None or not video_is_available(video):
             raise HTTPException(status_code=404, detail="Presentation video is unavailable.")
+        return FileResponse(video, media_type="video/mp4", headers=NO_CACHE_HEADERS)
+
+    @app.get("/participant/video/mode/{mode}", include_in_schema=False)
+    async def mode_explanation_video(mode: str):
+        state = experiment.participant_snapshot() if experiment is not None else {}
+        paths = mode_explanation_videos or {}
+        video = paths.get(mode) if mode in ("baseline", "snake") else None
+        if (
+            state.get("panel") != "B"
+            or state.get("mode") != mode
+            or not video_is_available(video)
+        ):
+            raise HTTPException(status_code=404, detail="Mode explanation video is unavailable.")
         return FileResponse(video, media_type="video/mp4", headers=NO_CACHE_HEADERS)
 
     @app.websocket("/participant/ws")
@@ -328,6 +342,14 @@ def create_session_app(
     @app.post("/api/experiment/blocks/{block_id}/start")
     async def start_experiment_block(block_id: str):
         return experiment_action(lambda: experiment.start(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/explanation/show")
+    async def show_mode_explanation(block_id: str):
+        return experiment_action(lambda: experiment.show_mode_explanation(block_id))
+
+    @app.post("/api/experiment/blocks/{block_id}/explanation/complete")
+    async def complete_mode_explanation(block_id: str):
+        return experiment_action(lambda: experiment.complete_mode_explanation(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/end")
     async def end_experiment_block(block_id: str, request: EndBlockRequest):

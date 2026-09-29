@@ -107,6 +107,7 @@ class FakeExperiment:
     def __init__(self):
         self.panel = "D"
         self.calls = []
+        self.public_state = None
 
     def snapshot(self):
         return {
@@ -116,7 +117,7 @@ class FakeExperiment:
         }
 
     def participant_snapshot(self):
-        return {"panel": "A", "presentation_status": "showing", "video_available": False}
+        return self.public_state or {"panel": "A", "presentation_status": "showing", "video_available": False}
 
     def presentation_video_available(self):
         return False
@@ -126,6 +127,12 @@ class FakeExperiment:
 
     def complete_presentation(self):
         self.calls.append(("presentation", "complete"))
+
+    def show_mode_explanation(self, block_id):
+        self.calls.append(("explanation_show", block_id))
+
+    def complete_mode_explanation(self, block_id):
+        self.calls.append(("explanation_complete", block_id))
 
     def start(self, block_id):
         self.calls.append(("start", block_id))
@@ -333,6 +340,55 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_mode_explanation_routes_and_active_video_only(self):
+        from snake_experiment_ui.session_web_app import create_session_app
+
+        self.checkup.workflow = "validated"
+        self.enrollment.panel = "D"
+        block = "mode_1_discovery"
+        for action in ("show", "complete"):
+            response = await self.request(
+                "POST", f"/api/experiment/blocks/{block}/explanation/{action}"
+            )
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.experiment.calls, [
+            ("explanation_show", block), ("explanation_complete", block),
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            videos = {}
+            for mode in ("baseline", "snake"):
+                videos[mode] = root / f"{mode}.mp4"
+                videos[mode].write_bytes(mode.encode())
+            static = root / "static"
+            templates = root / "templates"
+            static.mkdir()
+            templates.mkdir()
+            (templates / "participant_index.html").write_text("Participant")
+            self.app = create_session_app(
+                self.checkup, static, templates, self.enrollment,
+                self.experiment, mode_explanation_videos=videos,
+            )
+            self.experiment.public_state = {
+                "panel": "B", "mode": "snake", "video_available": True,
+            }
+            video_route = next(
+                route for route in self.app.routes
+                if route.path == "/participant/video/mode/{mode}"
+            )
+            response = await video_route.endpoint("snake")
+            self.assertEqual(response.path, videos["snake"])
+            self.assertEqual(response.media_type, "video/mp4")
+            self.assertEqual(
+                (await self.request("GET", "/participant/video/mode/baseline")).status_code,
+                404,
+            )
+            self.experiment.public_state = {"panel": "waiting", "mode": None}
+            self.assertEqual(
+                (await self.request("GET", "/participant/video/mode/snake")).status_code,
+                404,
+            )
+
     async def test_training_routes(self):
         self.checkup.workflow = "validated"
         self.enrollment.panel = "D"
@@ -434,6 +490,19 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
 
 class SessionTemplateTest(unittest.TestCase):
+    def test_participant_panel_b_and_operator_gate_are_present(self):
+        package_root = Path(__file__).parents[1] / "snake_experiment_ui"
+        participant_html = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
+        participant_script = (package_root / "static/participant_app.js").read_text(encoding="utf-8")
+        operator_script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
+        self.assertIn('id="participant-mode-explanation"', participant_html)
+        self.assertIn('id="participant-mode-video"', participant_html)
+        self.assertIn('id="participant-presentation"', participant_html)
+        self.assertIn('modeVideo.getAttribute("src") !== source', participant_script)
+        self.assertIn('data-mode-explanation="show"', operator_script)
+        self.assertIn('data-mode-explanation="complete"', operator_script)
+        self.assertIn('this.busy || (!controlActive && !explanationDone)', operator_script)
+
     def test_participant_panel_a_and_operator_step_are_present(self):
         package_root = Path(__file__).resolve().parents[1] / "snake_experiment_ui"
         operator = (package_root / "templates/session_index.html").read_text(encoding="utf-8")
@@ -545,7 +614,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
         self.assertIn("session_style.css?v=participant-lot-1", html)
-        self.assertIn("session_app.js?v=participant-lot-1", html)
+        self.assertIn("session_app.js?v=participant-lot-2", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(
