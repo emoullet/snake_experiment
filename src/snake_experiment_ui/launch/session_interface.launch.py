@@ -13,6 +13,8 @@ def generate_launch_description():
         DeclareLaunchArgument("stack_use_simulation", default_value="false"),
         DeclareLaunchArgument("diagnostic_profile", default_value=""),
         DeclareLaunchArgument("experiment_profile", default_value=""),
+        DeclareLaunchArgument("participant_interface_profile", default_value=""),
+        DeclareLaunchArgument("presentation_video_path", default_value=""),
         DeclareLaunchArgument("measurement_window_sec", default_value="2.0"),
         DeclareLaunchArgument("repository_root", default_value=""),
         DeclareLaunchArgument("sessions_root", default_value=""),
@@ -40,6 +42,8 @@ def generate_launch_description():
                 ),
                 "diagnostic_profile": LaunchConfiguration("diagnostic_profile"),
                 "experiment_profile": LaunchConfiguration("experiment_profile"),
+                "participant_interface_profile": LaunchConfiguration("participant_interface_profile"),
+                "presentation_video_path": LaunchConfiguration("presentation_video_path"),
                 "measurement_window_sec": LaunchConfiguration(
                     "measurement_window_sec"
                 ),

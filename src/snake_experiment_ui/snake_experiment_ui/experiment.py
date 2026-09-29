@@ -250,6 +250,7 @@ class ExperimentController:
         monotonic_clock: Callable[[], float] = time.monotonic,
         thread_factory: Callable[..., threading.Thread] = threading.Thread,
         go_to_controller=None,
+        presentation_video: Optional[Path] = None,
     ) -> None:
         self._source_profile = profile
         self._profile = profile
@@ -260,6 +261,7 @@ class ExperimentController:
         self._monotonic_clock = monotonic_clock
         self._thread_factory = thread_factory
         self._go_to = go_to_controller
+        self._presentation_video = Path(presentation_video).expanduser().resolve() if presentation_video else None
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
         self._progress: Optional[dict] = None
@@ -308,6 +310,12 @@ class ExperimentController:
                     raise ExperimentError("experiment_progress.json is unreadable.") from error
                 self._validate_progress(progress, participant)
                 changed = False
+                if "presentation" not in progress:
+                    progress["presentation"] = {
+                        "status": "legacy_skipped", "shown_at_utc": None,
+                        "completed_at_utc": None, "video_missing": None,
+                    }
+                    changed = True
                 recovered_active = False
                 migrated_trial_phases = set()
                 for block in progress["blocks"]:
@@ -367,6 +375,11 @@ class ExperimentController:
                     "updated_at_utc": now,
                     "workflow": "ready",
                     "current_block": None,
+                    "presentation": {
+                        "status": "legacy_skipped" if late_initialization else "pending",
+                        "shown_at_utc": None,
+                        "completed_at_utc": None, "video_missing": None,
+                    },
                     "late_initialization": late_initialization,
                     "warnings": (
                         ["Experiment profile and progress were initialized for a legacy session."]
@@ -382,9 +395,57 @@ class ExperimentController:
             self._error = None
             return self.snapshot()
 
+    def show_presentation(self) -> dict:
+        with self._lock:
+            progress, folder = self._require_prepared()
+            if progress["current_block"] is not None:
+                raise ExperimentError("Stop the active block before showing the presentation.")
+            presentation = progress["presentation"]
+            if presentation["status"] == "legacy_skipped":
+                raise ExperimentError("This legacy session does not require presentation validation.")
+            if presentation["status"] == "pending":
+                presentation["status"] = "showing"
+                presentation["shown_at_utc"] = self._utc_clock()
+                self._persist(folder)
+            return self.snapshot()
+
+    def complete_presentation(self) -> dict:
+        with self._lock:
+            progress, folder = self._require_prepared()
+            presentation = progress["presentation"]
+            if presentation["status"] != "showing":
+                raise ExperimentError("Display the experiment presentation before validating it.")
+            presentation["status"] = "completed"
+            presentation["completed_at_utc"] = self._utc_clock()
+            presentation["video_missing"] = not self.presentation_video_available()
+            if presentation["video_missing"]:
+                warning = "Experiment presentation video was unavailable at manual validation."
+                if warning not in progress["warnings"]:
+                    progress["warnings"].append(warning)
+            self._persist(folder)
+            return self.snapshot()
+
+    def presentation_video_available(self) -> bool:
+        from .participant_profile import video_is_available
+
+        return video_is_available(self._presentation_video)
+
+    def participant_snapshot(self) -> dict:
+        """Public, read-only projection with no participant or session metadata."""
+        with self._lock:
+            presentation = self._progress.get("presentation", {}) if self._progress else {}
+            status = presentation.get("status", "pending")
+            return {
+                "panel": "A" if status in ("showing", "completed") else "waiting",
+                "presentation_status": status,
+                "video_available": self.presentation_video_available(),
+            }
+
     def start(self, block_id: str) -> dict:
         with self._lock:
             progress, folder = self._require_prepared()
+            if progress["presentation"]["status"] not in ("completed", "legacy_skipped"):
+                raise ExperimentError("Validate the experiment presentation before starting a block.")
             if progress["current_block"] is not None:
                 raise ExperimentError("Another experiment block is already active.")
             block = self._block(block_id)
@@ -1786,6 +1847,7 @@ class ExperimentController:
                     "configuration": json.loads(json.dumps(self._profile.data)),
                 },
                 "progress": json.loads(json.dumps(self._progress)),
+                "presentation_video_available": self.presentation_video_available(),
                 "stack": stack_state,
                 "mapper": mapper_state,
                 "recorder": recorder_state,
@@ -2136,6 +2198,13 @@ class ExperimentController:
         current = progress.get("current_block")
         if current is not None and current not in {block["id"] for block in blocks}:
             raise ExperimentError("Experiment progress references an unknown active block.")
+        presentation = progress.get("presentation")
+        if presentation is not None and (
+            not isinstance(presentation, dict)
+            or presentation.get("status") not in
+            {"pending", "showing", "completed", "legacy_skipped"}
+        ):
+            raise ExperimentError("Experiment progress has an invalid presentation state.")
 
     def _record_late_initialization(self, folder: Path, profile_path: Path) -> None:
         manifest_path = folder / "manifest.json"

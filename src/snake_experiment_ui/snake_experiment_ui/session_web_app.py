@@ -16,6 +16,7 @@ from .diagnostics import DiagnosticProfileError
 from .enrollment import EnrollmentError
 from .experiment import ExperimentError
 from .mode_manager import ModeError
+from .participant_profile import video_is_available
 from .rosbag_manager import RosbagError
 from .stack_manager import StackError
 from .training import TrainingError
@@ -95,6 +96,7 @@ def create_session_app(
     template_directory: Path,
     enrollment=None,
     experiment=None,
+    presentation_video="",
 ):
     """Create the Panel B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
@@ -132,6 +134,40 @@ def create_session_app(
     @app.get("/api/state")
     async def state():
         return combined_snapshot()
+
+    @app.get("/participant", include_in_schema=False)
+    async def participant_interface():
+        return FileResponse(template_directory / "participant_index.html", headers=NO_CACHE_HEADERS)
+
+    @app.get("/participant/api/state")
+    async def participant_state():
+        return experiment.participant_snapshot() if experiment is not None else {
+            "panel": "waiting", "presentation_status": "pending", "video_available": False,
+        }
+
+    @app.get("/participant/video", include_in_schema=False)
+    async def participant_video():
+        video = Path(presentation_video).expanduser().resolve() if presentation_video else None
+        if experiment is None or not video_is_available(video):
+            raise HTTPException(status_code=404, detail="Presentation video is unavailable.")
+        return FileResponse(video, media_type="video/mp4", headers=NO_CACHE_HEADERS)
+
+    @app.websocket("/participant/ws")
+    async def participant_websocket(websocket: WebSocket):
+        await websocket.accept()
+        previous = None
+        try:
+            while True:
+                current = experiment.participant_snapshot() if experiment is not None else {
+                    "panel": "waiting", "presentation_status": "pending", "video_available": False,
+                }
+                serialised = json.dumps(current, sort_keys=True)
+                if serialised != previous:
+                    await websocket.send_json(current)
+                    previous = serialised
+                await asyncio.sleep(0.25)
+        except (WebSocketDisconnect, RuntimeError):
+            return
 
     def combined_snapshot():
         state = checkup.snapshot()
@@ -280,6 +316,14 @@ def create_session_app(
             )
         action(callback)
         return combined_snapshot()
+
+    @app.post("/api/experiment/presentation/show")
+    async def show_presentation():
+        return experiment_action(lambda: experiment.show_presentation())
+
+    @app.post("/api/experiment/presentation/complete")
+    async def complete_presentation():
+        return experiment_action(lambda: experiment.complete_presentation())
 
     @app.post("/api/experiment/blocks/{block_id}/start")
     async def start_experiment_block(block_id: str):

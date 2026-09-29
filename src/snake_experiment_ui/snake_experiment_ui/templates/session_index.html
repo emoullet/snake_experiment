@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Snake experiment · Session</title>
-    <link rel="stylesheet" href="/session-static/session_style.css?v=trial-hero-3" />
+    <link rel="stylesheet" href="/session-static/session_style.css?v=participant-lot-1" />
   </head>
   <body>
     <main class="workspace">
@@ -151,6 +151,12 @@
           <span id="experiment-status" class="pill pill--neutral">Ready</span>
         </section>
         <div id="experiment-warning" class="warning-list" hidden></div>
+        <section class="card" aria-labelledby="presentation-heading">
+          <div class="section-heading"><div><p class="step-number">00</p><h2 id="presentation-heading">Experiment presentation</h2></div><span id="presentation-status" class="pill pill--neutral">Pending</span></div>
+          <p class="supporting-copy">Open <a href="/participant" target="_blank" rel="noopener">the participant page</a> on the second screen before displaying the presentation.</p>
+          <p id="presentation-video-warning" class="inline-warning" hidden>Presentation video is not configured or unavailable. Development validation is still possible and will be recorded.</p>
+          <div class="button-row"><button id="presentation-show-button" class="secondary-button" data-presentation="show" type="button">Display experiment presentation</button><button id="presentation-complete-button" class="primary-button" data-presentation="complete" type="button" disabled>Presentation done</button></div>
+        </section>
         <section class="card">
           <div class="section-heading"><div><p class="step-number">01</p><h2>Assigned blocks</h2></div><span id="experiment-plan" class="supporting-copy"></span></div>
           <div id="block-list" class="block-list"></div>
@@ -179,6 +185,6 @@
       </section>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/session-static/session_app.js?v=trial-hero-3"></script>
+    <script src="/session-static/session_app.js?v=participant-lot-1"></script>
   </body>
 </html>

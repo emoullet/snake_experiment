@@ -115,6 +115,18 @@ class FakeExperiment:
             "progress": {"workflow": "ready", "blocks": []},
         }
 
+    def participant_snapshot(self):
+        return {"panel": "A", "presentation_status": "showing", "video_available": False}
+
+    def presentation_video_available(self):
+        return False
+
+    def show_presentation(self):
+        self.calls.append(("presentation", "show"))
+
+    def complete_presentation(self):
+        self.calls.append(("presentation", "complete"))
+
     def start(self, block_id):
         self.calls.append(("start", block_id))
         self.panel = "E"
@@ -202,6 +214,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         templates.mkdir()
         (static / "session_app.js").write_text("window.session = true;\n", encoding="utf-8")
         (templates / "session_index.html").write_text("Panel B", encoding="utf-8")
+        (templates / "participant_index.html").write_text("Participant A", encoding="utf-8")
         self.checkup = FakeCheckup()
         self.enrollment = FakeEnrollment()
         self.experiment = FakeExperiment()
@@ -227,6 +240,22 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.checkup.confirmations, [("snake", True)])
         response = await self.request("POST", "/api/checkup/validate")
         self.assertEqual(response.json()["current_panel"], "C")
+
+    async def test_participant_projection_and_presentation_routes(self):
+        registered = {route.path for route in self.app.routes}
+        self.assertTrue({"/participant", "/participant/api/state", "/participant/ws"}.issubset(registered))
+        response = await self.request("GET", "/participant/api/state")
+        self.assertEqual(response.json(), {
+            "panel": "A", "presentation_status": "showing", "video_available": False,
+        })
+        self.assertNotIn("participant", response.text)
+        self.assertEqual((await self.request("GET", "/participant/video")).status_code, 404)
+        self.assertEqual((await self.request("POST", "/api/experiment/presentation/show")).status_code, 409)
+        self.checkup.workflow = "validated"
+        self.enrollment.panel = "D"
+        self.assertEqual((await self.request("POST", "/api/experiment/presentation/show")).status_code, 200)
+        self.assertEqual((await self.request("POST", "/api/experiment/presentation/complete")).status_code, 200)
+        self.assertEqual(self.experiment.calls[-2:], [("presentation", "show"), ("presentation", "complete")])
 
     async def test_unknown_mode_and_stack_action_are_reported(self):
         response = await self.request("POST", "/api/checkup/modes/automatic/start")
@@ -405,6 +434,20 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
 
 class SessionTemplateTest(unittest.TestCase):
+    def test_participant_panel_a_and_operator_step_are_present(self):
+        package_root = Path(__file__).resolve().parents[1] / "snake_experiment_ui"
+        operator = (package_root / "templates/session_index.html").read_text(encoding="utf-8")
+        participant = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
+        script = (package_root / "static/participant_app.js").read_text(encoding="utf-8")
+        self.assertIn('id="participant-waiting"', participant)
+        self.assertIn('id="participant-presentation"', participant)
+        self.assertIn('id="participant-video"', participant)
+        self.assertIn('controls preload="metadata"', participant)
+        self.assertIn('data-presentation="show"', operator)
+        self.assertIn('data-presentation="complete"', operator)
+        self.assertIn('new WebSocket(', script)
+        self.assertNotIn('innerHTML', script)
+
     def test_participant_fields_use_explicit_choices_without_defaults(self):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         html = (package_root / "templates/session_index.html").read_text(
@@ -501,8 +544,8 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("successfully reached", script)
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
-        self.assertIn("session_style.css?v=trial-hero-3", html)
-        self.assertIn("session_app.js?v=trial-hero-3", html)
+        self.assertIn("session_style.css?v=participant-lot-1", html)
+        self.assertIn("session_app.js?v=participant-lot-1", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(

@@ -127,6 +127,8 @@ and marks it as the active report.
 | `stack_use_simulation` | `false` | Use simulation instead of robot hardware. |
 | `diagnostic_profile` | packaged profile | Override the check-up YAML. |
 | `experiment_profile` | packaged profile | Override the versioned block-sequence YAML. |
+| `participant_interface_profile` | packaged `participant_interface.yaml` | Override the participant video-path YAML. |
+| `presentation_video_path` | empty | Optional presentation video path overriding the YAML value. |
 | `measurement_window_sec` | `2.0` | Rolling topic-rate measurement window. |
 | `repository_root` | process working directory | Repository used for Git provenance. |
 | `sessions_root` | process working directory | Root boundary exposed by the server-side folder browser. |
@@ -162,6 +164,30 @@ sessions. Launching prepares durable experiment progress and advances to Panel D
 without starting the stack or a mapper.
 
 ## Panel D: experiment sequence
+
+Before the six robot blocks, new sessions require the separate “Experiment
+presentation” step. Open <http://127.0.0.1:8081/participant> on the second
+screen, then use `Display experiment presentation` in Panel D. The participant
+page begins on a neutral waiting screen and switches to Panel A. The participant
+starts the video manually; the operator confirms with `Presentation done`.
+Until then, the six blocks remain locked on the server. If no MP4 is configured
+or the file is missing, Panel A displays a development placeholder and the
+operator may still validate; the missing video is noted in progress. Existing
+sessions created before this step are not retroactively blocked.
+
+Set `videos.experiment_presentation` in
+`config/participant_interface.yaml` to use a video. The same file reserves
+`videos.mode_explanation.baseline` and `.snake` for the future participant
+Panel B; these paths are not used yet. Empty values keep the placeholder.
+Paths may be absolute or relative to the YAML file. For a different config,
+launch with `participant_interface_profile:=/absolute/path/to/participant_interface.yaml`.
+Only `.mp4` files are accepted. Use H.264 video and AAC audio for broad
+browser compatibility; the interface does not transcode or inspect codecs.
+The existing
+`presentation_video_path:=/absolute/path/to/Experiment_video.mp4`
+launch argument overrides only the presentation path. The
+participant page receives only a read-only presentation state, not the
+participant pseudonym, session paths, or operator actions.
 
 Panel D resolves `mode_1` and `mode_2` from the participant's counterbalanced
 plan and enforces the six blocks in `config/experiment.yaml`: both discovery

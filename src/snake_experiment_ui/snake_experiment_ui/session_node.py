@@ -23,6 +23,7 @@ from .enrollment import EnrollmentController
 from .experiment import ExperimentController, ExperimentProfile
 from .go_to import GoToController
 from .mode_manager import ModeManager
+from .participant_profile import ParticipantProfile
 from .rosbag_manager import RosbagManager
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
@@ -38,6 +39,8 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("stack_use_simulation", False)
         self.declare_parameter("diagnostic_profile", "")
         self.declare_parameter("experiment_profile", "")
+        self.declare_parameter("participant_interface_profile", "")
+        self.declare_parameter("presentation_video_path", "")
         self.declare_parameter("measurement_window_sec", 2.0)
         self.declare_parameter("repository_root", "")
         self.declare_parameter("sessions_root", "")
@@ -209,12 +212,26 @@ class SessionInterfaceNode(Node):
             else share / "config/experiment.yaml"
         )
         self._experiment_profile = ExperimentProfile(experiment_profile_path)
+        configured_participant_profile = str(
+            self.get_parameter("participant_interface_profile").value
+        )
+        participant_profile_path = (
+            Path(configured_participant_profile)
+            if configured_participant_profile
+            else share / "config/participant_interface.yaml"
+        )
+        self._participant_profile = ParticipantProfile(participant_profile_path)
+        video_override = str(self.get_parameter("presentation_video_path").value)
+        presentation_video = video_override or self._participant_profile.video_path(
+            "experiment_presentation"
+        )
         self._experiment = ExperimentController(
             profile=self._experiment_profile,
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
             rosbag_manager=self._rosbag_manager,
             go_to_controller=self._experiment_go_to,
+            presentation_video=presentation_video,
         )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
@@ -233,6 +250,7 @@ class SessionInterfaceNode(Node):
             template_directory=share / "templates",
             enrollment=self._enrollment,
             experiment=self._experiment,
+            presentation_video=str(presentation_video or ""),
         )
         config = uvicorn.Config(
             app,

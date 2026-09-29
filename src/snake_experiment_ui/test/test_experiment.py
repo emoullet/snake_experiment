@@ -201,6 +201,22 @@ class ExperimentControllerTest(unittest.TestCase):
     def pose(self, name):
         return self.calibration["poses"][name]
 
+    def prepare_session(self):
+        state = self.controller.prepare(self.participant)
+        if state["progress"]["presentation"]["status"] == "pending":
+            self.controller.show_presentation()
+            return self.controller.complete_presentation()
+        return state
+
+    def mark_as_new_session(self):
+        profile_folder = self.participant_folder / "experimental_environment"
+        profile_folder.mkdir(exist_ok=True)
+        (profile_folder / "experiment.yaml").write_bytes(self.source_profile.read_bytes())
+        manifest_path = self.participant_folder / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["files"] = [{"path": "experimental_environment/experiment.yaml"}]
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
     def complete_go_to(self, pose_id):
         """Hold a pose long enough for the synthetic Go-to to complete."""
         self.controller.update_ee_pose(self.pose(pose_id))
@@ -238,7 +254,7 @@ class ExperimentControllerTest(unittest.TestCase):
             self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
 
     def start_first_recording_block(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
@@ -247,7 +263,7 @@ class ExperimentControllerTest(unittest.TestCase):
         return self.controller.start("mode_1_recording")
 
     def test_prepare_legacy_session_snapshots_profile_and_resolves_plan(self):
-        state = self.controller.prepare(self.participant)
+        state = self.prepare_session()
         self.assertEqual(state["current_panel"], "D")
         self.assertTrue(state["progress"]["late_initialization"])
         self.assertEqual(
@@ -257,6 +273,58 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertTrue((self.participant_folder / "experimental_environment/experiment.yaml").is_file())
         manifest = json.loads((self.participant_folder / "manifest.json").read_text())
         self.assertTrue(manifest["late_initializations"])
+
+    def test_presentation_gates_new_session_and_persists_missing_video(self):
+        self.mark_as_new_session()
+        state = self.controller.prepare(self.participant)
+        self.assertEqual(state["progress"]["presentation"]["status"], "pending")
+        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        with self.assertRaisesRegex(ExperimentError, "Display the experiment presentation"):
+            self.controller.complete_presentation()
+        with self.assertRaisesRegex(ExperimentError, "Validate the experiment presentation"):
+            self.controller.start("mode_1_discovery")
+        self.assertEqual(self.stack.start_count, 0)
+        self.controller.show_presentation()
+        public = self.controller.participant_snapshot()
+        self.assertEqual(public["panel"], "A")
+        self.assertNotIn("pseudonym", public)
+        self.assertNotIn("folder", public)
+        state = self.controller.complete_presentation()
+        self.assertTrue(state["progress"]["presentation"]["video_missing"])
+        self.assertEqual(self.stack.start_count, 0)
+        self.assertIn("video was unavailable", " ".join(state["progress"]["warnings"]))
+        self.controller.start("mode_1_discovery")
+
+    def test_configured_presentation_video_survives_prepare_and_resume(self):
+        self.mark_as_new_session()
+        video = self.root / "experiment.mp4"
+        video.write_bytes(b"placeholder-test-video")
+        controller = ExperimentController(
+            ExperimentProfile(self.source_profile), self.stack, self.modes,
+            self.rosbag, utc_clock=self.clock, presentation_video=video,
+        )
+        controller.prepare(self.participant)
+        self.assertTrue(controller.participant_snapshot()["video_available"])
+        controller.show_presentation()
+        controller.complete_presentation()
+        self.assertFalse(controller.snapshot()["progress"]["presentation"]["video_missing"])
+        resumed = ExperimentController(
+            ExperimentProfile(self.source_profile), self.stack, self.modes,
+            self.rosbag, utc_clock=self.clock, presentation_video=video,
+        )
+        resumed.prepare(self.participant)
+        self.assertEqual(resumed.participant_snapshot()["panel"], "A")
+        self.assertEqual(resumed.snapshot()["progress"]["presentation"]["status"], "completed")
+
+    def test_existing_progress_without_presentation_is_not_blocked(self):
+        self.controller.prepare(self.participant)
+        path = self.participant_folder / "experiment_progress.json"
+        progress = json.loads(path.read_text(encoding="utf-8"))
+        del progress["presentation"]
+        path.write_text(json.dumps(progress), encoding="utf-8")
+        state = self.controller.prepare(self.participant)
+        self.assertEqual(state["progress"]["presentation"]["status"], "legacy_skipped")
+        self.controller.start("mode_1_discovery")
 
     def test_profile_requires_mcap_and_standardised_instructions(self):
         profile = ExperimentProfile(self.source_profile)
@@ -287,7 +355,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(len(recording_block["training_trials"]), 9)
 
     def test_sequence_is_strict_and_abort_resumes_same_folder(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         with self.assertRaisesRegex(ExperimentError, "next required"):
             self.controller.start("mode_2_discovery")
         state = self.controller.start("mode_1_discovery")
@@ -304,7 +372,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(Path(state["participant"]["folder"]) / "snake_discovery", folder)
 
     def test_end_requires_confirmation_and_final_block_stops_stack(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         ids = [
             "mode_1_discovery",
             "mode_2_discovery",
@@ -330,7 +398,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(self.stack.stop_count, 1)
 
     def test_shutdown_marks_running_block_interrupted(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.controller.start("mode_1_discovery")
         self.controller.shutdown()
         progress = json.loads((self.participant_folder / "experiment_progress.json").read_text())
@@ -339,7 +407,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertIsNone(progress["current_block"])
 
     def test_discovery_segments_are_numbered_and_gate_completion(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.controller.start("mode_1_discovery")
         with self.assertRaisesRegex(ExperimentError, "valid segment"):
             self.controller.end("mode_1_discovery", True)
@@ -353,7 +421,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(len(state["segments"]), 2)
 
     def test_incomplete_segment_does_not_unlock_end(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.controller.start("mode_1_discovery")
         self.rosbag.valid = False
         self.controller.set_control("mode_1_discovery", True)
@@ -362,7 +430,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(state["segments"][0]["status"], "incomplete")
 
     def test_restart_restores_active_state_with_new_segment(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.controller.start("mode_1_discovery")
         self.controller.restart_stack("mode_1_discovery")
         self.assertFalse(self.controller.snapshot()["control_active"])
@@ -373,7 +441,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(state["restart"]["status"], "complete")
 
     def test_restart_failure_keeps_current_block_recoverable(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.controller.start("mode_1_discovery")
         self.stack.fail_start = True
         with self.assertRaisesRegex(ExperimentError, "Unable to restart stack"):
@@ -385,7 +453,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(state["restart"]["status"], "error")
 
     def test_shutdown_closes_active_segment_before_interrupting_block(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.controller.start("mode_1_discovery")
         self.controller.set_control("mode_1_discovery", True)
         self.controller.shutdown()
@@ -398,7 +466,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertFalse(self.rosbag.active)
 
     def test_training_generates_six_global_trials_and_gates_start_pose(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         state = self.controller.start("mode_1_training")
@@ -427,7 +495,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.stop_training_attempt("mode_1_training")
 
     def test_training_go_to_suspends_and_restores_mapper(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
@@ -452,7 +520,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(progress["blocks"][2]["go_to_history"][0]["status"], "succeeded")
 
     def test_legacy_participant_ready_transition_remains_supported(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         block_id = "mode_1_training"
@@ -466,7 +534,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.stop_training_attempt(block_id)
 
     def test_abort_before_recording_requeues_trial_for_resume(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         block_id = "mode_1_training"
@@ -489,7 +557,7 @@ class ExperimentControllerTest(unittest.TestCase):
         )
 
     def test_abort_during_recording_preserves_required_decision(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         block_id = "mode_1_training"
@@ -517,7 +585,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(reviewed["training"]["workflow"], "decision_required")
 
     def test_training_go_to_is_blocked_during_recording(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         block_id = "mode_1_training"
@@ -529,7 +597,7 @@ class ExperimentControllerTest(unittest.TestCase):
             self.controller.start_go_to(block_id, "target_out_1")
 
     def test_training_success_stops_recorder_after_stable_pose(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
@@ -556,7 +624,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertTrue((trial_folder / "attempt_001" / "attempt.json").is_file())
 
     def test_successful_attempt_waits_for_incident_review(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         block_id = "mode_1_training"
@@ -589,7 +657,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(state["training"]["workflow"], "awaiting_prepare")
 
     def test_incident_can_invalidate_technically_successful_attempt(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         block_id = "mode_1_training"
@@ -614,7 +682,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertTrue(attempt["technical_outcome"]["completed"])
 
     def test_training_stale_pose_blocks_readiness_and_recording(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
@@ -629,7 +697,7 @@ class ExperimentControllerTest(unittest.TestCase):
             self.controller.start_training_attempt("mode_1_training")
 
     def test_training_invalid_mcap_requires_operator_resolution(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
@@ -648,7 +716,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(set(attempt["missing_topics"]), set(attempt["topics"]))
 
     def test_shutdown_invalidates_active_training_attempt(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
@@ -708,7 +776,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(attempt["incident_review"]["status"], "complete")
 
     def test_trial_fields_are_migrated_from_legacy_profile(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         profile_path = (
             self.participant_folder / "experimental_environment" / "experiment.yaml"
         )
@@ -766,7 +834,7 @@ class ExperimentControllerTest(unittest.TestCase):
         )
 
     def test_manual_stop_incident_retry_and_deviation(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
@@ -850,7 +918,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(state["training"]["deviations"], [1])
 
     def test_restart_during_training_invalidates_attempt(self):
-        self.controller.prepare(self.participant)
+        self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")

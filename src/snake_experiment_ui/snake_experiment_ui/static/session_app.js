@@ -51,6 +51,10 @@ class SessionInterface {
           acknowledge_mismatch: acknowledged,
         });
       }
+      const presentation = event.target.closest("[data-presentation]");
+      if (presentation) {
+        return this.post(`/api/experiment/presentation/${presentation.dataset.presentation}`);
+      }
       const blockStart = event.target.closest("[data-block-start]");
       if (blockStart) {
         return this.post(`/api/experiment/blocks/${blockStart.dataset.blockStart}/start`);
@@ -527,12 +531,20 @@ class SessionInterface {
     this.setText(status, statusLabels[progress.workflow] || progress.workflow.replaceAll("_", " "));
     this.setClass(status, `pill ${progress.workflow === "sequence_completed" ? "pill--active" : ["interrupted", "error"].includes(progress.workflow) ? "pill--warning" : "pill--neutral"}`);
     this.setText(document.getElementById("experiment-plan"), experiment.participant.experimental_plan.replace("->", " → "));
+    const presentation = progress.presentation || { status: "legacy_skipped" };
+    const presentationStatus = document.getElementById("presentation-status");
+    const presentationLabels = { pending: "Pending", showing: "On participant screen", completed: "Done", legacy_skipped: "Legacy session" };
+    this.setText(presentationStatus, presentationLabels[presentation.status] || presentation.status);
+    this.setClass(presentationStatus, `pill ${presentation.status === "completed" ? "pill--active" : presentation.status === "showing" ? "pill--warning" : "pill--neutral"}`);
+    this.setHidden(document.getElementById("presentation-video-warning"), !!experiment.presentation_video_available || presentation.status === "legacy_skipped");
+    this.setDisabled(document.getElementById("presentation-show-button"), this.busy || !["pending", "showing", "completed"].includes(presentation.status) || !!progress.current_block);
+    this.setDisabled(document.getElementById("presentation-complete-button"), this.busy || presentation.status !== "showing");
     const next = progress.blocks.find((block) => block.status !== "completed");
     this.patchMarkup(document.getElementById("block-list"), progress.blocks.map((block) => {
       const isNext = next?.id === block.id;
       const labels = { not_started: "Locked", starting: "Starting", running: "Running", completed: "Complete", interrupted: "Interrupted", error: "Error" };
       const pillClass = block.status === "completed" ? "pill--active" : ["interrupted", "error"].includes(block.status) ? "pill--warning" : "pill--neutral";
-      const startable = isNext && ["not_started", "interrupted", "error"].includes(block.status) && progress.workflow !== "sequence_completed";
+      const startable = isNext && ["not_started", "interrupted", "error"].includes(block.status) && progress.workflow !== "sequence_completed" && ["completed", "legacy_skipped"].includes(presentation.status);
       const verb = block.status === "interrupted" ? "Resume" : block.status === "error" ? "Retry" : "Start";
       return `<article class="block-entry${isNext ? " is-next" : ""}" data-dom-key="block:${this.escape(block.id)}">
         <span class="block-order">${block.order}</span>
