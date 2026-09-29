@@ -8,3 +8,21 @@
 .participant-video-placeholder strong { font-size: clamp(1.5rem, 3vw, 2.5rem); }
 .participant-video-placeholder p { max-width: 480px; margin: 12px auto 0; color: #a9c5eb; line-height: 1.5; }
 @media (max-width: 600px) { .participant-workspace { width: calc(100% - 24px); padding: 18px 0; } }
+.participant-trial-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(250px, 1fr); gap: clamp(24px, 4vw, 56px); align-items: start; }
+.participant-trial-information { display: grid; gap: 28px; }
+.participant-task, .participant-control-state { display: grid; gap: 8px; }
+.participant-task > span, .participant-control-state > span:first-child, .participant-metrics span { color: var(--muted); font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.participant-task strong { font-size: clamp(1.4rem, 2.6vw, 2.2rem); }
+.participant-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.participant-metrics > div { display: grid; gap: 8px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--background, #f6f9fd); }
+.participant-metrics strong { font-size: clamp(1.35rem, 2.5vw, 2rem); }
+.participant-control-state strong { font-size: 1.4rem; }
+.participant-control-state .pill { justify-self: start; }
+.participant-state-picture { display: grid; place-items: center; min-height: 180px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #f3f7fc; text-align: center; }
+.participant-state-picture img { max-width: 100%; max-height: 300px; object-fit: contain; }
+.participant-state-picture p { color: var(--muted); }
+.participant-camera h2 { margin-top: 0; font-size: 1.1rem; }
+.participant-camera-frame { display: grid; place-items: center; min-height: 235px; margin-bottom: 16px; border-radius: 14px; overflow: hidden; background: #101b2c; color: #d7e7fc; }
+.participant-camera-frame video { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.participant-camera-frame p { padding: 16px; text-align: center; }
+@media (max-width: 760px) { .participant-trial-grid { grid-template-columns: 1fr; } }

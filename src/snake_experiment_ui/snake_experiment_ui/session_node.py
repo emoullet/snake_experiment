@@ -13,6 +13,7 @@ import rclpy
 from rcl_interfaces.msg import ParameterType
 from rcl_interfaces.srv import GetParameters, ListParameters
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState, Joy
 from std_msgs.msg import String
 import uvicorn
@@ -173,6 +174,16 @@ class SessionInterfaceNode(Node):
                 lambda message: self._diagnostics.record("/mode_request", message),
                 10,
             ),
+            self.create_subscription(
+                String,
+                "/joystick_mapper/active_mode",
+                self._record_mapper_local_mode,
+                QoSProfile(
+                    depth=1,
+                    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                    reliability=ReliabilityPolicy.RELIABLE,
+                ),
+            ),
         ]
         self._controller_client = self.create_client(
             ListControllers, "/controller_manager/list_controllers"
@@ -229,6 +240,13 @@ class SessionInterfaceNode(Node):
             mode: self._participant_profile.video_path("mode_explanation", mode)
             for mode in ("baseline", "snake")
         }
+        state_images = {
+            mode: {
+                state: self._participant_profile.state_image_path(mode, state)
+                for state in states
+            }
+            for mode, states in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2")))
+        }
         self._experiment = ExperimentController(
             profile=self._experiment_profile,
             stack_manager=self._stack_manager,
@@ -237,6 +255,7 @@ class SessionInterfaceNode(Node):
             go_to_controller=self._experiment_go_to,
             presentation_video=presentation_video,
             mode_explanation_videos=mode_explanation_videos,
+            state_images=state_images,
         )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
@@ -257,6 +276,7 @@ class SessionInterfaceNode(Node):
             experiment=self._experiment,
             presentation_video=str(presentation_video or ""),
             mode_explanation_videos=mode_explanation_videos,
+            state_images=state_images,
         )
         config = uvicorn.Config(
             app,
@@ -345,11 +365,17 @@ class SessionInterfaceNode(Node):
             )
 
     def _request_mapper_client_reset(self) -> None:
+        if hasattr(self, "_experiment"):
+            self._experiment.clear_mapper_local_mode()
         with self._graph_lock:
             self._graph["mapper_modes"] = []
             self._graph["mapper_parameter_names"] = []
             self._graph["mapper_parameters"] = {}
         self._mapper_client_reset_requested.set()
+
+    def _record_mapper_local_mode(self, message: String) -> None:
+        if hasattr(self, "_experiment"):
+            self._experiment.record_mapper_local_mode(message.data)
 
     def _reset_mapper_parameter_clients(self) -> None:
         self._mapper_client_generation += 1

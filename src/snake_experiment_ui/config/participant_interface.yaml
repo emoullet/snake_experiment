@@ -7,3 +7,13 @@ videos:
   mode_explanation:
     baseline: "/home/emoullet/Vidéos/Captures vidéo/baseline_placeholder.mp4"
     snake: "/home/emoullet/Vidéos/Captures vidéo/snake_placeholder.mp4"
+
+# Absolute or YAML-relative PNG paths. Blank values display a placeholder.
+state_images:
+  baseline:
+    b1: ""
+    b2: ""
+    b3: ""
+  snake:
+    b1: ""
+    b2: ""

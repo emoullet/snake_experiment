@@ -579,6 +579,66 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertIsNotNone(state["training"]["current_trial"]["ready_at_utc"])
         self.controller.stop_training_attempt("mode_1_training")
 
+    def test_participant_panel_c_shows_target_only_during_recording(self):
+        self.prepare_session()
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        public = self.controller.participant_snapshot()
+        self.assertEqual((public["panel"], public["mode"], public["phase"]),
+                         ("C", "snake", "training"))
+        self.assertEqual(public["state"], "Waiting")
+        self.assertIsNone(public["linear_mm"])
+        self.assertNotIn("pseudonym", public)
+        self.assertNotIn("folder", public)
+        self.controller.record_mapper_local_mode("b1")
+        self.assertEqual(self.controller.participant_snapshot()["local_mode"], "b1")
+        self.controller.record_mapper_local_mode("b3")
+        self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
+        self.controller.prepare_training_trial("mode_1_training")
+        public = self.controller.participant_snapshot()
+        self.assertEqual(public["task"], "Preparing trial")
+        self.assertNotIn("target 2", str(public).lower())
+        self.complete_go_to("target_out_1")
+        self.controller.start_training_attempt("mode_1_training")
+        target = json.loads(json.dumps(self.pose("target_2")))
+        target["position"]["x"] += 0.02
+        self.controller.update_ee_pose(target)
+        public = self.controller.participant_snapshot()
+        self.assertEqual(public["task"], "Go to target 2")
+        self.assertEqual(public["state"], "Recording")
+        self.assertAlmostEqual(public["linear_mm"], 20.0)
+        self.assertAlmostEqual(public["angular_deg"], 0.0)
+        self.monotonic_value += 0.6
+        self.assertIsNone(self.controller.participant_snapshot()["linear_mm"])
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.assertEqual(self.controller.participant_snapshot()["state"], "Target reached")
+        self.controller.abort("mode_1_training")
+        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        self.controller.start("mode_1_training")
+        self.assertEqual(self.controller.participant_snapshot()["panel"], "C")
+
+    def test_participant_panel_c_works_for_recording_and_baseline_b3(self):
+        self.participant["experimental_plan"] = "baseline->snake"
+        self.prepare_session()
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.record_mapper_local_mode("b3")
+        self.assertEqual(self.controller.participant_snapshot()["local_mode"], "b3")
+        self.controller.clear_mapper_local_mode()
+        self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
+        self.complete_training("mode_1_training")
+        self.controller.end("mode_1_training", True)
+        self.controller.start("mode_1_recording")
+        public = self.controller.participant_snapshot()
+        self.assertEqual((public["panel"], public["mode"], public["phase"]),
+                         ("C", "baseline", "recording"))
+        self.controller.abort("mode_1_recording")
+        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+
     def test_training_go_to_suspends_and_restores_mapper(self):
         self.prepare_session()
         self.complete_discovery("mode_1_discovery")

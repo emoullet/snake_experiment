@@ -16,6 +16,7 @@ from typing import Callable, Optional
 import yaml
 
 from .go_to import GoToError
+from .participant_profile import STATE_NAMES, state_image_is_available
 from .training import (
     TrainingError,
     build_trials,
@@ -256,6 +257,7 @@ class ExperimentController:
         go_to_controller=None,
         presentation_video: Optional[Path] = None,
         mode_explanation_videos: Optional[dict] = None,
+        state_images: Optional[dict] = None,
     ) -> None:
         self._source_profile = profile
         self._profile = profile
@@ -272,6 +274,15 @@ class ExperimentController:
             for mode, path in (mode_explanation_videos or {}).items()
             if mode in MODES
         }
+        self._state_images = {
+            mode: {
+                state: Path(path).expanduser().resolve() if path else None
+                for state, path in (state_images or {}).get(mode, {}).items()
+                if state in STATE_NAMES[mode]
+            }
+            for mode in MODES
+        }
+        self._mapper_local_mode: Optional[str] = None
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
         self._progress: Optional[dict] = None
@@ -447,6 +458,20 @@ class ExperimentController:
             self._mode_explanation_videos.get(mode)
         )
 
+    def state_image_available(self, mode: str, state: str) -> bool:
+        return state in STATE_NAMES.get(mode, ()) and state_image_is_available(
+            self._state_images.get(mode, {}).get(state)
+        )
+
+    def record_mapper_local_mode(self, state: str) -> None:
+        """Record the mapper's reported local mode, never infer it from joystick input."""
+        with self._lock:
+            self._mapper_local_mode = state if state in {"b1", "b2", "b3"} else None
+
+    def clear_mapper_local_mode(self) -> None:
+        with self._lock:
+            self._mapper_local_mode = None
+
     def show_mode_explanation(self, block_id: str) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
@@ -505,6 +530,53 @@ class ExperimentController:
                     ),
                     "mode": active["mode"] if visible else None,
                     "explanation_status": explanation["status"],
+                }
+            if active and active["phase"] in TRIAL_PHASES and active["status"] == "running":
+                self._refresh_training_live(active)
+                workflow = active.get("training_workflow")
+                trial = next(
+                    (
+                        item for item in active.get("training_trials", [])
+                        if item.get("id") == active.get("current_trial_id")
+                    ),
+                    None,
+                )
+                mapper = self._modes.snapshot()
+                state = (
+                    self._mapper_local_mode
+                    if mapper.get("status") == "active"
+                    and mapper.get("active_mode") == active["mode"]
+                    and self._mapper_local_mode in STATE_NAMES[active["mode"]]
+                    else None
+                )
+                recording = workflow == "recording"
+                live = active.get("training_live", {})
+                target_error = live.get("target_error") if recording and live.get("pose_fresh") else None
+                latest_completed = max(
+                    (
+                        item for item in active.get("training_trials", [])
+                        if item.get("status") == "completed"
+                    ),
+                    key=lambda item: item["id"],
+                    default=None,
+                )
+                reached = workflow in ("awaiting_prepare", "ready_to_end") and latest_completed is not None
+                return {
+                    "panel": "C",
+                    "phase": active["phase"],
+                    "mode": active["mode"],
+                    "task": (
+                        f"Go to target {trial['target_end']}" if recording and trial
+                        else "Preparing trial" if trial and workflow in ("awaiting_start_pose", "ready")
+                        else "Waiting for next trial"
+                    ),
+                    "state": "Recording" if recording else "Target reached" if reached else "Waiting",
+                    "linear_mm": target_error.get("linear_mm") if target_error else None,
+                    "angular_deg": target_error.get("angular_deg") if target_error else None,
+                    "local_mode": state,
+                    "state_image_available": bool(
+                        state and self.state_image_available(active["mode"], state)
+                    ),
                 }
             any_explanation = bool(
                 self._progress and any(

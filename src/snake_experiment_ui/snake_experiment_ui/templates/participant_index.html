@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Snake experiment · Participant</title>
     <link rel="stylesheet" href="/session-static/session_style.css?v=participant-lot-1" />
-    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-lot-2" />
-    <script src="/session-static/participant_app.js?v=participant-lot-2" defer></script>
+    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-lot-3" />
+    <script src="/session-static/participant_app.js?v=participant-lot-3" defer></script>
   </head>
   <body>
     <main class="participant-workspace">
@@ -38,6 +38,30 @@
         <div id="participant-video-placeholder" class="participant-video-placeholder" hidden>
           <strong>Experiment_video.mp4</strong>
           <p>Presentation video is not available yet. The experimenter may continue for development only.</p>
+        </div>
+      </section>
+      <section id="participant-trial" class="participant-card" hidden>
+        <p class="step-number">Panel C</p>
+        <h1 id="participant-trial-title">Training</h1>
+        <div class="participant-trial-grid">
+          <div class="participant-trial-information">
+            <div class="participant-task"><span>Current task</span><strong id="participant-task">Waiting for next trial</strong></div>
+            <div class="participant-metrics">
+              <div><span>Linear distance</span><strong id="participant-linear-distance">—</strong></div>
+              <div><span>Angular distance</span><strong id="participant-angular-distance">—</strong></div>
+            </div>
+            <div class="participant-control-state"><span>Current state</span><strong id="participant-local-mode">Unknown</strong><span id="participant-trial-state" class="pill pill--neutral">Waiting</span></div>
+            <div class="participant-state-picture">
+              <img id="participant-state-image" alt="Current control state explanation" hidden>
+              <p id="participant-state-image-placeholder">State explanation picture is not available yet.</p>
+            </div>
+          </div>
+          <div class="participant-camera">
+            <h2>Webcam live feed</h2>
+            <div class="participant-camera-frame"><video id="participant-camera-video" autoplay muted playsinline hidden></video><p id="participant-camera-placeholder">Camera preview is off.</p></div>
+            <button id="participant-camera-enable" class="secondary-button" type="button">Enable camera</button>
+            <p id="participant-camera-error" class="inline-warning" role="alert" hidden></p>
+          </div>
         </div>
       </section>
     </main>

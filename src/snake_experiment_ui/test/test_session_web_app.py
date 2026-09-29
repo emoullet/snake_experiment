@@ -389,6 +389,46 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
                 404,
             )
 
+    async def test_state_image_serves_only_the_active_participant_mode_and_state(self):
+        from snake_experiment_ui.session_web_app import create_session_app
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            images = {
+                mode: {state: root / f"{mode}_{state}.png" for state in states}
+                for mode, states in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2")))
+            }
+            for states in images.values():
+                for image in states.values():
+                    image.write_bytes(b"test png")
+            self.app = create_session_app(
+                self.checkup, root, root, self.enrollment, self.experiment,
+                state_images=images,
+            )
+            self.experiment.public_state = {
+                "panel": "C", "mode": "snake", "local_mode": "b2",
+            }
+            image_route = next(
+                route for route in self.app.routes
+                if route.path == "/participant/state-image/{mode}/{state}"
+            )
+            response = await image_route.endpoint("snake", "b2")
+            self.assertEqual(response.path, images["snake"]["b2"])
+            self.assertEqual(response.media_type, "image/png")
+            self.assertEqual(
+                (await self.request("GET", "/participant/state-image/baseline/b2")).status_code,
+                404,
+            )
+            self.assertEqual(
+                (await self.request("GET", "/participant/state-image/snake/b1")).status_code,
+                404,
+            )
+            self.experiment.public_state = {"panel": "waiting"}
+            self.assertEqual(
+                (await self.request("GET", "/participant/state-image/snake/b2")).status_code,
+                404,
+            )
+
     async def test_training_routes(self):
         self.checkup.workflow = "validated"
         self.enrollment.panel = "D"
@@ -490,6 +530,23 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
 
 class SessionTemplateTest(unittest.TestCase):
+    def test_participant_panel_c_has_stable_preview_and_no_robot_controls(self):
+        package_root = Path(__file__).parents[1] / "snake_experiment_ui"
+        html = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
+        script = (package_root / "static/participant_app.js").read_text(encoding="utf-8")
+        for element in (
+            "participant-trial", "participant-task", "participant-linear-distance",
+            "participant-angular-distance", "participant-local-mode", "participant-state-image",
+            "participant-camera-video", "participant-camera-enable",
+        ):
+            self.assertIn(f'id="{element}"', html)
+        self.assertIn('getUserMedia({ video: true, audio: false })', script)
+        self.assertIn('window.addEventListener("pagehide", stopCamera)', script)
+        self.assertIn('if (!showC && currentPanel === "C") stopCamera()', script)
+        self.assertIn('if (element.textContent !== value) element.textContent = value', script)
+        self.assertNotIn('innerHTML', script)
+        self.assertNotIn('/api/experiment/', script)
+
     def test_participant_panel_b_and_operator_gate_are_present(self):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         participant_html = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
