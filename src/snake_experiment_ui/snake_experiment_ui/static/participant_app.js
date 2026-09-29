@@ -23,12 +23,13 @@
   const stateImagePlaceholder = document.getElementById("participant-state-image-placeholder");
   const cameraVideo = document.getElementById("participant-camera-video");
   const cameraPlaceholder = document.getElementById("participant-camera-placeholder");
-  const cameraEnable = document.getElementById("participant-camera-enable");
+  const cameraRetry = document.getElementById("participant-camera-retry");
   const cameraError = document.getElementById("participant-camera-error");
   const connection = document.getElementById("participant-connection");
   let reconnectDelay = 500;
   let cameraStream = null;
   let cameraRequest = 0;
+  let cameraStarting = false;
   let currentPanel = "waiting";
   const setText = (element, value) => { if (element.textContent !== value) element.textContent = value; };
   video.addEventListener("error", () => { videoError.hidden = false; });
@@ -42,20 +43,25 @@
 
   function stopCamera() {
     cameraRequest += 1;
+    cameraStarting = false;
     if (cameraStream) cameraStream.getTracks().forEach((track) => track.stop());
     cameraStream = null;
     cameraVideo.srcObject = null;
     cameraVideo.hidden = true;
     cameraPlaceholder.hidden = false;
-    cameraEnable.hidden = false;
-    cameraEnable.disabled = false;
+    setText(cameraPlaceholder, "Camera preview is off.");
+    cameraRetry.hidden = true;
+    cameraRetry.disabled = false;
+    cameraError.hidden = true;
   }
 
-  cameraEnable.addEventListener("click", async () => {
-    if (currentPanel !== "C" || cameraStream) return;
+  async function startCamera() {
+    if (currentPanel !== "C" || cameraStream || cameraStarting) return;
     const request = ++cameraRequest;
-    cameraEnable.disabled = true;
+    cameraStarting = true;
+    cameraRetry.hidden = true;
     cameraError.hidden = true;
+    setText(cameraPlaceholder, "Waiting for camera access…");
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera access is unavailable in this browser or origin.");
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -63,24 +69,29 @@
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
+      cameraStarting = false;
       cameraStream = stream;
       cameraVideo.srcObject = stream;
       cameraVideo.hidden = false;
       cameraPlaceholder.hidden = true;
-      cameraEnable.hidden = true;
     } catch (error) {
       if (request !== cameraRequest) return;
+      cameraStarting = false;
+      setText(cameraPlaceholder, "Camera preview is unavailable.");
       setText(cameraError, "Camera preview is unavailable. You may continue without it.");
       cameraError.hidden = false;
-      cameraEnable.disabled = false;
+      cameraRetry.hidden = false;
     }
-  });
+  }
+
+  cameraRetry.addEventListener("click", startCamera);
   window.addEventListener("pagehide", stopCamera);
 
   function render(state) {
     const showA = state.panel === "A";
     const showB = state.panel === "B" && ["baseline", "snake"].includes(state.mode);
     const showC = state.panel === "C" && ["baseline", "snake"].includes(state.mode);
+    const enteringC = showC && currentPanel !== "C";
     workspace.classList.toggle("participant-workspace--trial", showC);
     if (!showC && currentPanel === "C") stopCamera();
     currentPanel = showC ? "C" : state.panel;
@@ -143,6 +154,7 @@
         stateImagePlaceholder.hidden = false;
       }
     }
+    if (enteringC) void startCamera();
   }
 
   function connect() {

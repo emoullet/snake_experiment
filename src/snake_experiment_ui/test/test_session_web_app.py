@@ -538,10 +538,15 @@ class SessionTemplateTest(unittest.TestCase):
         for element in (
             "participant-trial", "participant-task", "participant-linear-distance",
             "participant-angular-distance", "participant-local-mode", "participant-state-image",
-            "participant-camera-video", "participant-camera-enable",
+            "participant-camera-video", "participant-camera-retry",
         ):
             self.assertIn(f'id="{element}"', html)
         self.assertIn('getUserMedia({ video: true, audio: false })', script)
+        self.assertIn('if (enteringC) void startCamera()', script)
+        self.assertIn('cameraRetry.hidden = false', script)
+        self.assertIn('cameraRetry.hidden = true', script)
+        self.assertIn('Retry camera</button>', html)
+        self.assertNotIn('Enable camera</button>', html)
         self.assertIn('window.addEventListener("pagehide", stopCamera)', script)
         self.assertIn('if (!showC && currentPanel === "C") stopCamera()', script)
         self.assertIn('if (element.textContent !== value) element.textContent = value', script)

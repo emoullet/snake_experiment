@@ -6,7 +6,7 @@
     <title>Snake experiment · Participant</title>
     <link rel="stylesheet" href="/session-static/session_style.css?v=participant-lot-1" />
     <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-layout-2" />
-    <script src="/session-static/participant_app.js?v=participant-layout-2" defer></script>
+    <script src="/session-static/participant_app.js?v=participant-camera-auto" defer></script>
   </head>
   <body>
     <main class="participant-workspace">
@@ -59,7 +59,7 @@
           <div class="participant-camera">
             <h2>Webcam live feed</h2>
             <div class="participant-camera-frame"><video id="participant-camera-video" autoplay muted playsinline hidden></video><p id="participant-camera-placeholder">Camera preview is off.</p></div>
-            <button id="participant-camera-enable" class="secondary-button" type="button">Enable camera</button>
+            <button id="participant-camera-retry" class="secondary-button" type="button" hidden>Retry camera</button>
             <p id="participant-camera-error" class="inline-warning" role="alert" hidden></p>
           </div>
         </div>
