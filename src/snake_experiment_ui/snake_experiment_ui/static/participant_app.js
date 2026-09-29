@@ -1,4 +1,5 @@
 (() => {
+  const workspace = document.querySelector(".participant-workspace");
   const waiting = document.getElementById("participant-waiting");
   const presentation = document.getElementById("participant-presentation");
   const frame = document.getElementById("participant-video-frame");
@@ -80,6 +81,7 @@
     const showA = state.panel === "A";
     const showB = state.panel === "B" && ["baseline", "snake"].includes(state.mode);
     const showC = state.panel === "C" && ["baseline", "snake"].includes(state.mode);
+    workspace.classList.toggle("participant-workspace--trial", showC);
     if (!showC && currentPanel === "C") stopCamera();
     currentPanel = showC ? "C" : state.panel;
     waiting.hidden = showA || showB || showC;

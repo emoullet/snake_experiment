@@ -534,6 +534,7 @@ class SessionTemplateTest(unittest.TestCase):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         html = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
         script = (package_root / "static/participant_app.js").read_text(encoding="utf-8")
+        style = (package_root / "static/participant_style.css").read_text(encoding="utf-8")
         for element in (
             "participant-trial", "participant-task", "participant-linear-distance",
             "participant-angular-distance", "participant-local-mode", "participant-state-image",
@@ -544,6 +545,10 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('window.addEventListener("pagehide", stopCamera)', script)
         self.assertIn('if (!showC && currentPanel === "C") stopCamera()', script)
         self.assertIn('if (element.textContent !== value) element.textContent = value', script)
+        self.assertIn('workspace.classList.toggle("participant-workspace--trial", showC)', script)
+        self.assertIn('.participant-workspace--trial { width: min(1540px, calc(100% - 32px)); }', style)
+        self.assertIn('grid-template-columns: minmax(0, 1.1fr) minmax(250px, 1fr)', style)
+        self.assertIn('participant_style.css?v=participant-layout-2', html)
         self.assertNotIn('innerHTML', script)
         self.assertNotIn('/api/experiment/', script)
 
