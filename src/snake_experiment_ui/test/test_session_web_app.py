@@ -501,8 +501,8 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("successfully reached", script)
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
-        self.assertIn("session_style.css?v=incremental-render-1", html)
-        self.assertIn("session_app.js?v=incremental-render-1", html)
+        self.assertIn("session_style.css?v=trial-hero-3", html)
+        self.assertIn("session_app.js?v=trial-hero-3", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(
@@ -521,9 +521,21 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('class="trial-main-column"', trial_render)
         self.assertIn('class="card trial-progress-card"', trial_render)
         self.assertLess(
-            trial_render.index("Development configuration"),
-            trial_render.index("Current trial"),
+            trial_render.index('class="trial-hero-heading"'),
+            trial_render.index('class="trial-hero-status"'),
         )
+        self.assertLess(
+            trial_render.index('class="trial-hero-status"'),
+            trial_render.index('class="trial-workspace"'),
+        )
+        self.assertIn(
+            '<dl class="participant-summary trial-process-summary" aria-label="Process status">${processItems}</dl>',
+            trial_render,
+        )
+        self.assertLess(trial_render.index('["Mode", block.mode]'), trial_render.index('["Stack", experiment.stack.status]'))
+        self.assertNotIn("Development configuration", trial_render)
+        self.assertNotIn("Provisional", trial_render)
+        self.assertNotIn("These thresholds are development values", trial_render)
         self.assertLess(
             trial_render.index("Current trial"),
             trial_render.index("Incident occurrences"),
@@ -538,6 +550,9 @@ class SessionTemplateTest(unittest.TestCase):
         )
         self.assertIn(".trial-progress-card { position: sticky", style)
         self.assertIn(".trial-progress-card .segment-list", style)
+        self.assertIn(".trial-hero-card { display: grid; grid-template-columns:", style)
+        self.assertIn(".trial-process-summary { display: grid; width: 100%; grid-template-columns: repeat(4,", style)
+        self.assertIn(".trial-hero-card { grid-template-columns: 1fr; }", style)
         self.assertIn("@media (max-width: 900px)", style)
 
 

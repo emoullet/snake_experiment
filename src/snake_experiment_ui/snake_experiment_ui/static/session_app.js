@@ -613,7 +613,6 @@ class SessionInterface {
     const workflow = training.workflow || "awaiting_prepare";
     const current = training.current_trial || trials.find((trial) => trial.id === training.current_trial_id) || null;
     const live = training.live || {};
-    const thresholds = training.thresholds || {};
     const recording = workflow === "recording";
     const completed = trials.filter((trial) => ["completed", "completed_with_deviation"].includes(trial.status)).length;
     const currentAttempt = current?.attempts?.length ? current.attempts[current.attempts.length - 1] : null;
@@ -642,10 +641,10 @@ class SessionInterface {
       <p class="inline-warning" ${reviewRequired ? "" : "hidden"}>Describe every occurrence, then decide whether the incidents invalidate this attempt. ${this.escape(technicalLabel)}.</p>
       <form class="incident-review-form" data-trial-incident-review-form data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" ${reviewRequired ? "" : "hidden"}>${reviewFields}<div class="training-actions"><button class="secondary-button" data-incident-invalidates="false" type="submit" ${this.busy || !reviewRequired ? "disabled" : ""}>Validate attempt</button><button class="reject-button" data-incident-invalidates="true" type="submit" ${this.busy || !reviewRequired ? "disabled" : ""}>Invalidate attempt</button></div></form>`;
     const processItems = [
+      ["Mode", block.mode],
       ["Stack", experiment.stack.status],
       ["Mapper", experiment.mapper.status],
       ["Recorder", experiment.recorder.status],
-      ["Mode", block.mode],
     ].map(([term, value]) => `<div data-dom-key="summary:${term}"><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
     const canPrepare = workflow === "awaiting_prepare" && !experiment.can_end;
     const mapperReady = experiment.mapper?.status === "active" && experiment.mapper?.active_mode === block.mode;
@@ -654,10 +653,12 @@ class SessionInterface {
       && !experiment.go_to?.motion?.active
       && mapperReady;
     this.setClass(panel, "panel-page");
-    this.patchMarkup(panel, `<section class="hero-card"><div><p class="step-number">Panel ${panelLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span></section>
+    this.patchMarkup(panel, `<section class="hero-card trial-hero-card">
+        <div class="trial-hero-heading"><p class="step-number">Panel ${panelLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div>
+        <div class="trial-hero-status"><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span><dl class="participant-summary trial-process-summary" aria-label="Process status">${processItems}</dl></div>
+      </section>
       <div class="trial-workspace">
         <div class="trial-main-column">
-          <section class="card"><div class="section-heading"><div><p class="step-number">Development configuration</p><h2>${Number(thresholds.linear_mm || 0).toFixed(1)} mm · ${Number(thresholds.angular_deg || 0).toFixed(1)}° thresholds</h2></div><span class="pill pill--warning">Provisional</span></div><p class="inline-warning">These thresholds are development values and must be scientifically approved before participant sessions. Success requires ${Number(thresholds.success_dwell_sec || 0).toFixed(1)} s continuously inside both limits.</p><dl class="participant-summary process-summary">${processItems}</dl></section>
           <section class="card"><div class="section-heading"><div><p class="step-number">Current trial</p><h2>${current ? `Trial ${current.id} · cycle ${current.cycle} · target ${current.target_start} → ${current.target_end}` : experiment.can_end ? "All trials resolved" : "Prepare the next trial"}</h2></div><span class="supporting-copy">${current ? this.escape(current.folder) : this.escape(block.folder)}</span></div>
             <div class="training-metrics"><article><span>Start linear error</span><strong>${errorValue(live.start_error, "linear_mm")}</strong></article><article><span>Start angular error</span><strong>${errorValue(live.start_error, "angular_deg")}</strong></article><article><span>Target linear error</span><strong>${errorValue(live.target_error, "linear_mm")}</strong></article><article><span>Target angular error</span><strong>${errorValue(live.target_error, "angular_deg")}</strong></article></div>
             <p class="supporting-copy">${live.error ? this.escape(live.error) : current ? `Place the robot at target_out_${current.target_start}. Arrival success is measured at target_${current.target_end}.` : "The mapper remains active between trials."}</p>

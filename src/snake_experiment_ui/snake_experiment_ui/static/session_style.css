@@ -148,6 +148,10 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
 .segment-entry div { display: grid; gap: 4px; }
 .segment-entry span:not(.pill) { color: var(--muted); font-size: .78rem; }
 .trial-workspace { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr); align-items: start; gap: 18px; }
+.trial-hero-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(390px, 460px); align-items: start; }
+.trial-hero-heading, .trial-hero-status { min-width: 0; }
+.trial-hero-status { display: grid; justify-items: end; }
+.trial-process-summary { display: grid; width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
 .trial-main-column { min-width: 0; }
 .trial-progress-card { position: sticky; top: 18px; display: flex; min-width: 0; max-height: calc(100vh - 36px); flex-direction: column; overflow: hidden; }
 .trial-progress-card .section-heading { flex: 0 0 auto; }
@@ -190,6 +194,8 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
   .enrolment-grid { grid-template-columns: 1fr; }
   .goto-grid { grid-template-columns: repeat(2, 1fr); }
   .hero-card, .validation-card, .action-row { align-items: stretch; flex-direction: column; }
+  .trial-hero-card { grid-template-columns: 1fr; }
+  .trial-hero-status { justify-items: start; }
   .block-entry { grid-template-columns: auto 1fr; }
   .block-entry .pill, .block-entry button { grid-column: 2; justify-self: start; }
   .process-card { align-items: stretch; flex-direction: column; }
@@ -202,4 +208,7 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
   .page-header { align-items: flex-start; flex-direction: column; }
   .step span { display: none; }
   .goto-grid { grid-template-columns: 1fr; }
+  .trial-process-summary { gap: 6px; }
+  .trial-process-summary dt { font-size: .62rem; letter-spacing: .03em; }
+  .trial-process-summary dd { font-size: .75rem; }
 }
