@@ -26,6 +26,7 @@ from .go_to import GoToController
 from .mode_manager import ModeManager
 from .participant_profile import ParticipantProfile
 from .rosbag_manager import RosbagManager
+from .robot_preview import RobotPreview
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
 
@@ -125,6 +126,7 @@ class SessionInterfaceNode(Node):
             ),
         )
         self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
+        self._robot_preview = RobotPreview()
         go_to_options = {
             "publish_target": self._publish_pose_target,
             "publish_passthrough": self._publish_passthrough,
@@ -139,7 +141,7 @@ class SessionInterfaceNode(Node):
             self.create_subscription(
                 JointState,
                 "/joint_states",
-                lambda message: self._diagnostics.record("/joint_states", message),
+                self._record_joint_states,
                 50,
             ),
             self.create_subscription(
@@ -277,6 +279,7 @@ class SessionInterfaceNode(Node):
             presentation_video=str(presentation_video or ""),
             mode_explanation_videos=mode_explanation_videos,
             state_images=state_images,
+            robot_preview=self._robot_preview,
         )
         config = uvicorn.Config(
             app,
@@ -303,6 +306,10 @@ class SessionInterfaceNode(Node):
         experiment = getattr(self, "_experiment", None)
         if experiment is not None:
             experiment.update_ee_pose(message)
+
+    def _record_joint_states(self, message: JointState) -> None:
+        self._diagnostics.record("/joint_states", message)
+        self._robot_preview.record(message)
 
     def _node_names(self):
         return [
