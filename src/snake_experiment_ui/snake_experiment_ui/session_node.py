@@ -26,7 +26,7 @@ from .go_to import GoToController
 from .mode_manager import ModeManager
 from .participant_profile import ParticipantProfile
 from .rosbag_manager import RosbagManager
-from .robot_preview import RobotPreview
+from .robot_preview import PreviewConfiguration, RobotPreview
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
 
@@ -126,7 +126,11 @@ class SessionInterfaceNode(Node):
             ),
         )
         self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
-        self._robot_preview = RobotPreview()
+        self._robot_preview = RobotPreview(
+            configuration=PreviewConfiguration(
+                share / "config/robot_preview.yaml", share
+            )
+        )
         go_to_options = {
             "publish_target": self._publish_pose_target,
             "publish_passthrough": self._publish_passthrough,

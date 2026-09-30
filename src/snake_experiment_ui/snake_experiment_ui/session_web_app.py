@@ -155,6 +155,15 @@ def create_session_app(
             raise HTTPException(status_code=503, detail="Robot preview is unavailable.")
         return robot_preview.snapshot()
 
+    @app.get("/participant/3d-preview/api/config", include_in_schema=False)
+    async def participant_3d_config():
+        if robot_preview is None:
+            raise HTTPException(status_code=503, detail="Robot preview is unavailable.")
+        try:
+            return robot_preview.configuration()
+        except RobotPreviewError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+
     @app.get("/participant/3d-preview/model.urdf", include_in_schema=False)
     async def participant_3d_model():
         if robot_preview is None:

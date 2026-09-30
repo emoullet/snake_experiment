@@ -11,9 +11,130 @@ import time
 from urllib.parse import unquote, urlparse
 from xml.etree import ElementTree
 
+import yaml
+
 
 class RobotPreviewError(RuntimeError):
     """The preview model or an allowed visual asset is unavailable."""
+
+
+class PreviewConfiguration:
+    """Validate installed mapper/manager profiles and expose browser-safe mapping data."""
+
+    COMPONENTS = (
+        "linear_x", "linear_y", "linear_z",
+        "angular_x", "angular_y", "angular_z",
+    )
+
+    def __init__(self, preview_path: Path, package_share: Path) -> None:
+        share = Path(package_share)
+        preview = self._read_yaml(preview_path)
+        if preview.get("schema_version") != 1:
+            raise RobotPreviewError("Unsupported robot preview configuration schema.")
+        try:
+            animation = preview["animation"]
+            linear_mm = self._positive(animation["linear_mm"], "linear_mm")
+            angular_deg = self._positive(animation["angular_deg"], "angular_deg")
+            loop_sec = self._positive(animation["loop_sec"], "loop_sec")
+            if not (1 <= linear_mm <= 200 and 1 <= angular_deg <= 45 and 1 <= loop_sec <= 30):
+                raise RobotPreviewError("Robot preview animation values are outside safe display ranges.")
+            demo = preview["demo_pose"]
+            demo_joints = {
+                name: self._finite(demo[name], name)
+                for name in RobotPoseMonitor.ARM_JOINTS + (RobotPoseMonitor.GRIPPER_JOINT,)
+            }
+            signs = preview["physical_axis_signs"]
+            physical_signs = {
+                "right": self._sign(signs["right"]),
+                "up": self._sign(signs["up"]),
+            }
+            mapper = {}
+            for mode, expected in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2"))):
+                mapper_path = share / "bringup/joystick_mapper/config" / f"joystick_2d_{mode}.yaml"
+                parameters = self._read_yaml(mapper_path)["joystick_mapper"]["ros__parameters"]
+                modes = parameters["modes"]
+                if tuple(modes["names"]) != expected:
+                    raise RobotPreviewError(f"Unexpected {mode} mapper sub-modes.")
+                mapper[mode] = {}
+                for name in expected:
+                    configured = modes[name]
+                    frame = configured["angular_output_frame_id"]
+                    if frame not in ("base_link", "effector_frame"):
+                        raise RobotPreviewError(f"Unsupported {mode}/{name} angular frame.")
+                    axes = {}
+                    for component in self.COMPONENTS:
+                        spec = configured["axes"][component]
+                        index = spec["index"]
+                        if type(index) is not int or index not in (-1, 0, 1):
+                            raise RobotPreviewError(f"Unsupported {mode}/{name}/{component} axis index.")
+                        axes[component] = {
+                            "index": index,
+                            "scale": self._finite(spec["scale"], component),
+                        }
+                    if any(
+                        not any(
+                            spec["index"] == axis and spec["scale"] != 0
+                            for spec in axes.values()
+                        )
+                        for axis in (0, 1)
+                    ):
+                        raise RobotPreviewError(f"{mode}/{name} must map both joystick axes.")
+                    mapper[mode][name] = {"angular_frame": frame, "axes": axes}
+            manager_path = share / "bringup/cartesian_manager/config/explorer_params.yaml"
+            gain = self._positive(
+                self._read_yaml(manager_path)["cartesian_manager"]["ros__parameters"]["shapers"]["snake"]["gain"],
+                "snake gain",
+            )
+        except RobotPreviewError:
+            raise
+        except (KeyError, TypeError, ValueError, IndexError) as error:
+            raise RobotPreviewError("Robot preview configuration is incomplete or invalid.") from error
+        self.public = {
+            "schema_version": 1,
+            "animation": {
+                "linear_mm": linear_mm,
+                "angular_deg": angular_deg,
+                "loop_sec": loop_sec,
+            },
+            "demo_pose": demo_joints,
+            "physical_axis_signs": physical_signs,
+            "snake_gain": gain,
+            "mapper": mapper,
+        }
+
+    @staticmethod
+    def _read_yaml(path: Path) -> dict:
+        try:
+            raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError) as error:
+            raise RobotPreviewError("Robot preview configuration file is unavailable or invalid.") from error
+        if not isinstance(raw, dict):
+            raise RobotPreviewError("Robot preview configuration must be a mapping.")
+        return raw
+
+    @staticmethod
+    def _finite(value, name: str) -> float:
+        if isinstance(value, bool):
+            raise RobotPreviewError(f"Robot preview {name} must be a finite number.")
+        result = float(value)
+        if not math.isfinite(result):
+            raise RobotPreviewError(f"Robot preview {name} must be a finite number.")
+        return result
+
+    @classmethod
+    def _positive(cls, value, name: str) -> float:
+        result = cls._finite(value, name)
+        if result <= 0:
+            raise RobotPreviewError(f"Robot preview {name} must be positive.")
+        return result
+
+    @staticmethod
+    def _sign(value):
+        if value is None:
+            return None
+        if type(value) is not int or value not in (-1, 1):
+            raise RobotPreviewError("Physical joystick axis signs must be -1, 1, or null.")
+        return value
 
 
 class ExplorerModelProvider:
@@ -186,12 +307,18 @@ class RobotPoseMonitor:
 class RobotPreview:
     """Model-provider boundary; Kinova can supply another provider later."""
 
-    def __init__(self, model=None, pose=None) -> None:
+    def __init__(self, model=None, pose=None, configuration=None) -> None:
         self.model = model if model is not None else ExplorerModelProvider()
         self.pose = pose if pose is not None else RobotPoseMonitor()
+        self._configuration = configuration
 
     def record(self, message) -> None:
         self.pose.record(message)
 
     def snapshot(self) -> dict:
         return self.pose.snapshot()
+
+    def configuration(self) -> dict:
+        if self._configuration is None:
+            raise RobotPreviewError("Robot preview configuration is unavailable.")
+        return self._configuration.public

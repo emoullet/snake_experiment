@@ -1,5 +1,6 @@
 import hashlib
 from pathlib import Path
+import shutil
 import tempfile
 import types
 import unittest
@@ -7,12 +8,76 @@ from xml.etree import ElementTree
 
 from snake_experiment_ui.robot_preview import (
     ExplorerModelProvider,
+    PreviewConfiguration,
     RobotPoseMonitor,
     RobotPreviewError,
 )
 
 
 PACKAGE_ROOT = Path(__file__).parents[1]
+
+
+class PreviewConfigurationTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.share = Path(self.temporary_directory.name)
+        original = PACKAGE_ROOT
+        for relative in (
+            "bringup/joystick_mapper/config/joystick_2d_baseline.yaml",
+            "bringup/joystick_mapper/config/joystick_2d_snake.yaml",
+            "bringup/cartesian_manager/config/explorer_params.yaml",
+            "config/robot_preview.yaml",
+        ):
+            destination = self.share / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(original / relative, destination)
+
+    def tearDown(self):
+        self.temporary_directory.cleanup()
+
+    def profile(self):
+        return PreviewConfiguration(self.share / "config/robot_preview.yaml", self.share)
+
+    def test_installed_profiles_expose_only_needed_mapping_data(self):
+        public = self.profile().public
+        self.assertEqual(list(public["mapper"]["baseline"]), ["b1", "b2", "b3"])
+        self.assertEqual(list(public["mapper"]["snake"]), ["b1", "b2"])
+        self.assertEqual(public["mapper"]["baseline"]["b3"]["axes"]["angular_x"]["index"], 0)
+        self.assertEqual(public["snake_gain"], 3.0)
+        self.assertEqual(public["animation"], {"linear_mm": 40.0, "angular_deg": 7.0, "loop_sec": 4.0})
+        self.assertEqual(public["physical_axis_signs"], {"right": None, "up": None})
+        self.assertNotIn(str(self.share), str(public))
+
+    def test_invalid_mapper_and_animation_are_rejected(self):
+        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake.yaml"
+        mapper.write_text(mapper.read_text().replace("names: [b1, b2]", "names: [b1, b2, b3]"))
+        with self.assertRaises(RobotPreviewError):
+            self.profile()
+        mapper.write_text((PACKAGE_ROOT / "bringup/joystick_mapper/config/joystick_2d_snake.yaml").read_text())
+        preview = self.share / "config/robot_preview.yaml"
+        preview.write_text(preview.read_text().replace("linear_mm: 40", "linear_mm: .nan"))
+        with self.assertRaises(RobotPreviewError):
+            self.profile()
+
+    def test_unmapped_axis_is_rejected(self):
+        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_baseline.yaml"
+        mapper.write_text(mapper.read_text().replace("linear_y: {index: 1, scale: 1.0}", "linear_y: {index: -1, scale: 1.0}"))
+        with self.assertRaises(RobotPreviewError):
+            self.profile()
+
+    def test_invalid_snake_gain_is_rejected(self):
+        manager = self.share / "bringup/cartesian_manager/config/explorer_params.yaml"
+        manager.write_text(manager.read_text().replace("gain: 3.0", "gain: -1.0"))
+        with self.assertRaises(RobotPreviewError):
+            self.profile()
+
+    def test_unverified_signs_remain_unknown(self):
+        preview = self.share / "config/robot_preview.yaml"
+        preview.write_text(preview.read_text().replace("right: null", "right: 1"))
+        self.assertEqual(self.profile().public["physical_axis_signs"]["right"], 1)
+        preview.write_text(preview.read_text().replace("right: 1", "right: 0"))
+        with self.assertRaises(RobotPreviewError):
+            self.profile()
 
 
 class ExplorerModelProviderTest(unittest.TestCase):
@@ -127,7 +192,10 @@ class PreviewAssetsTest(unittest.TestCase):
     def test_bundle_matches_versioned_source_and_preview_is_separate(self):
         frontend = PACKAGE_ROOT / "frontend/participant_3d"
         hash_value = hashlib.sha256()
-        for name in ("package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "src/main.js"):
+        for name in (
+            "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
+            "src/main.js", "src/mapping.js", "src/kinematics.js",
+        ):
             hash_value.update(name.encode("utf-8"))
             hash_value.update((frontend / name).read_bytes())
         bundle = (PACKAGE_ROOT / "snake_experiment_ui/static/participant_3d.bundle.js").read_text(
@@ -138,6 +206,10 @@ class PreviewAssetsTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("participant_3d.bundle.js", html)
+        self.assertIn('id="preview-mode"', html)
+        self.assertIn('id="preview-submode"', html)
+        self.assertIn('id="preview-snake-held"', html)
+        self.assertIn('v=participant-3d-2', html)
         participant = (PACKAGE_ROOT / "snake_experiment_ui/templates/participant_index.html").read_text(
             encoding="utf-8"
         )

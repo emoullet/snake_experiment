@@ -3,12 +3,20 @@
 .preview-header h1 { margin: 8px 0 12px; }
 .preview-header p:last-child { color: var(--muted); max-width: 720px; }
 .preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+.preview-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 14px 24px; margin: 0 0 24px; padding: 18px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+.preview-controls label { display: flex; flex-direction: column; gap: 5px; font-weight: 700; }
+.preview-controls select { min-width: 160px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: inherit; }
+.preview-controls .preview-switch { flex-direction: row; align-items: center; gap: 8px; min-height: 40px; }
+.preview-switch input { width: 18px; height: 18px; }
+.preview-controls-note { margin: 0; color: var(--muted); font-size: .9rem; }
+.preview-controls [hidden] { display: none; }
 .preview-card { padding: clamp(16px, 2vw, 28px); border: 1px solid var(--line); border-radius: 22px; background: var(--surface); box-shadow: var(--shadow); min-width: 0; }
 .preview-card-heading { display: flex; align-items: baseline; gap: 12px; }
 .preview-card h2 { margin: 0 0 18px; font-size: clamp(1.1rem, 1.8vw, 1.45rem); }
 .preview-canvas { position: relative; width: 100%; height: clamp(360px, 48vw, 720px); overflow: hidden; border-radius: 14px; background: radial-gradient(circle at 50% 43%, #e8f2ff, #cbdcec 75%); }
 .preview-canvas canvas { display: block; width: 100%; height: 100%; }
 .preview-caption { color: var(--muted); margin: 16px 0 0; }
+.preview-limit { color: #945c09; min-height: 22px; margin: 6px 0 0; font-weight: 600; }
 .preview-message { min-height: 24px; margin: 24px 2px 8px; font-weight: 600; }
 .preview-note { color: var(--muted); }
 @media (max-width: 900px) { .preview-grid { grid-template-columns: 1fr; } .preview-canvas { height: clamp(340px, 70vw, 650px); } }

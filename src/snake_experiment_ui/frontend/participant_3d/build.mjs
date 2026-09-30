@@ -5,7 +5,10 @@ import path from 'node:path';
 import { build } from 'esbuild';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const inputs = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'src/main.js'];
+const inputs = [
+  'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml',
+  'src/main.js', 'src/mapping.js', 'src/kinematics.js',
+];
 const hash = createHash('sha256');
 for (const name of inputs) {
   hash.update(name);

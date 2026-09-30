@@ -50,7 +50,10 @@ class RobotPreviewWebTest(unittest.IsolatedAsyncioTestCase):
         (templates / "participant_3d_preview.html").write_text("3D preview", encoding="utf-8")
         self.asset = root / "allowed.dae"
         self.asset.write_text("<COLLADA/>", encoding="utf-8")
-        self.preview = RobotPreview(model=FakeModel(self.asset), pose=FakePose())
+        self.preview = RobotPreview(
+            model=FakeModel(self.asset), pose=FakePose(),
+            configuration=type("PreviewConfig", (), {"public": {"schema_version": 1, "mapper": {"baseline": {"b1": {}}}}})(),
+        )
         self.app = create_session_app(
             FakeCheckup(), static, templates,
             robot_preview=self.preview,
@@ -68,10 +71,14 @@ class RobotPreviewWebTest(unittest.IsolatedAsyncioTestCase):
         paths = {route.path for route in self.app.routes}
         self.assertTrue({
             "/participant/3d-preview", "/participant/3d-preview/api/state",
+            "/participant/3d-preview/api/config",
             "/participant/3d-preview/model.urdf", "/participant/3d-preview/assets/{asset_id}",
             "/participant/3d-preview/ws",
         }.issubset(paths))
         self.assertEqual((await self.request("/participant/3d-preview/api/state")).json()["joints"], {"joint_1": 0.25})
+        config = await self.request("/participant/3d-preview/api/config")
+        self.assertEqual(config.json()["mapper"], {"baseline": {"b1": {}}})
+        self.assertNotIn(str(self.asset), config.text)
         model = await self.request("/participant/3d-preview/model.urdf")
         self.assertEqual(model.status_code, 200)
         self.assertEqual(model.text, "<robot name='explorer'/>")

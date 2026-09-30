@@ -1,0 +1,18 @@
+schema_version: 1
+animation:
+  linear_mm: 100
+  angular_deg: 20
+  loop_sec: 2
+# Set to +1 or -1 only after verifying the physical joystick direction.
+physical_axis_signs:
+  right: null  # /joy.axes[0]
+  up: null     # /joy.axes[1]
+# Explorer POC2 initial joint positions from explorer_joints.xacro.
+demo_pose:
+  joint_1: 0.0
+  joint_2: 1.71
+  joint_3: 2.5
+  joint_4: 0.0
+  joint_5: -0.17
+  joint_6: 0.0
+  right_finger_joint: 0.0
