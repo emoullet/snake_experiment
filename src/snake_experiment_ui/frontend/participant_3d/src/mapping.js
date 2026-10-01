@@ -16,8 +16,8 @@ export function commandForAxis(config, mode, submode, axisIndex, sign, snakeHeld
   };
   const linear = new Vector3(...LINEAR.map(component));
   const angular = new Vector3(...ANGULAR.map(component));
-  // InputManager only rotates angular values in effector_frame. Linear stays in base.
-  if (mapping.angular_frame === 'effector_frame') angular.applyQuaternion(eeQuaternion);
+  // InputManager rotates angular values in the configured EE frame. Linear stays in base.
+  if (mapping.angular_frame === config.frames.ee) angular.applyQuaternion(eeQuaternion);
   if (mode === 'snake' && snakeHeld) {
     // SnakeShaper: gain * tool-z x linear + angular, using the current EE pose.
     const toolZ = new Vector3(0, 0, 1).applyQuaternion(eeQuaternion);

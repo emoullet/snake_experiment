@@ -6,6 +6,8 @@ import types
 import unittest
 from xml.etree import ElementTree
 
+import yaml
+
 from snake_experiment_ui.robot_preview import (
     ExplorerModelProvider,
     PreviewConfiguration,
@@ -39,6 +41,16 @@ class PreviewConfigurationTest(unittest.TestCase):
     def profile(self):
         return PreviewConfiguration(self.share / "config/robot_preview.yaml", self.share)
 
+    @staticmethod
+    def mapper_parameters(path):
+        return yaml.safe_load(path.read_text())["joystick_mapper"]["ros__parameters"]
+
+    @staticmethod
+    def edit_mapper(path, edit):
+        document = yaml.safe_load(path.read_text())
+        edit(document["joystick_mapper"]["ros__parameters"])
+        path.write_text(yaml.safe_dump(document))
+
     def test_installed_profiles_expose_only_needed_mapping_data(self):
         public = self.profile().public
         self.assertEqual(list(public["mapper"]["baseline"]), ["b1", "b2", "b3"])
@@ -47,12 +59,18 @@ class PreviewConfigurationTest(unittest.TestCase):
         self.assertEqual(public["snake_gain"], 3.0)
         self.assertEqual(public["animation"], {"linear_mm": 100.0, "angular_deg": 20.0, "loop_sec": 2.0})
         self.assertEqual(public["physical_axis_signs"], {"right": 1, "up": 1})
-        self.assertEqual(self.profile().snake_button_index, 10)
+        snake_mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake.yaml"
+        self.assertEqual(
+            self.profile().snake_button_index,
+            self.mapper_parameters(snake_mapper)["snake_button_index"],
+        )
+        self.assertEqual(public["mapper"]["baseline"]["b2"]["angular_frame"], "ft_frame")
+        self.assertEqual(public["frames"], {"base": "base_link", "ee": "ft_frame"})
         self.assertNotIn(str(self.share), str(public))
 
     def test_invalid_mapper_and_animation_are_rejected(self):
         mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake.yaml"
-        mapper.write_text(mapper.read_text().replace("names: [b1, b2]", "names: [b1, b2, b3]"))
+        self.edit_mapper(mapper, lambda parameters: parameters["modes"]["names"].append("b3"))
         with self.assertRaises(RobotPreviewError):
             self.profile()
         mapper.write_text((PACKAGE_ROOT / "bringup/joystick_mapper/config/joystick_2d_snake.yaml").read_text())
@@ -63,8 +81,22 @@ class PreviewConfigurationTest(unittest.TestCase):
 
     def test_unmapped_axis_is_rejected(self):
         mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_baseline.yaml"
-        mapper.write_text(mapper.read_text().replace("linear_y: {index: 1, scale: 1.0}", "linear_y: {index: -1, scale: 1.0}"))
+        self.edit_mapper(
+            mapper,
+            lambda parameters: parameters["modes"]["b1"]["axes"]["linear_y"].update(index=-1),
+        )
         with self.assertRaises(RobotPreviewError):
+            self.profile()
+
+    def test_mapper_frame_must_match_cartesian_manager_configuration(self):
+        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_baseline.yaml"
+        self.edit_mapper(
+            mapper,
+            lambda parameters: parameters["modes"]["b2"].update(
+                angular_output_frame_id="effector_frame"
+            ),
+        )
+        with self.assertRaisesRegex(RobotPreviewError, "Unsupported baseline/b2 angular frame"):
             self.profile()
 
     def test_invalid_snake_gain_is_rejected(self):
@@ -243,7 +275,7 @@ class PreviewAssetsTest(unittest.TestCase):
         self.assertIn('id="preview-mode"', html)
         self.assertIn('id="preview-submode"', html)
         self.assertIn('id="preview-snake-held"', html)
-        self.assertIn('v=participant-3d-3', html)
+        self.assertIn('v=participant-3d-4', html)
         participant = (PACKAGE_ROOT / "snake_experiment_ui/templates/participant_index.html").read_text(
             encoding="utf-8"
         )

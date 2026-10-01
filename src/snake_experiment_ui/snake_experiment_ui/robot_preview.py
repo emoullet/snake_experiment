@@ -48,6 +48,12 @@ class PreviewConfiguration:
                 "right": self._sign(signs["right"]),
                 "up": self._sign(signs["up"]),
             }
+            manager_path = share / "bringup/cartesian_manager/config/explorer_params.yaml"
+            manager_parameters = self._read_yaml(manager_path)["cartesian_manager"]["ros__parameters"]
+            frames = manager_parameters["frames"]
+            allowed_frames = {frames[name] for name in ("base_frame", "ee_frame")}
+            if any(type(frame) is not str or not frame.strip() for frame in allowed_frames):
+                raise RobotPreviewError("Cartesian manager command frames are invalid.")
             mapper = {}
             for mode, expected in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2"))):
                 mapper_path = share / "bringup/joystick_mapper/config" / f"joystick_2d_{mode}.yaml"
@@ -68,7 +74,7 @@ class PreviewConfiguration:
                 for name in expected:
                     configured = modes[name]
                     frame = configured["angular_output_frame_id"]
-                    if frame not in ("base_link", "effector_frame"):
+                    if frame not in allowed_frames:
                         raise RobotPreviewError(f"Unsupported {mode}/{name} angular frame.")
                     axes = {}
                     for component in self.COMPONENTS:
@@ -89,9 +95,8 @@ class PreviewConfiguration:
                     ):
                         raise RobotPreviewError(f"{mode}/{name} must map both joystick axes.")
                     mapper[mode][name] = {"angular_frame": frame, "axes": axes}
-            manager_path = share / "bringup/cartesian_manager/config/explorer_params.yaml"
             gain = self._positive(
-                self._read_yaml(manager_path)["cartesian_manager"]["ros__parameters"]["shapers"]["snake"]["gain"],
+                manager_parameters["shapers"]["snake"]["gain"],
                 "snake gain",
             )
         except RobotPreviewError:
@@ -100,6 +105,7 @@ class PreviewConfiguration:
             raise RobotPreviewError("Robot preview configuration is incomplete or invalid.") from error
         self.public = {
             "schema_version": 1,
+            "frames": {"base": frames["base_frame"], "ee": frames["ee_frame"]},
             "animation": {
                 "linear_mm": linear_mm,
                 "angular_deg": angular_deg,

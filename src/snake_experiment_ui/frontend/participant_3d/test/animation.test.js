@@ -11,6 +11,7 @@ const axes = (x, y, z, rx, ry, rz) => ({
 });
 const config = {
   animation: { linear_mm: 40, angular_deg: 7, loop_sec: 4 },
+  frames: { base: 'base_link', ee: 'ft_frame' },
   physical_axis_signs: { right: null, up: null },
   snake_gain: 3,
   demo_pose: {
@@ -20,12 +21,12 @@ const config = {
   mapper: {
     baseline: {
       b1: { angular_frame: 'base_link', axes: axes(0, 1, -1, -1, -1, -1) },
-      b2: { angular_frame: 'effector_frame', axes: axes(-1, -1, 0, -1, -1, 1) },
-      b3: { angular_frame: 'effector_frame', axes: axes(-1, -1, -1, 0, 1, -1) },
+      b2: { angular_frame: 'ft_frame', axes: axes(-1, -1, 0, -1, -1, 1) },
+      b3: { angular_frame: 'ft_frame', axes: axes(-1, -1, -1, 0, 1, -1) },
     },
     snake: {
       b1: { angular_frame: 'base_link', axes: axes(0, 1, -1, -1, -1, -1) },
-      b2: { angular_frame: 'effector_frame', axes: axes(-1, -1, 0, -1, -1, 1) },
+      b2: { angular_frame: 'ft_frame', axes: axes(-1, -1, 0, -1, -1, 1) },
     },
   },
 };
