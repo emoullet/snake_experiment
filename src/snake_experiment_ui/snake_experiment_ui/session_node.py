@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import threading
+import time
 
 from ament_index_python.packages import get_package_share_directory
 from controller_manager_msgs.srv import ListControllers
@@ -29,6 +30,9 @@ from .rosbag_manager import RosbagManager
 from .robot_preview import PreviewConfiguration, RobotPreview, SnakeButtonMonitor
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
+
+
+CONTROLLER_REQUEST_TIMEOUT_SEC = 5.0
 
 
 class SessionInterfaceNode(Node):
@@ -84,6 +88,9 @@ class SessionInterfaceNode(Node):
             "mapper_parameters": {},
         }
         self._controller_future = None
+        self._controller_future_started_at = None
+        self._controller_client_created_at = time.monotonic()
+        self._controller_client_generation = 0
         self._parameter_list_future = None
         self._parameter_get_future = None
         self._mapper_client_generation = 0
@@ -337,11 +344,7 @@ class SessionInterfaceNode(Node):
     def _refresh_services(self) -> None:
         if self._mapper_client_reset_requested.is_set():
             self._reset_mapper_parameter_clients()
-        if self._controller_client.service_is_ready() and self._controller_future is None:
-            self._controller_future = self._controller_client.call_async(
-                ListControllers.Request()
-            )
-            self._controller_future.add_done_callback(self._controllers_received)
+        self._refresh_controllers()
         active_mode = self._mode_manager.active_mode()
         if (
             active_mode is not None
@@ -376,6 +379,57 @@ class SessionInterfaceNode(Node):
                 )
             )
 
+    def _refresh_controllers(self) -> None:
+        now = time.monotonic()
+        if (
+            self._controller_future is not None
+            and self._controller_future_started_at is not None
+            and now - self._controller_future_started_at >= CONTROLLER_REQUEST_TIMEOUT_SEC
+        ):
+            self.get_logger().warning(
+                "Timed out listing controllers; reconnecting to controller_manager."
+            )
+            self._reconnect_controller_client(now)
+
+        if not self._controller_client.service_is_ready():
+            with self._graph_lock:
+                self._graph["controllers"] = {}
+                manager_visible = "/controller_manager" in self._graph["nodes"]
+            if (
+                manager_visible
+                and now - self._controller_client_created_at >= CONTROLLER_REQUEST_TIMEOUT_SEC
+            ):
+                self.get_logger().warning(
+                    "Controller manager is visible but its service is unavailable; reconnecting."
+                )
+                self._reconnect_controller_client(now)
+            return
+        if self._controller_future is None:
+            self._controller_future = self._controller_client.call_async(
+                ListControllers.Request()
+            )
+            self._controller_future_started_at = now
+            generation = self._controller_client_generation
+            self._controller_future.add_done_callback(
+                lambda future, generation=generation: self._controllers_received(
+                    future, generation
+                )
+            )
+
+    def _reconnect_controller_client(self, now: float) -> None:
+        if self._controller_future is not None:
+            self._controller_client.remove_pending_request(self._controller_future)
+        self.destroy_client(self._controller_client)
+        self._controller_client = self.create_client(
+            ListControllers, "/controller_manager/list_controllers"
+        )
+        self._controller_client_generation += 1
+        self._controller_client_created_at = now
+        self._controller_future = None
+        self._controller_future_started_at = None
+        with self._graph_lock:
+            self._graph["controllers"] = {}
+
     def _request_mapper_client_reset(self) -> None:
         self._snake_button_monitor.reset()
         if hasattr(self, "_experiment"):
@@ -404,7 +458,9 @@ class SessionInterfaceNode(Node):
             GetParameters, "/joystick_mapper/get_parameters"
         )
 
-    def _controllers_received(self, future) -> None:
+    def _controllers_received(self, future, generation) -> None:
+        if generation != self._controller_client_generation:
+            return
         try:
             response = future.result()
             controllers = {item.name: item.state for item in response.controller}
@@ -412,8 +468,12 @@ class SessionInterfaceNode(Node):
                 self._graph["controllers"] = controllers
         except Exception as error:  # service failures are exposed as missing checks
             self.get_logger().warning(f"Unable to list controllers: {error}")
+            with self._graph_lock:
+                self._graph["controllers"] = {}
         finally:
-            self._controller_future = None
+            if generation == self._controller_client_generation:
+                self._controller_future = None
+                self._controller_future_started_at = None
 
     def _parameter_names_received(self, future, generation) -> None:
         if generation != self._mapper_client_generation:
