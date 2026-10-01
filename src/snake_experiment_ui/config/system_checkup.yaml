@@ -34,7 +34,8 @@ mode_topics:
     min_rate_hz: 5.0
   /mode_request:
     type: std_msgs/msg/String
-    min_rate_hz: 0.5
+    # Event-driven: verify type and requested mode, but not publication frequency.
+    min_rate_hz: 0.0
 
 modes:
   baseline:

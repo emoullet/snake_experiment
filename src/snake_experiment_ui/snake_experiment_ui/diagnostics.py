@@ -269,16 +269,17 @@ class DiagnosticMonitor:
                     list(observed_types),
                 )
             )
-            rate = self._rate(topic, now)
-            checks.append(
-                self._check(
-                    f"topic_rate:{topic}",
-                    rate >= requirement.min_rate_hz,
-                    requirement.min_rate_hz,
-                    round(rate, 3),
-                    unit="Hz",
+            if requirement.min_rate_hz > 0:
+                rate = self._rate(topic, now)
+                checks.append(
+                    self._check(
+                        f"topic_rate:{topic}",
+                        rate >= requirement.min_rate_hz,
+                        requirement.min_rate_hz,
+                        round(rate, 3),
+                        unit="Hz",
+                    )
                 )
-            )
             valid, error = self._message_validity.get(
                 topic, (False, "No message received.")
             )

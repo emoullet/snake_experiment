@@ -108,6 +108,41 @@ class DiagnosticMonitorTest(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertTrue(result["joystick_activity"])
 
+    def test_mode_request_has_no_rate_check_but_still_requires_a_valid_request(self):
+        self.record_passing_rates()
+        self.clock.now += self.profile.measurement_window_sec + 0.1
+        topic_messages = messages()
+        for topic, count in {
+            "/joint_states": 40,
+            "/ee_pose": 40,
+            "/joy": 10,
+            "/joystick_cartesian_command": 10,
+            "/cartesian_command": 10,
+        }.items():
+            for _ in range(count):
+                self.monitor.record(topic, topic_messages[topic], self.clock.now)
+
+        checks = {
+            check["name"]: check
+            for check in self.monitor.evaluate("baseline")["checks"]
+        }
+        self.assertNotIn("topic_rate:/mode_request", checks)
+        self.assertIn("topic_rate:/joy", checks)
+        for name in (
+            "topic_type:/mode_request",
+            "message:/mode_request",
+            "mode_request",
+        ):
+            self.assertTrue(checks[name]["passed"])
+
+        self.monitor.reset_mode_observation()
+        checks = {
+            check["name"]: check
+            for check in self.monitor.evaluate("baseline")["checks"]
+        }
+        self.assertFalse(checks["message:/mode_request"]["passed"])
+        self.assertFalse(checks["mode_request"]["passed"])
+
     def test_snake_requires_only_b1_and_b2(self):
         self.monitor.reset_mode_observation()
         self.graph["mapper_modes"] = ["b1", "b2"]
