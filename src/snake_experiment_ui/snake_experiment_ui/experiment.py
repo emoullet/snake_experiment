@@ -258,6 +258,7 @@ class ExperimentController:
         presentation_video: Optional[Path] = None,
         mode_explanation_videos: Optional[dict] = None,
         state_images: Optional[dict] = None,
+        snake_button_provider: Optional[Callable[[], Optional[bool]]] = None,
     ) -> None:
         self._source_profile = profile
         self._profile = profile
@@ -283,6 +284,7 @@ class ExperimentController:
             for mode in MODES
         }
         self._mapper_local_mode: Optional[str] = None
+        self._snake_button_provider = snake_button_provider or (lambda: None)
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
         self._progress: Optional[dict] = None
@@ -574,6 +576,11 @@ class ExperimentController:
                     "linear_mm": target_error.get("linear_mm") if target_error else None,
                     "angular_deg": target_error.get("angular_deg") if target_error else None,
                     "local_mode": state,
+                    "snake_button_held": (
+                        self._snake_button_provider()
+                        if active["mode"] == "snake" and state is not None
+                        else None
+                    ),
                     "state_image_available": bool(
                         state and self.state_image_available(active["mode"], state)
                     ),

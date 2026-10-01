@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Snake experiment · Participant</title>
     <link rel="stylesheet" href="/session-static/session_style.css?v=participant-lot-1" />
-    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-layout-2" />
-    <script src="/session-static/participant_app.js?v=participant-camera-auto" defer></script>
+    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-mapping-1" />
+    <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
+    <script src="/session-static/participant_app.js?v=participant-mapping-1" defer></script>
+    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-1" defer></script>
   </head>
   <body>
     <main class="participant-workspace">
@@ -51,10 +53,6 @@
               <div><span>Angular distance</span><strong id="participant-angular-distance">—</strong></div>
             </div>
             <div class="participant-control-state"><span>Current state</span><strong id="participant-local-mode">Unknown</strong><span id="participant-trial-state" class="pill pill--neutral">Waiting</span></div>
-            <div class="participant-state-picture">
-              <img id="participant-state-image" alt="Current control state explanation" hidden>
-              <p id="participant-state-image-placeholder">State explanation picture is not available yet.</p>
-            </div>
           </div>
           <div class="participant-camera">
             <h2>Webcam live feed</h2>
@@ -63,6 +61,24 @@
             <p id="participant-camera-error" class="inline-warning" role="alert" hidden></p>
           </div>
         </div>
+        <section class="participant-mapping" aria-label="Current joystick mapping explanation">
+          <div class="participant-mapping-heading"><h2>Joystick mapping · example inputs</h2><span id="participant-snake-indicator" class="pill pill--neutral" hidden></span></div>
+          <p id="participant-mapping-message" class="preview-note" role="status">Waiting for the current mapper state.</p>
+          <div class="preview-grid">
+            <article class="preview-card mapping-view" id="participant-horizontal-view">
+              <div class="preview-card-heading"><span class="step-number">01</span><h3>Horizontal input</h3></div>
+              <div class="mapping-motion"><div class="preview-canvas mapping-canvas" aria-label="Animated Explorer arm for horizontal input"></div><div class="mapping-joystick" aria-label="Illustrative horizontal joystick input"></div></div>
+              <p class="preview-caption"><span data-mapping-direction>Axis 0</span> · <span data-mapping-source class="pill pill--neutral">Waiting</span></p>
+              <p class="preview-limit" data-mapping-limit role="status"></p>
+            </article>
+            <article class="preview-card mapping-view" id="participant-vertical-view">
+              <div class="preview-card-heading"><span class="step-number">02</span><h3>Vertical input</h3></div>
+              <div class="mapping-motion"><div class="preview-canvas mapping-canvas" aria-label="Animated Explorer arm for vertical input"></div><div class="mapping-joystick" aria-label="Illustrative vertical joystick input"></div></div>
+              <p class="preview-caption"><span data-mapping-direction>Axis 1</span> · <span data-mapping-source class="pill pill--neutral">Waiting</span></p>
+              <p class="preview-limit" data-mapping-limit role="status"></p>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
   </body>

@@ -34,6 +34,15 @@ export function axisLabels(config, axisIndex) {
   return physical === 1 ? [positive, negative] : [negative, positive];
 }
 
+/** Joystick and arm share this phase; the stick shows commanded input, not IK reachability. */
+export function joystickDisplacement(config, axisIndex, phase, radius = 32) {
+  const sign = axisIndex === 0 ? config.physical_axis_signs.right : config.physical_axis_signs.up;
+  const input = Math.sin(2 * Math.PI * phase);
+  const direction = sign === -1 ? -1 : 1;
+  const amount = Math.abs(input) < 1e-12 ? 0 : input * radius * direction;
+  return axisIndex === 0 ? { x: amount, y: 0, input } : { x: 0, y: amount === 0 ? 0 : -amount, input };
+}
+
 /** Select a fresh server pose at every loop boundary, never a stale cached pose. */
 export function cycleBasePose(config, state) {
   const names = Array.from({ length: 6 }, (_, index) => `joint_${index + 1}`);

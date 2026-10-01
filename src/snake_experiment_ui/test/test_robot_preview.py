@@ -11,6 +11,7 @@ from snake_experiment_ui.robot_preview import (
     PreviewConfiguration,
     RobotPoseMonitor,
     RobotPreviewError,
+    SnakeButtonMonitor,
 )
 
 
@@ -44,8 +45,9 @@ class PreviewConfigurationTest(unittest.TestCase):
         self.assertEqual(list(public["mapper"]["snake"]), ["b1", "b2"])
         self.assertEqual(public["mapper"]["baseline"]["b3"]["axes"]["angular_x"]["index"], 0)
         self.assertEqual(public["snake_gain"], 3.0)
-        self.assertEqual(public["animation"], {"linear_mm": 40.0, "angular_deg": 7.0, "loop_sec": 4.0})
-        self.assertEqual(public["physical_axis_signs"], {"right": None, "up": None})
+        self.assertEqual(public["animation"], {"linear_mm": 100.0, "angular_deg": 20.0, "loop_sec": 2.0})
+        self.assertEqual(public["physical_axis_signs"], {"right": 1, "up": 1})
+        self.assertEqual(self.profile().snake_button_index, 10)
         self.assertNotIn(str(self.share), str(public))
 
     def test_invalid_mapper_and_animation_are_rejected(self):
@@ -55,7 +57,7 @@ class PreviewConfigurationTest(unittest.TestCase):
             self.profile()
         mapper.write_text((PACKAGE_ROOT / "bringup/joystick_mapper/config/joystick_2d_snake.yaml").read_text())
         preview = self.share / "config/robot_preview.yaml"
-        preview.write_text(preview.read_text().replace("linear_mm: 40", "linear_mm: .nan"))
+        preview.write_text(preview.read_text().replace("linear_mm: 100", "linear_mm: .nan"))
         with self.assertRaises(RobotPreviewError):
             self.profile()
 
@@ -71,11 +73,17 @@ class PreviewConfigurationTest(unittest.TestCase):
         with self.assertRaises(RobotPreviewError):
             self.profile()
 
-    def test_unverified_signs_remain_unknown(self):
+    def test_axis_signs_support_unknown_and_reject_invalid_values(self):
         preview = self.share / "config/robot_preview.yaml"
-        preview.write_text(preview.read_text().replace("right: null", "right: 1"))
-        self.assertEqual(self.profile().public["physical_axis_signs"]["right"], 1)
-        preview.write_text(preview.read_text().replace("right: 1", "right: 0"))
+        preview.write_text(preview.read_text().replace("right: 1", "right: null"))
+        self.assertIsNone(self.profile().public["physical_axis_signs"]["right"])
+        preview.write_text(preview.read_text().replace("right: null", "right: 0"))
+        with self.assertRaises(RobotPreviewError):
+            self.profile()
+
+    def test_snake_button_must_be_a_hold_binding(self):
+        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake.yaml"
+        mapper.write_text(mapper.read_text().replace("snake_button_mode: hold", "snake_button_mode: toggle"))
         with self.assertRaises(RobotPreviewError):
             self.profile()
 
@@ -188,20 +196,46 @@ class RobotPoseMonitorTest(unittest.TestCase):
                 self.assertEqual(self.monitor.snapshot()["status"], "unavailable")
 
 
+class SnakeButtonMonitorTest(unittest.TestCase):
+    def test_pressed_released_stale_invalid_and_reset(self):
+        now = [10.0]
+        monitor = SnakeButtonMonitor(10, clock=lambda: now[0], max_age_sec=0.5)
+        self.assertIsNone(monitor.snapshot())
+        monitor.record(types.SimpleNamespace(buttons=[0] * 10 + [1]))
+        self.assertIs(monitor.snapshot(), True)
+        now[0] += 1.2
+        monitor.record(types.SimpleNamespace(buttons=[0] * 10 + [1]))
+        self.assertIs(monitor.snapshot(), True)
+        now[0] += 0.3
+        monitor.record(types.SimpleNamespace(buttons=[0] * 11))
+        self.assertIs(monitor.snapshot(), False)
+        now[0] += 0.51
+        self.assertIsNone(monitor.snapshot())
+        monitor.record(types.SimpleNamespace(buttons=[0] * 10))
+        self.assertIsNone(monitor.snapshot())
+        monitor.record(types.SimpleNamespace(buttons=[0] * 10 + [2]))
+        self.assertIsNone(monitor.snapshot())
+        monitor.record(types.SimpleNamespace(buttons=[0] * 10 + [1]))
+        monitor.reset()
+        self.assertIsNone(monitor.snapshot())
+
+
 class PreviewAssetsTest(unittest.TestCase):
     def test_bundle_matches_versioned_source_and_preview_is_separate(self):
         frontend = PACKAGE_ROOT / "frontend/participant_3d"
         hash_value = hashlib.sha256()
         for name in (
             "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
-            "src/main.js", "src/mapping.js", "src/kinematics.js",
+            "src/main.js", "src/participant.js", "src/animation.js",
+            "src/mapping.js", "src/kinematics.js",
         ):
             hash_value.update(name.encode("utf-8"))
             hash_value.update((frontend / name).read_bytes())
-        bundle = (PACKAGE_ROOT / "snake_experiment_ui/static/participant_3d.bundle.js").read_text(
-            encoding="utf-8"
-        )
-        self.assertTrue(bundle.startswith(f"// source-sha256: {hash_value.hexdigest()}\n"))
+        for filename in ("participant_3d.bundle.js", "participant_mapping.bundle.js"):
+            bundle = (PACKAGE_ROOT / "snake_experiment_ui/static" / filename).read_text(
+                encoding="utf-8"
+            )
+            self.assertTrue(bundle.startswith(f"// source-sha256: {hash_value.hexdigest()}\n"))
         html = (PACKAGE_ROOT / "snake_experiment_ui/templates/participant_3d_preview.html").read_text(
             encoding="utf-8"
         )
@@ -209,11 +243,21 @@ class PreviewAssetsTest(unittest.TestCase):
         self.assertIn('id="preview-mode"', html)
         self.assertIn('id="preview-submode"', html)
         self.assertIn('id="preview-snake-held"', html)
-        self.assertIn('v=participant-3d-2', html)
+        self.assertIn('v=participant-3d-3', html)
         participant = (PACKAGE_ROOT / "snake_experiment_ui/templates/participant_index.html").read_text(
             encoding="utf-8"
         )
         self.assertNotIn("participant_3d.bundle.js", participant)
+        self.assertIn("participant_mapping.bundle.js", participant)
+        self.assertIn('id="participant-horizontal-view"', participant)
+        self.assertIn('id="participant-vertical-view"', participant)
+        self.assertNotIn('id="participant-state-image"', participant)
+
+    def test_session_mode_request_is_not_periodically_republished(self):
+        node = (PACKAGE_ROOT / "snake_experiment_ui/session_node.py").read_text(encoding="utf-8")
+        self.assertNotIn("_mode_refresh_timer", node)
+        self.assertNotIn("_refresh_mode_request", node)
+        self.assertIn("publish_mode_request=self._publish_mode_request", node)
 
 
 if __name__ == "__main__":

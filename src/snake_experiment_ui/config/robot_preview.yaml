@@ -3,10 +3,10 @@ animation:
   linear_mm: 100
   angular_deg: 20
   loop_sec: 2
-# Set to +1 or -1 only after verifying the physical joystick direction.
+# Confirmed physical joystick directions for the schematic input display.
 physical_axis_signs:
-  right: null  # /joy.axes[0]
-  up: null     # /joy.axes[1]
+  right: 1  # /joy.axes[0]
+  up: 1     # /joy.axes[1]
 # Explorer POC2 initial joint positions from explorer_joints.xacro.
 demo_pose:
   joint_1: 0.0

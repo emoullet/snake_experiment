@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Euler, Group, Quaternion, Vector3 } from 'three';
-import { axisLabels, commandForAxis, cycleBasePose } from '../src/mapping.js';
+import { axisLabels, commandForAxis, cycleBasePose, joystickDisplacement } from '../src/mapping.js';
 import { ARM_JOINTS, cyclePose, effectorPose, rotationVector, setArmPose, solveAxisEndpoints } from '../src/kinematics.js';
 
 const component = (index, scale = 1) => ({ index, scale });
@@ -145,6 +145,23 @@ test('physical directions remain unknown until explicitly configured', () => {
   const known = { ...config, physical_axis_signs: { right: -1, up: 1 } };
   assert.deepEqual(axisLabels(known, 0), ['Left', 'Right']);
   assert.deepEqual(axisLabels(known, 1), ['Up', 'Down']);
+});
+
+test('schematic sticks share the arm cycle, with right/up positive and exact neutral', () => {
+  const known = { ...config, physical_axis_signs: { right: 1, up: 1 } };
+  assert.deepEqual(axisLabels(known, 0), ['Right', 'Left']);
+  assert.deepEqual(axisLabels(known, 1), ['Up', 'Down']);
+  for (const phase of [0, 0.5, 1]) {
+    assert.deepEqual(joystickDisplacement(known, 0, phase), { x: 0, y: 0, input: Math.sin(2 * Math.PI * phase) });
+    assert.equal(joystickDisplacement(known, 1, phase).y, 0);
+  }
+  assert.equal(joystickDisplacement(known, 0, 0.25).x, 32);
+  assert.equal(joystickDisplacement(known, 0, 0.75).x, -32);
+  assert.equal(joystickDisplacement(known, 1, 0.25).y, -32);
+  assert.equal(joystickDisplacement(known, 1, 0.75).y, 32);
+  const reversed = { ...known, physical_axis_signs: { right: -1, up: -1 } };
+  assert.equal(joystickDisplacement(reversed, 0, 0.25).x, -32);
+  assert.equal(joystickDisplacement(reversed, 1, 0.25).y, 32);
 });
 
 test('each loop uses a new complete live pose or an explicitly labeled demo pose', () => {

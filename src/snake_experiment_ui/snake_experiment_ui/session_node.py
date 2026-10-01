@@ -26,7 +26,7 @@ from .go_to import GoToController
 from .mode_manager import ModeManager
 from .participant_profile import ParticipantProfile
 from .rosbag_manager import RosbagManager
-from .robot_preview import PreviewConfiguration, RobotPreview
+from .robot_preview import PreviewConfiguration, RobotPreview, SnakeButtonMonitor
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
 
@@ -93,7 +93,6 @@ class SessionInterfaceNode(Node):
         self._pose_target_publisher = self.create_publisher(
             PoseStamped, "/pose_target", 10
         )
-        self._active_mode_request = None
         self._mode_manager = ModeManager(
             node_names=self._node_names,
             publish_mode_request=self._publish_mode_request,
@@ -126,11 +125,9 @@ class SessionInterfaceNode(Node):
             ),
         )
         self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
-        self._robot_preview = RobotPreview(
-            configuration=PreviewConfiguration(
-                share / "config/robot_preview.yaml", share
-            )
-        )
+        preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share)
+        self._robot_preview = RobotPreview(configuration=preview_configuration)
+        self._snake_button_monitor = SnakeButtonMonitor(preview_configuration.snake_button_index)
         go_to_options = {
             "publish_target": self._publish_pose_target,
             "publish_passthrough": self._publish_passthrough,
@@ -157,7 +154,7 @@ class SessionInterfaceNode(Node):
             self.create_subscription(
                 Joy,
                 "/joy",
-                lambda message: self._diagnostics.record("/joy", message),
+                self._record_joy,
                 50,
             ),
             self.create_subscription(
@@ -202,7 +199,6 @@ class SessionInterfaceNode(Node):
         )
         self._graph_timer = self.create_timer(0.5, self._refresh_graph)
         self._service_timer = self.create_timer(1.0, self._refresh_services)
-        self._mode_refresh_timer = self.create_timer(1.0, self._refresh_mode_request)
 
         configured_calibration = str(self.get_parameter("calibration_file").value)
         calibration_file = (
@@ -262,6 +258,7 @@ class SessionInterfaceNode(Node):
             presentation_video=presentation_video,
             mode_explanation_videos=mode_explanation_videos,
             state_images=state_images,
+            snake_button_provider=self._snake_button_monitor.snapshot,
         )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
@@ -314,6 +311,10 @@ class SessionInterfaceNode(Node):
     def _record_joint_states(self, message: JointState) -> None:
         self._diagnostics.record("/joint_states", message)
         self._robot_preview.record(message)
+
+    def _record_joy(self, message: Joy) -> None:
+        self._diagnostics.record("/joy", message)
+        self._snake_button_monitor.record(message)
 
     def _node_names(self):
         return [
@@ -376,6 +377,7 @@ class SessionInterfaceNode(Node):
             )
 
     def _request_mapper_client_reset(self) -> None:
+        self._snake_button_monitor.reset()
         if hasattr(self, "_experiment"):
             self._experiment.clear_mapper_local_mode()
         with self._graph_lock:
@@ -465,7 +467,6 @@ class SessionInterfaceNode(Node):
         return list(observed) if value.type >= ParameterType.PARAMETER_BYTE_ARRAY else observed
 
     def _publish_mode_request(self, request: str) -> None:
-        self._active_mode_request = request
         message = String()
         message.data = request
         self._mode_publisher.publish(message)
@@ -497,13 +498,6 @@ class SessionInterfaceNode(Node):
         if "geometry_msgs/msg/PoseStamped" not in topic_types:
             return "The /pose_target PoseStamped topic is not available."
         return None
-
-    def _refresh_mode_request(self) -> None:
-        if self._active_mode_request is None or self._mode_manager.active_mode() is None:
-            return
-        message = String()
-        message.data = self._active_mode_request
-        self._mode_publisher.publish(message)
 
     def destroy_node(self):
         self._experiment.shutdown()

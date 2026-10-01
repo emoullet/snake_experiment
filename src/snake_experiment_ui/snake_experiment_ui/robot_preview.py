@@ -55,6 +55,15 @@ class PreviewConfiguration:
                 modes = parameters["modes"]
                 if tuple(modes["names"]) != expected:
                     raise RobotPreviewError(f"Unexpected {mode} mapper sub-modes.")
+                if mode == "snake":
+                    button_index = parameters["snake_button_index"]
+                    if (
+                        type(button_index) is not int
+                        or button_index < 0
+                        or parameters["snake_button_mode"] != "hold"
+                    ):
+                        raise RobotPreviewError("Snake button must use a valid hold binding.")
+                    self.snake_button_index = button_index
                 mapper[mode] = {}
                 for name in expected:
                     configured = modes[name]
@@ -302,6 +311,41 @@ class RobotPoseMonitor:
                     status == "live" and self.GRIPPER_JOINT in self._positions
                 ),
             }
+
+
+class SnakeButtonMonitor:
+    """Keep only a fresh boolean for the mapped Snake hold button."""
+
+    def __init__(self, button_index: int, clock=time.monotonic, max_age_sec: float = 0.5) -> None:
+        if type(button_index) is not int or button_index < 0 or max_age_sec <= 0:
+            raise ValueError("Invalid Snake button monitoring configuration.")
+        self._button_index = button_index
+        self._clock = clock
+        self._max_age_sec = max_age_sec
+        self._lock = threading.RLock()
+        self._held: bool | None = None
+        self._received_at: float | None = None
+
+    def record(self, message) -> None:
+        try:
+            value = message.buttons[self._button_index]
+            held = bool(value) if value in (0, 1) else None
+        except (AttributeError, IndexError, TypeError):
+            held = None
+        with self._lock:
+            self._held = held
+            self._received_at = self._clock() if held is not None else None
+
+    def reset(self) -> None:
+        with self._lock:
+            self._held = None
+            self._received_at = None
+
+    def snapshot(self) -> bool | None:
+        with self._lock:
+            if self._received_at is None or self._clock() - self._received_at > self._max_age_sec:
+                return None
+            return self._held
 
 
 class RobotPreview:
