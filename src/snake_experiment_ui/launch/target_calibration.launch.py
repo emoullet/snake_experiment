@@ -1,4 +1,4 @@
-"""Launch Panel A of the Snake experiment operator interface."""
+"""Launch the Snake experiment target calibration interface (Panel A)."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

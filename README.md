@@ -25,7 +25,7 @@ Initial dependency references do not constitute a validated experiment version.
 | `docs/` | Target architecture, data, work status and open questions |
 
 ```bash
-git clone --recurse-submodules https://github.com/emoullet/exp_snake.git
+git clone --recurse-submodules https://github.com/emoullet/snake_experiment.git
 ```
 
 Private dependencies require access permissions. Nested submodules may be hosted

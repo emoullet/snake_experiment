@@ -291,6 +291,16 @@ class PreviewAssetsTest(unittest.TestCase):
         self.assertNotIn("_refresh_mode_request", node)
         self.assertIn("publish_mode_request=self._publish_mode_request", node)
 
+    def test_mapper_publishes_latched_local_mode_for_participant_panel(self):
+        mapper = (
+            PACKAGE_ROOT.parents[1] / "dependencies/input_interfaces/joystick_mapper"
+            / "src/joystick_mapper.cpp"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"/joystick_mapper/active_mode"', mapper)
+        self.assertIn("rclcpp::QoS(1).transient_local().reliable()", mapper)
+        self.assertIn("publishActiveMode();", mapper)
+        self.assertRegex(mapper, r"if \(active_mode_index_ != previous_mode_index_\)[\s\S]*?publishActiveMode\(\);")
+
 
 if __name__ == "__main__":
     unittest.main()

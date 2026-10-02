@@ -51,7 +51,7 @@ colcon build \
   --symlink-install
 
 source "$snake_ws/install/setup.bash"
-ros2 launch snake_experiment_ui panel_a.launch.py
+ros2 launch snake_experiment_ui target_calibration.launch.py
 ```
 
 Open <http://127.0.0.1:8080>. The stack button starts `explorer.launch.py`
