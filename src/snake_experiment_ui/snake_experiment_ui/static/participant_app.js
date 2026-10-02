@@ -19,8 +19,6 @@
   const angularDistance = document.getElementById("participant-angular-distance");
   const localMode = document.getElementById("participant-local-mode");
   const trialState = document.getElementById("participant-trial-state");
-  const stateImage = document.getElementById("participant-state-image");
-  const stateImagePlaceholder = document.getElementById("participant-state-image-placeholder");
   const cameraVideo = document.getElementById("participant-camera-video");
   const cameraPlaceholder = document.getElementById("participant-camera-placeholder");
   const cameraRetry = document.getElementById("participant-camera-retry");
@@ -36,10 +34,6 @@
   video.addEventListener("loadedmetadata", () => { videoError.hidden = true; });
   modeVideo.addEventListener("error", () => { modeVideoError.hidden = false; });
   modeVideo.addEventListener("loadedmetadata", () => { modeVideoError.hidden = true; });
-  stateImage.addEventListener("error", () => {
-    stateImage.hidden = true;
-    stateImagePlaceholder.hidden = false;
-  });
 
   function stopCamera() {
     cameraRequest += 1;
@@ -142,19 +136,9 @@
       setText(trialState, state.state || "Waiting");
       const stateClass = state.state === "Target reached" ? "pill pill--active" : state.state === "Recording" ? "pill pill--warning" : "pill pill--neutral";
       if (trialState.className !== stateClass) trialState.className = stateClass;
-      const source = state.local_mode && state.state_image_available
-        ? `/participant/state-image/${state.mode}/${state.local_mode}` : null;
-      if (source && stateImage.getAttribute("src") !== source) {
-        stateImage.src = source;
-        stateImage.hidden = false;
-        stateImagePlaceholder.hidden = true;
-      } else if (!source && stateImage.getAttribute("src")) {
-        stateImage.removeAttribute("src");
-        stateImage.hidden = true;
-        stateImagePlaceholder.hidden = false;
-      }
     }
     if (enteringC) void startCamera();
+    window.dispatchEvent(new CustomEvent("participant:state", { detail: state }));
   }
 
   function connect() {

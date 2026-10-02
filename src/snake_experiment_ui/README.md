@@ -82,6 +82,34 @@ moved to `calibrations/calib_archives/` with a unique UTC-stamped name.
 The server binds to loopback by default and has no authentication. Do not expose
 it on another interface without an appropriate network access policy.
 
+## Explorer POC2 3D preview (participant interface, lot 1)
+
+Open <http://127.0.0.1:8081/participant/3d-preview> after starting
+`session_interface.launch.py`. This separate development page shows two
+independent, read-only URDF views of the Explorer POC2 arm and gripper. Both
+follow fresh `/joint_states`; a missing or stale stream is reported instead of
+claiming the pose is live. The participant Panel C, its images, and its webcam
+are unchanged. No joystick mapping is animated in this lot, and the preview
+sends no ROS commands.
+
+The installed `explorer_description` and `gripper_pincette` packages provide
+the Xacro and visual meshes. Only opaque, allowlisted visual-asset URLs are
+served; package paths are not exposed to the browser. The model provider is a
+separate boundary so that a Kinova Gen3 model can be introduced in a later lot.
+
+The compiled JavaScript bundle is versioned with the package. A normal
+`colcon build` requires no Node installation. Only when changing the 3D
+frontend source, rebuild the bundle with Node and pnpm:
+
+```bash
+cd src/snake_experiment_ui/frontend/participant_3d
+pnpm install --frozen-lockfile
+pnpm run build
+```
+
+Commit the resulting `snake_experiment_ui/static/participant_3d.bundle.js`
+together with the frontend source and lockfile.
+
 ## Panel B: system check-up
 
 Build the same package and launch the second interface independently:

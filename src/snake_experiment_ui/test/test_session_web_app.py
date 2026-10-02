@@ -537,7 +537,8 @@ class SessionTemplateTest(unittest.TestCase):
         style = (package_root / "static/participant_style.css").read_text(encoding="utf-8")
         for element in (
             "participant-trial", "participant-task", "participant-linear-distance",
-            "participant-angular-distance", "participant-local-mode", "participant-state-image",
+            "participant-angular-distance", "participant-local-mode", "participant-horizontal-view",
+            "participant-vertical-view", "participant-snake-indicator",
             "participant-camera-video", "participant-camera-retry",
         ):
             self.assertIn(f'id="{element}"', html)
@@ -553,7 +554,11 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('workspace.classList.toggle("participant-workspace--trial", showC)', script)
         self.assertIn('.participant-workspace--trial { width: min(1540px, calc(100% - 32px)); }', style)
         self.assertIn('grid-template-columns: minmax(0, 1.1fr) minmax(250px, 1fr)', style)
-        self.assertIn('participant_style.css?v=participant-layout-2', html)
+        self.assertIn('participant_style.css?v=participant-mapping-1', html)
+        self.assertIn('participant_mapping.bundle.js?v=participant-mapping-2', html)
+        self.assertIn('data-mapping-source class="pill pill--neutral"', html)
+        self.assertNotIn('id="participant-state-image"', html)
+        self.assertIn('new CustomEvent("participant:state", { detail: state })', script)
         self.assertNotIn('innerHTML', script)
         self.assertNotIn('/api/experiment/', script)
 

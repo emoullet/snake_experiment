@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ from .experiment import ExperimentError
 from .mode_manager import ModeError
 from .participant_profile import state_image_is_available, video_is_available
 from .rosbag_manager import RosbagError
+from .robot_preview import RobotPreviewError
 from .stack_manager import StackError
 from .training import TrainingError
 
@@ -99,6 +100,7 @@ def create_session_app(
     presentation_video="",
     mode_explanation_videos=None,
     state_images=None,
+    robot_preview=None,
 ):
     """Create the Panel B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
@@ -140,6 +142,66 @@ def create_session_app(
     @app.get("/participant", include_in_schema=False)
     async def participant_interface():
         return FileResponse(template_directory / "participant_index.html", headers=NO_CACHE_HEADERS)
+
+    @app.get("/participant/3d-preview", include_in_schema=False)
+    async def participant_3d_preview():
+        return FileResponse(
+            template_directory / "participant_3d_preview.html", headers=NO_CACHE_HEADERS
+        )
+
+    @app.get("/participant/3d-preview/api/state", include_in_schema=False)
+    async def participant_3d_state():
+        if robot_preview is None:
+            raise HTTPException(status_code=503, detail="Robot preview is unavailable.")
+        return robot_preview.snapshot()
+
+    @app.get("/participant/3d-preview/api/config", include_in_schema=False)
+    async def participant_3d_config():
+        if robot_preview is None:
+            raise HTTPException(status_code=503, detail="Robot preview is unavailable.")
+        try:
+            return robot_preview.configuration()
+        except RobotPreviewError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+
+    @app.get("/participant/3d-preview/model.urdf", include_in_schema=False)
+    async def participant_3d_model():
+        if robot_preview is None:
+            raise HTTPException(status_code=503, detail="Robot preview is unavailable.")
+        try:
+            model = robot_preview.model.urdf()
+        except RobotPreviewError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        return Response(model, media_type="application/xml", headers=NO_CACHE_HEADERS)
+
+    @app.get("/participant/3d-preview/assets/{asset_id}", include_in_schema=False)
+    async def participant_3d_asset(asset_id: str):
+        if robot_preview is None:
+            raise HTTPException(status_code=503, detail="Robot preview is unavailable.")
+        try:
+            asset = robot_preview.model.asset(asset_id)
+        except RobotPreviewError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        media_type = "model/stl" if asset.suffix.lower() == ".stl" else "model/vnd.collada+xml"
+        return FileResponse(asset, media_type=media_type, headers=NO_CACHE_HEADERS)
+
+    @app.websocket("/participant/3d-preview/ws")
+    async def participant_3d_websocket(websocket: WebSocket):
+        if robot_preview is None:
+            await websocket.close(code=1013)
+            return
+        await websocket.accept()
+        previous = None
+        try:
+            while True:
+                current = robot_preview.snapshot()
+                serialised = json.dumps(current, sort_keys=True)
+                if serialised != previous:
+                    await websocket.send_json(current)
+                    previous = serialised
+                await asyncio.sleep(0.1)
+        except (WebSocketDisconnect, RuntimeError):
+            return
 
     @app.get("/participant/api/state")
     async def participant_state():

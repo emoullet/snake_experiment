@@ -164,6 +164,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.rosbag = FakeRosbag()
         self.clock_tick = 0
         self.monotonic_value = 10.0
+        self.snake_held = None
         self.pose_targets = []
         self.passthrough_requests = 0
         self.go_to = GoToController(
@@ -181,6 +182,7 @@ class ExperimentControllerTest(unittest.TestCase):
             monotonic_clock=lambda: self.monotonic_value,
             thread_factory=ImmediateThread,
             go_to_controller=self.go_to,
+            snake_button_provider=lambda: self.snake_held,
         )
         self.participant = {
             "pseudonym": "A1B2C3",
@@ -300,6 +302,8 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(public["panel"], "A")
         self.assertNotIn("pseudonym", public)
         self.assertNotIn("folder", public)
+        self.assertNotIn("axes", public)
+        self.assertNotIn("buttons", public)
         state = self.controller.complete_presentation()
         self.assertTrue(state["progress"]["presentation"]["video_missing"])
         self.assertEqual(self.stack.start_count, 0)
@@ -593,6 +597,11 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertNotIn("folder", public)
         self.controller.record_mapper_local_mode("b1")
         self.assertEqual(self.controller.participant_snapshot()["local_mode"], "b1")
+        self.assertIsNone(self.controller.participant_snapshot()["snake_button_held"])
+        self.snake_held = True
+        self.assertIs(self.controller.participant_snapshot()["snake_button_held"], True)
+        self.snake_held = False
+        self.assertIs(self.controller.participant_snapshot()["snake_button_held"], False)
         self.controller.record_mapper_local_mode("b3")
         self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
         self.controller.prepare_training_trial("mode_1_training")
@@ -628,6 +637,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start("mode_1_training")
         self.controller.record_mapper_local_mode("b3")
         self.assertEqual(self.controller.participant_snapshot()["local_mode"], "b3")
+        self.assertIsNone(self.controller.participant_snapshot()["snake_button_held"])
         self.controller.clear_mapper_local_mode()
         self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
         self.complete_training("mode_1_training")

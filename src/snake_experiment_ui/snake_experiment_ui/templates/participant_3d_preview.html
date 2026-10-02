@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Explorer POC2 · 3D model preview</title>
+    <link rel="stylesheet" href="/session-static/session_style.css?v=participant-3d-3" />
+    <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
+    <script src="/session-static/participant_3d.bundle.js?v=participant-3d-4" defer></script>
+  </head>
+  <body>
+    <main class="preview-workspace">
+      <header class="preview-header">
+        <div>
+          <p class="eyebrow">Snake experiment · development preview</p>
+          <h1>Explorer POC2 · robot model</h1>
+          <p>Two independent, schematic demonstrations of the selected joystick mapping. The movements are illustrative, not predicted robot trajectories.</p>
+        </div>
+        <span id="preview-connection" class="pill pill--neutral" role="status">Connecting</span>
+      </header>
+      <section class="preview-controls" aria-label="Preview mapping controls">
+        <label>Control mode
+          <select id="preview-mode" disabled>
+            <option value="baseline">Baseline</option>
+            <option value="snake">Snake</option>
+          </select>
+        </label>
+        <label>Mapper sub-mode
+          <select id="preview-submode" disabled></select>
+        </label>
+        <label id="preview-snake-control" class="preview-switch" hidden>
+          <input id="preview-snake-held" type="checkbox" disabled />
+          <span>Simulated Snake button held</span>
+        </label>
+        <p class="preview-controls-note">The simulated switch does not control the real joystick or robot.</p>
+      </section>
+      <section class="preview-grid" aria-label="Robot model previews">
+        <article class="preview-card mapping-view" id="preview-horizontal-view">
+          <div class="preview-card-heading"><span class="step-number">01</span><h2>Joystick horizontal axis</h2></div>
+          <div class="mapping-motion"><div class="preview-canvas mapping-canvas" id="preview-horizontal" aria-label="Explorer POC2 3D model, horizontal-axis view"></div><div class="mapping-joystick" aria-label="Illustrative horizontal joystick input"></div></div>
+          <p class="preview-caption"><span data-mapping-direction>Axis 0 · + / −</span> · <span data-mapping-source>Waiting</span></p>
+          <p class="preview-limit" data-mapping-limit role="status"></p>
+        </article>
+        <article class="preview-card mapping-view" id="preview-vertical-view">
+          <div class="preview-card-heading"><span class="step-number">02</span><h2>Joystick vertical axis</h2></div>
+          <div class="mapping-motion"><div class="preview-canvas mapping-canvas" id="preview-vertical" aria-label="Explorer POC2 3D model, vertical-axis view"></div><div class="mapping-joystick" aria-label="Illustrative vertical joystick input"></div></div>
+          <p class="preview-caption"><span data-mapping-direction>Axis 1 · + / −</span> · <span data-mapping-source>Waiting</span></p>
+          <p class="preview-limit" data-mapping-limit role="status"></p>
+        </article>
+      </section>
+      <p id="preview-message" class="preview-message" role="status">Loading the Explorer POC2 model…</p>
+      <p class="preview-note">Read-only preview. Each cycle returns to neutral and starts from the latest live joint pose, or from a labeled demo pose when joint states are unavailable. This page does not command the robot or change the participant panel.</p>
+    </main>
+  </body>
+</html>

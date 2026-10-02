@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import threading
+import time
 
 from ament_index_python.packages import get_package_share_directory
 from controller_manager_msgs.srv import ListControllers
@@ -26,8 +27,12 @@ from .go_to import GoToController
 from .mode_manager import ModeManager
 from .participant_profile import ParticipantProfile
 from .rosbag_manager import RosbagManager
+from .robot_preview import PreviewConfiguration, RobotPreview, SnakeButtonMonitor
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
+
+
+CONTROLLER_REQUEST_TIMEOUT_SEC = 5.0
 
 
 class SessionInterfaceNode(Node):
@@ -83,6 +88,9 @@ class SessionInterfaceNode(Node):
             "mapper_parameters": {},
         }
         self._controller_future = None
+        self._controller_future_started_at = None
+        self._controller_client_created_at = time.monotonic()
+        self._controller_client_generation = 0
         self._parameter_list_future = None
         self._parameter_get_future = None
         self._mapper_client_generation = 0
@@ -92,7 +100,6 @@ class SessionInterfaceNode(Node):
         self._pose_target_publisher = self.create_publisher(
             PoseStamped, "/pose_target", 10
         )
-        self._active_mode_request = None
         self._mode_manager = ModeManager(
             node_names=self._node_names,
             publish_mode_request=self._publish_mode_request,
@@ -125,6 +132,9 @@ class SessionInterfaceNode(Node):
             ),
         )
         self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
+        preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share)
+        self._robot_preview = RobotPreview(configuration=preview_configuration)
+        self._snake_button_monitor = SnakeButtonMonitor(preview_configuration.snake_button_index)
         go_to_options = {
             "publish_target": self._publish_pose_target,
             "publish_passthrough": self._publish_passthrough,
@@ -139,7 +149,7 @@ class SessionInterfaceNode(Node):
             self.create_subscription(
                 JointState,
                 "/joint_states",
-                lambda message: self._diagnostics.record("/joint_states", message),
+                self._record_joint_states,
                 50,
             ),
             self.create_subscription(
@@ -151,7 +161,7 @@ class SessionInterfaceNode(Node):
             self.create_subscription(
                 Joy,
                 "/joy",
-                lambda message: self._diagnostics.record("/joy", message),
+                self._record_joy,
                 50,
             ),
             self.create_subscription(
@@ -196,7 +206,6 @@ class SessionInterfaceNode(Node):
         )
         self._graph_timer = self.create_timer(0.5, self._refresh_graph)
         self._service_timer = self.create_timer(1.0, self._refresh_services)
-        self._mode_refresh_timer = self.create_timer(1.0, self._refresh_mode_request)
 
         configured_calibration = str(self.get_parameter("calibration_file").value)
         calibration_file = (
@@ -256,6 +265,7 @@ class SessionInterfaceNode(Node):
             presentation_video=presentation_video,
             mode_explanation_videos=mode_explanation_videos,
             state_images=state_images,
+            snake_button_provider=self._snake_button_monitor.snapshot,
         )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
@@ -277,6 +287,7 @@ class SessionInterfaceNode(Node):
             presentation_video=str(presentation_video or ""),
             mode_explanation_videos=mode_explanation_videos,
             state_images=state_images,
+            robot_preview=self._robot_preview,
         )
         config = uvicorn.Config(
             app,
@@ -304,6 +315,14 @@ class SessionInterfaceNode(Node):
         if experiment is not None:
             experiment.update_ee_pose(message)
 
+    def _record_joint_states(self, message: JointState) -> None:
+        self._diagnostics.record("/joint_states", message)
+        self._robot_preview.record(message)
+
+    def _record_joy(self, message: Joy) -> None:
+        self._diagnostics.record("/joy", message)
+        self._snake_button_monitor.record(message)
+
     def _node_names(self):
         return [
             f"{namespace.rstrip('/')}/{name}" if namespace != "/" else name
@@ -325,11 +344,7 @@ class SessionInterfaceNode(Node):
     def _refresh_services(self) -> None:
         if self._mapper_client_reset_requested.is_set():
             self._reset_mapper_parameter_clients()
-        if self._controller_client.service_is_ready() and self._controller_future is None:
-            self._controller_future = self._controller_client.call_async(
-                ListControllers.Request()
-            )
-            self._controller_future.add_done_callback(self._controllers_received)
+        self._refresh_controllers()
         active_mode = self._mode_manager.active_mode()
         if (
             active_mode is not None
@@ -364,7 +379,59 @@ class SessionInterfaceNode(Node):
                 )
             )
 
+    def _refresh_controllers(self) -> None:
+        now = time.monotonic()
+        if (
+            self._controller_future is not None
+            and self._controller_future_started_at is not None
+            and now - self._controller_future_started_at >= CONTROLLER_REQUEST_TIMEOUT_SEC
+        ):
+            self.get_logger().warning(
+                "Timed out listing controllers; reconnecting to controller_manager."
+            )
+            self._reconnect_controller_client(now)
+
+        if not self._controller_client.service_is_ready():
+            with self._graph_lock:
+                self._graph["controllers"] = {}
+                manager_visible = "/controller_manager" in self._graph["nodes"]
+            if (
+                manager_visible
+                and now - self._controller_client_created_at >= CONTROLLER_REQUEST_TIMEOUT_SEC
+            ):
+                self.get_logger().warning(
+                    "Controller manager is visible but its service is unavailable; reconnecting."
+                )
+                self._reconnect_controller_client(now)
+            return
+        if self._controller_future is None:
+            self._controller_future = self._controller_client.call_async(
+                ListControllers.Request()
+            )
+            self._controller_future_started_at = now
+            generation = self._controller_client_generation
+            self._controller_future.add_done_callback(
+                lambda future, generation=generation: self._controllers_received(
+                    future, generation
+                )
+            )
+
+    def _reconnect_controller_client(self, now: float) -> None:
+        if self._controller_future is not None:
+            self._controller_client.remove_pending_request(self._controller_future)
+        self.destroy_client(self._controller_client)
+        self._controller_client = self.create_client(
+            ListControllers, "/controller_manager/list_controllers"
+        )
+        self._controller_client_generation += 1
+        self._controller_client_created_at = now
+        self._controller_future = None
+        self._controller_future_started_at = None
+        with self._graph_lock:
+            self._graph["controllers"] = {}
+
     def _request_mapper_client_reset(self) -> None:
+        self._snake_button_monitor.reset()
         if hasattr(self, "_experiment"):
             self._experiment.clear_mapper_local_mode()
         with self._graph_lock:
@@ -391,7 +458,9 @@ class SessionInterfaceNode(Node):
             GetParameters, "/joystick_mapper/get_parameters"
         )
 
-    def _controllers_received(self, future) -> None:
+    def _controllers_received(self, future, generation) -> None:
+        if generation != self._controller_client_generation:
+            return
         try:
             response = future.result()
             controllers = {item.name: item.state for item in response.controller}
@@ -399,8 +468,12 @@ class SessionInterfaceNode(Node):
                 self._graph["controllers"] = controllers
         except Exception as error:  # service failures are exposed as missing checks
             self.get_logger().warning(f"Unable to list controllers: {error}")
+            with self._graph_lock:
+                self._graph["controllers"] = {}
         finally:
-            self._controller_future = None
+            if generation == self._controller_client_generation:
+                self._controller_future = None
+                self._controller_future_started_at = None
 
     def _parameter_names_received(self, future, generation) -> None:
         if generation != self._mapper_client_generation:
@@ -454,7 +527,6 @@ class SessionInterfaceNode(Node):
         return list(observed) if value.type >= ParameterType.PARAMETER_BYTE_ARRAY else observed
 
     def _publish_mode_request(self, request: str) -> None:
-        self._active_mode_request = request
         message = String()
         message.data = request
         self._mode_publisher.publish(message)
@@ -486,13 +558,6 @@ class SessionInterfaceNode(Node):
         if "geometry_msgs/msg/PoseStamped" not in topic_types:
             return "The /pose_target PoseStamped topic is not available."
         return None
-
-    def _refresh_mode_request(self) -> None:
-        if self._active_mode_request is None or self._mode_manager.active_mode() is None:
-            return
-        message = String()
-        message.data = self._active_mode_request
-        self._mode_publisher.publish(message)
 
     def destroy_node(self):
         self._experiment.shutdown()

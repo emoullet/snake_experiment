@@ -1,0 +1,17 @@
+{
+  "name": "snake-experiment-participant-3d",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test/animation.test.js"
+  },
+  "dependencies": {
+    "three": "0.184.0",
+    "urdf-loader": "0.12.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  }
+}
