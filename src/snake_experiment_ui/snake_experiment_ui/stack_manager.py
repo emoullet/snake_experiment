@@ -15,7 +15,7 @@ class StackError(RuntimeError):
 
 
 class StackManager:
-    """Start and stop the experiment stack owned by Panel A."""
+    """Start and stop the experiment stack owned by View A."""
 
     def __init__(
         self,
@@ -109,7 +109,7 @@ class StackManager:
             raise StackError(self._error)
 
     def stop(self) -> dict:
-        """Stop the stack if it was started by this panel."""
+        """Stop the stack if it was started by this view."""
         with self._lock:
             self._refresh_process_state()
             if self._process is None:

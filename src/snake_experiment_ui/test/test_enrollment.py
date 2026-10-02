@@ -178,13 +178,13 @@ class EnrollmentControllerTest(unittest.TestCase):
         resumed.cancel()
         self.assertTrue((self.experiment / "A1B2C3").is_dir())
 
-    def test_launch_prepares_panel_d_without_starting_ros_processes(self):
+    def test_launch_prepares_view_d_without_starting_ros_processes(self):
         self.controller.select_parent(str(self.experiment))
         self.controller.create_participant(self.form())
         state = self.controller.launch()
         self.assertFalse(self.stack.active)
         self.assertIsNone(self.modes.active)
-        self.assertEqual(state["current_panel"], "D")
+        self.assertEqual(state["current_view"], "D")
         with self.assertRaisesRegex(EnrollmentError, "cannot be cancelled"):
             self.controller.cancel()
 

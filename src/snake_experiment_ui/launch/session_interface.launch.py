@@ -1,4 +1,4 @@
-"""Launch the independent Panels B-G Snake experiment interface."""
+"""Launch the independent Views B-G Snake experiment interface."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

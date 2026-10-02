@@ -1,4 +1,4 @@
-"""Launch the Snake experiment target calibration interface (Panel A)."""
+"""Launch the Snake experiment target calibration interface."""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -18,8 +18,8 @@ def generate_launch_description():
     ]
     node = Node(
         package="snake_experiment_ui",
-        executable="panel_a_node",
-        name="snake_experiment_panel_a",
+        executable="target_calibration_node",
+        name="snake_experiment_target_calibration",
         output="screen",
         parameters=[
             {

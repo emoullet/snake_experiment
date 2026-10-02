@@ -1,4 +1,4 @@
-"""ROS node hosting the Snake experiment calibration panel."""
+"""ROS node hosting the Snake experiment calibration view."""
 
 from __future__ import annotations
 
@@ -19,11 +19,11 @@ from .storage import CalibrationStorage
 from .web_app import create_app
 
 
-class PanelANode(Node):
-    """Bridge ROS state and launch control to the local operator panel."""
+class TargetCalibrationNode(Node):
+    """Bridge ROS state and launch control to the local operator view."""
 
     def __init__(self) -> None:
-        super().__init__("snake_experiment_panel_a")
+        super().__init__("snake_experiment_target_calibration")
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("port", 8080)
         self.declare_parameter("pose_topic", "/ee_pose")
@@ -89,13 +89,13 @@ class PanelANode(Node):
         self._server = uvicorn.Server(config)
         self._server_thread = threading.Thread(
             target=self._server.run,
-            name="panel-a-web-server",
+            name="target-calibration-web-server",
             daemon=True,
         )
         self._server_thread.start()
         host = self.get_parameter("host").value
         port = self.get_parameter("port").value
-        self.get_logger().info(f"Panel A available at http://{host}:{port}")
+        self.get_logger().info(f"Target calibration available at http://{host}:{port}")
 
     def _node_names(self):
         return [
@@ -131,7 +131,7 @@ class PanelANode(Node):
 
 def main(args=None) -> None:
     rclpy.init(args=args)
-    node = PanelANode()
+    node = TargetCalibrationNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

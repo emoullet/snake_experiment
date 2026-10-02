@@ -1,4 +1,4 @@
-"""Panel D experiment block orchestration and durable progress."""
+"""View D experiment block orchestration and durable progress."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from .training import (
 
 
 MODES = ("baseline", "snake")
-PHASE_PANELS = {"discovery": "E", "training": "F", "recording": "G"}
+PHASE_VIEWS = {"discovery": "E", "training": "F", "recording": "G"}
 TRIAL_PHASES = ("training", "recording")
 REQUIRED_SEQUENCE = (
     ("mode_1_discovery", "mode_1", "discovery"),
@@ -70,7 +70,7 @@ DEFAULT_TRAINING_THRESHOLDS = {
 
 
 class ExperimentError(RuntimeError):
-    """An operator-correctable Panel D-G error."""
+    """An operator-correctable View D-G error."""
 
 
 def _utc_now() -> str:
@@ -104,7 +104,7 @@ def _atomic_json(path: Path, value: dict) -> None:
 
 
 class ExperimentProfile:
-    """Validated, versioned description of the six Panel D blocks."""
+    """Validated, versioned description of the six View D blocks."""
 
     def __init__(self, path: Path, allow_legacy: bool = False) -> None:
         self.path = Path(path).resolve()
@@ -127,7 +127,7 @@ class ExperimentProfile:
         phases = data.get("phases")
         if not isinstance(phases, dict):
             raise ExperimentError("experiment.yaml phases are missing.")
-        for phase in PHASE_PANELS:
+        for phase in PHASE_VIEWS:
             settings = phases.get(phase)
             if not isinstance(settings, dict):
                 raise ExperimentError(f"experiment.yaml phase '{phase}' is missing.")
@@ -206,7 +206,7 @@ class ExperimentProfile:
                     "mode_role": item["mode_role"],
                     "mode": resolved_mode,
                     "phase": phase,
-                    "panel": PHASE_PANELS[phase],
+                    "view": PHASE_VIEWS[phase],
                     "folder": f"{resolved_mode}_{phase}",
                     "settings": json.loads(json.dumps(self.data["phases"][phase])),
                     "success_thresholds": dict(self.data["success_thresholds"]),
@@ -288,7 +288,7 @@ class ExperimentController:
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
         self._progress: Optional[dict] = None
-        self._current_panel = "D"
+        self._current_view = "D"
         self._error: Optional[str] = None
         self._calibration: Optional[dict] = None
         self._latest_pose: Optional[dict] = None
@@ -342,7 +342,11 @@ class ExperimentController:
                 recovered_active = False
                 migrated_trial_phases = set()
                 for block in progress["blocks"]:
-                    changed = self._ensure_lot5_fields(block) or changed
+                    expected_view = PHASE_VIEWS.get(block.get("phase"))
+                    if expected_view is not None and block.get("view") != expected_view:
+                        block["view"] = expected_view
+                        changed = True
+                    changed = self._ensure_discovery_fields(block) or changed
                     if "go_to_history" not in block:
                         block["go_to_history"] = []
                         changed = True
@@ -371,9 +375,8 @@ class ExperimentController:
                         recovered_active = True
                 if changed:
                     for phase in sorted(migrated_trial_phases):
-                        lot = 6 if phase == "training" else 7
                         warning = (
-                            f"LOT {lot} {phase} fields were initialised with the "
+                            f"{phase.title()} fields were initialised with the "
                             "effective development profile."
                         )
                         progress.setdefault("warnings", [])
@@ -414,7 +417,7 @@ class ExperimentController:
                 _atomic_json(progress_path, progress)
             self._participant = dict(participant)
             self._progress = progress
-            self._current_panel = "D"
+            self._current_view = "D"
             self._error = None
             return self.snapshot()
 
@@ -524,7 +527,7 @@ class ExperimentController:
                 explanation = active["mode_explanation"]
                 visible = explanation["status"] in ("showing", "completed")
                 return {
-                    "panel": "B" if visible else "waiting",
+                    "view": "B" if visible else "waiting",
                     "presentation_status": status,
                     "video_available": (
                         self.mode_explanation_video_available(active["mode"])
@@ -564,7 +567,7 @@ class ExperimentController:
                 )
                 reached = workflow in ("awaiting_prepare", "ready_to_end") and latest_completed is not None
                 return {
-                    "panel": "C",
+                    "view": "C",
                     "phase": active["phase"],
                     "mode": active["mode"],
                     "task": (
@@ -593,7 +596,7 @@ class ExperimentController:
                 )
             )
             return {
-                "panel": "A" if status in ("showing", "completed") and not any_explanation else "waiting",
+                "view": "A" if status in ("showing", "completed") and not any_explanation else "waiting",
                 "presentation_status": status,
                 "video_available": self.presentation_video_available(),
                 "mode": None,
@@ -657,7 +660,7 @@ class ExperimentController:
             block["control_active"] = block["phase"] != "discovery"
             block["updated_at_utc"] = self._utc_clock()
             progress["workflow"] = "block_running"
-            self._current_panel = block["panel"]
+            self._current_view = block["view"]
             self._error = None
             self._persist(folder)
             self._write_block(folder, block)
@@ -672,7 +675,7 @@ class ExperimentController:
             _, folder = self._require_prepared()
             block = self._running_block(block_id)
             if block["phase"] not in TRIAL_PHASES:
-                raise ExperimentError("Go-to is available only on Panels F and G.")
+                raise ExperimentError("Go-to is available only on Views F and G.")
             if self._go_to is None:
                 raise ExperimentError("Cartesian Go-to is not configured.")
             if block.get("training_workflow") in (
@@ -822,7 +825,7 @@ class ExperimentController:
             block["updated_at_utc"] = now
             block["error"] = None
             progress["current_block"] = None
-            self._current_panel = "D"
+            self._current_view = "D"
             if self._next_block() is None:
                 try:
                     self._stack.stop()
@@ -888,7 +891,7 @@ class ExperimentController:
                 block["error"] += " Cleanup warning: " + "; ".join(cleanup_errors)
             progress["workflow"] = "interrupted"
             progress["current_block"] = None
-            self._current_panel = "D"
+            self._current_view = "D"
             self._error = block["error"] if cleanup_errors else None
             self._persist(folder)
             self._write_block(folder, block)
@@ -1591,9 +1594,9 @@ class ExperimentController:
     def _trial_block(self, block_id: str, expected_phase: str) -> dict:
         block = self._running_block(block_id)
         if block["phase"] != expected_phase or expected_phase not in TRIAL_PHASES:
-            panel = PHASE_PANELS.get(expected_phase, "F/G")
+            view = PHASE_VIEWS.get(expected_phase, "F/G")
             raise ExperimentError(
-                f"{expected_phase.title()} actions are available only on Panel {panel}."
+                f"{expected_phase.title()} actions are available only on View {view}."
             )
         return block
 
@@ -1784,7 +1787,7 @@ class ExperimentController:
             if self._progress is None:
                 return {
                     "workflow": "not_prepared",
-                    "current_panel": "D",
+                    "current_view": "D",
                     "error": None,
                     "participant": None,
                     "profile": None,
@@ -1903,7 +1906,7 @@ class ExperimentController:
                     block["error"] = "A required owned process stopped unexpectedly."
                     self._progress["workflow"] = "interrupted"
                     self._progress["current_block"] = None
-                    self._current_panel = "D"
+                    self._current_view = "D"
                     self._error = block["error"]
                     self._persist(folder)
                     self._write_block(folder, block)
@@ -1999,7 +2002,7 @@ class ExperimentController:
                 }
             return {
                 "workflow": self._progress["workflow"],
-                "current_panel": self._current_panel,
+                "current_view": self._current_view,
                 "error": self._error,
                 "participant": {
                     "pseudonym": self._participant["pseudonym"],
@@ -2107,11 +2110,11 @@ class ExperimentController:
             self._rosbag.shutdown()
             self._modes.shutdown()
             self._stack.shutdown()
-            self._current_panel = "D"
+            self._current_view = "D"
 
     def _require_prepared(self) -> tuple[dict, Path]:
         if self._progress is None or self._participant is None:
-            raise ExperimentError("Prepare a participant from Panel C first.")
+            raise ExperimentError("Prepare a participant from View C first.")
         return self._progress, Path(self._participant["folder"])
 
     def _block(self, block_id: str) -> dict:
@@ -2132,7 +2135,7 @@ class ExperimentController:
         raise ExperimentError(f"Unknown discovery segment: {name}")
 
     @staticmethod
-    def _ensure_lot5_fields(block: dict) -> bool:
+    def _ensure_discovery_fields(block: dict) -> bool:
         changed = False
         defaults = {
             "control_active": False,
@@ -2392,7 +2395,7 @@ class ExperimentController:
             {
                 "at_utc": self._utc_clock(),
                 "component": "experiment_profile_and_progress",
-                "warning": "Initialized when Panel D was first opened for a legacy session.",
+                "warning": "Initialized when View D was first opened for a legacy session.",
             }
         )
         manifest["late_initializations"] = history

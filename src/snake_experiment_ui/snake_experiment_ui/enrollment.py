@@ -1,4 +1,4 @@
-"""Panel C pseudonymised enrolment and resumable session preparation."""
+"""View C pseudonymised enrolment and resumable session preparation."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ PLANS = ("baseline->snake", "snake->baseline")
 
 
 class EnrollmentError(RuntimeError):
-    """An operator-correctable Panel C error."""
+    """An operator-correctable View C error."""
 
 
 def _utc_now() -> str:
@@ -85,7 +85,7 @@ class EnrollmentController:
         self._warnings: list[str] = []
         self._resume_candidates: list[dict] = []
         self._mismatches: list[dict] = []
-        self._current_panel = "C"
+        self._current_view = "C"
 
     @property
     def sessions_root(self) -> Path:
@@ -195,7 +195,7 @@ class EnrollmentController:
                 raise EnrollmentError("A participant is already selected.")
             report = self._checkup_report_provider()
             if not report:
-                raise EnrollmentError("A validated Panel B report is required.")
+                raise EnrollmentError("A validated View B report is required.")
             row = self._validate_form(form)
             rows = self._read_rows()
             if any(item["pseudonym"] == row["pseudonym"] for item in rows):
@@ -271,7 +271,7 @@ class EnrollmentController:
                 raise EnrollmentError("The saved environment differs from the current environment. Acknowledge the warning to resume.")
             report = self._checkup_report_provider()
             if not report:
-                raise EnrollmentError("A validated Panel B report is required.")
+                raise EnrollmentError("A validated View B report is required.")
             manifest = self._append_checkup_report(folder, manifest, report)
             self._participant = {
                 **row,
@@ -286,7 +286,7 @@ class EnrollmentController:
 
     def cancel(self) -> dict:
         with self._lock:
-            if self._current_panel == "D":
+            if self._current_view == "D":
                 raise EnrollmentError("The participant cannot be cancelled after launch.")
             if self._participant is not None and self._created_here:
                 pseudonym = self._participant["pseudonym"]
@@ -308,7 +308,7 @@ class EnrollmentController:
 
     def reset(self) -> dict:
         with self._lock:
-            if self._current_panel == "D":
+            if self._current_view == "D":
                 raise EnrollmentError("The session cannot be reset after launch.")
             self.cancel()
             self._selected_parent = None
@@ -319,7 +319,7 @@ class EnrollmentController:
 
     def launch(self) -> dict:
         with self._lock:
-            if self._current_panel == "D":
+            if self._current_view == "D":
                 raise EnrollmentError("The experiment is already launched.")
             if self._participant is None:
                 raise EnrollmentError("Create or resume a participant before launching.")
@@ -333,14 +333,14 @@ class EnrollmentController:
                 self._error = f"Unable to prepare experiment: {error}"
                 raise EnrollmentError(self._error) from error
             self._workflow = "experiment_ready"
-            self._current_panel = "D"
+            self._current_view = "D"
             return self.snapshot()
 
     def snapshot(self) -> dict:
         with self._lock:
             return {
                 "workflow": self._workflow,
-                "current_panel": self._current_panel,
+                "current_view": self._current_view,
                 "error": self._error,
                 "sessions_root": str(self._sessions_root),
                 "selected_parent": str(self._selected_parent) if self._selected_parent else None,
@@ -500,7 +500,7 @@ class EnrollmentController:
         environment = folder / "experimental_environment"
         bringup_destination = environment / "bringup"
         calibration_destination = folder / "calibration" / "latest_calib.json"
-        checkup_id = report.get("checkup_id", "panel-b-checkup")
+        checkup_id = report.get("checkup_id", "view-b-checkup")
         checkup_destination = folder / "checkups" / f"{checkup_id}.json"
         files = []
         for source in self._bringup_files():
@@ -553,10 +553,10 @@ class EnrollmentController:
     def _append_checkup_report(self, folder: Path, manifest: dict, report: dict) -> dict:
         checkup_id = report.get("checkup_id")
         if not checkup_id:
-            raise EnrollmentError("The Panel B report has no checkup identifier.")
+            raise EnrollmentError("The View B report has no checkup identifier.")
         checkup_id = str(checkup_id)
         if Path(checkup_id).name != checkup_id or checkup_id in (".", ".."):
-            raise EnrollmentError("The Panel B checkup identifier is unsafe.")
+            raise EnrollmentError("The View B checkup identifier is unsafe.")
         relative = str(Path("checkups") / f"{checkup_id}.json")
         destination = folder / relative
         if destination.exists():
@@ -608,8 +608,8 @@ class EnrollmentController:
             or item.get("path") == "calibration/latest_calib.json"
         }
         current = self._current_environment_hashes()
-        # Sessions created before LOT 4 legitimately have no experiment profile.
-        # It is snapshotted, with a manifest warning, when Panel D is first opened.
+        # Older sessions legitimately have no experiment profile.
+        # It is snapshotted, with a manifest warning, when View D is first opened.
         if "experimental_environment/experiment.yaml" not in saved:
             current.pop("experimental_environment/experiment.yaml", None)
         mismatches = []

@@ -6,13 +6,13 @@
   const placeholder = document.getElementById("participant-video-placeholder");
   const video = document.getElementById("participant-video");
   const videoError = document.getElementById("participant-video-error");
-  const modePanel = document.getElementById("participant-mode-explanation");
+  const modeView = document.getElementById("participant-mode-explanation");
   const modeTitle = document.getElementById("participant-mode-title");
   const modeFrame = document.getElementById("participant-mode-video-frame");
   const modePlaceholder = document.getElementById("participant-mode-video-placeholder");
   const modeVideo = document.getElementById("participant-mode-video");
   const modeVideoError = document.getElementById("participant-mode-video-error");
-  const trialPanel = document.getElementById("participant-trial");
+  const trialView = document.getElementById("participant-trial");
   const trialTitle = document.getElementById("participant-trial-title");
   const trialTask = document.getElementById("participant-task");
   const linearDistance = document.getElementById("participant-linear-distance");
@@ -28,7 +28,7 @@
   let cameraStream = null;
   let cameraRequest = 0;
   let cameraStarting = false;
-  let currentPanel = "waiting";
+  let currentView = "waiting";
   const setText = (element, value) => { if (element.textContent !== value) element.textContent = value; };
   video.addEventListener("error", () => { videoError.hidden = false; });
   video.addEventListener("loadedmetadata", () => { videoError.hidden = true; });
@@ -50,7 +50,7 @@
   }
 
   async function startCamera() {
-    if (currentPanel !== "C" || cameraStream || cameraStarting) return;
+    if (currentView !== "C" || cameraStream || cameraStarting) return;
     const request = ++cameraRequest;
     cameraStarting = true;
     cameraRetry.hidden = true;
@@ -59,7 +59,7 @@
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera access is unavailable in this browser or origin.");
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      if (request !== cameraRequest || currentPanel !== "C") {
+      if (request !== cameraRequest || currentView !== "C") {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
@@ -82,17 +82,17 @@
   window.addEventListener("pagehide", stopCamera);
 
   function render(state) {
-    const showA = state.panel === "A";
-    const showB = state.panel === "B" && ["baseline", "snake"].includes(state.mode);
-    const showC = state.panel === "C" && ["baseline", "snake"].includes(state.mode);
-    const enteringC = showC && currentPanel !== "C";
+    const showA = state.view === "A";
+    const showB = state.view === "B" && ["baseline", "snake"].includes(state.mode);
+    const showC = state.view === "C" && ["baseline", "snake"].includes(state.mode);
+    const enteringC = showC && currentView !== "C";
     workspace.classList.toggle("participant-workspace--trial", showC);
-    if (!showC && currentPanel === "C") stopCamera();
-    currentPanel = showC ? "C" : state.panel;
+    if (!showC && currentView === "C") stopCamera();
+    currentView = showC ? "C" : state.view;
     waiting.hidden = showA || showB || showC;
     presentation.hidden = !showA;
-    modePanel.hidden = !showB;
-    trialPanel.hidden = !showC;
+    modeView.hidden = !showB;
+    trialView.hidden = !showC;
     if (!showA && !video.paused) video.pause();
     if (!showB && !modeVideo.paused) modeVideo.pause();
     if (showA) {

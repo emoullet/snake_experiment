@@ -161,7 +161,7 @@ class CheckupControllerTest(unittest.TestCase):
         self.assertTrue(self.controller.snapshot()["can_validate"])
         state = self.controller.validate()
         self.assertEqual(state["workflow"], "validated")
-        self.assertEqual(state["current_panel"], "C")
+        self.assertEqual(state["current_view"], "C")
         self.assertEqual(state["stack"]["status"], "inactive")
         self.assertEqual(state["pending_report"]["status"], "PASSED_WITH_WARNINGS")
 

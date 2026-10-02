@@ -1,4 +1,4 @@
-"""FastAPI surface for the independent Panels B-G interface."""
+"""FastAPI surface for the independent Views B-G interface."""
 
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ def create_session_app(
     state_images=None,
     robot_preview=None,
 ):
-    """Create the Panel B-G app around injectable workflow controllers."""
+    """Create the View B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
     websocket_clients = 0
 
@@ -206,7 +206,7 @@ def create_session_app(
     @app.get("/participant/api/state")
     async def participant_state():
         return experiment.participant_snapshot() if experiment is not None else {
-            "panel": "waiting", "presentation_status": "pending", "video_available": False,
+            "view": "waiting", "presentation_status": "pending", "video_available": False,
         }
 
     @app.get("/participant/video", include_in_schema=False)
@@ -222,7 +222,7 @@ def create_session_app(
         paths = mode_explanation_videos or {}
         video = paths.get(mode) if mode in ("baseline", "snake") else None
         if (
-            state.get("panel") != "B"
+            state.get("view") != "B"
             or state.get("mode") != mode
             or not video_is_available(video)
         ):
@@ -234,7 +234,7 @@ def create_session_app(
         public = experiment.participant_snapshot() if experiment is not None else {}
         image = (state_images or {}).get(mode, {}).get(state)
         if (
-            public.get("panel") != "C"
+            public.get("view") != "C"
             or public.get("mode") != mode
             or public.get("local_mode") != state
             or not state_image_is_available(image)
@@ -249,7 +249,7 @@ def create_session_app(
         try:
             while True:
                 current = experiment.participant_snapshot() if experiment is not None else {
-                    "panel": "waiting", "presentation_status": "pending", "video_available": False,
+                    "view": "waiting", "presentation_status": "pending", "video_available": False,
                 }
                 serialised = json.dumps(current, sort_keys=True)
                 if serialised != previous:
@@ -261,35 +261,35 @@ def create_session_app(
 
     def combined_snapshot():
         state = checkup.snapshot()
-        if enrollment is not None and state.get("current_panel") != "B":
-            panel_c = enrollment.snapshot()
-            state["current_panel"] = panel_c["current_panel"]
-            state["enrollment"] = panel_c
-            if experiment is not None and panel_c["current_panel"] != "C":
-                panel_d = experiment.snapshot()
-                state["current_panel"] = panel_d["current_panel"]
-                state["experiment"] = panel_d
+        if enrollment is not None and state.get("current_view") != "B":
+            view_c = enrollment.snapshot()
+            state["current_view"] = view_c["current_view"]
+            state["enrollment"] = view_c
+            if experiment is not None and view_c["current_view"] != "C":
+                view_d = experiment.snapshot()
+                state["current_view"] = view_d["current_view"]
+                state["experiment"] = view_d
         return state
 
     def enrollment_action(callback):
-        require_panel_c()
+        require_view_c()
         action(callback)
         return combined_snapshot()
 
-    def require_panel_c():
-        if checkup.snapshot().get("current_panel") == "B":
+    def require_view_c():
+        if checkup.snapshot().get("current_view") == "B":
             raise HTTPException(
                 status_code=409,
-                detail="Validate Panel B before using session enrolment.",
+                detail="Validate View B before using session enrolment.",
             )
 
-    def require_panel_b():
-        if checkup.snapshot().get("current_panel") != "B":
-            raise HTTPException(status_code=409, detail="Panel B is already complete.")
+    def require_view_b():
+        if checkup.snapshot().get("current_view") != "B":
+            raise HTTPException(status_code=409, detail="View B is already complete.")
 
     @app.post("/api/stack/{command}")
     async def stack(command: str):
-        require_panel_b()
+        require_view_b()
         if command == "start":
             return action(checkup.start_stack)
         if command == "stop":
@@ -298,57 +298,57 @@ def create_session_app(
 
     @app.post("/api/checkup/modes/{mode}/start")
     async def start_mode(mode: str):
-        require_panel_b()
+        require_view_b()
         return action(lambda: checkup.start_mode(mode))
 
     @app.post("/api/checkup/modes/{mode}/retry")
     async def retry_mode(mode: str):
-        require_panel_b()
+        require_view_b()
         return action(lambda: checkup.retry_mode(mode))
 
     @app.post("/api/checkup/modes/{mode}/confirm")
     async def confirm_mode(mode: str, confirmation: Confirmation):
-        require_panel_b()
+        require_view_b()
         return action(lambda: checkup.confirm_mode(mode, confirmation.accepted))
 
     @app.post("/api/checkup/validate")
     async def validate():
-        require_panel_b()
+        require_view_b()
         return action(checkup.validate)
 
     @app.post("/api/checkup/reset")
     async def reset():
-        require_panel_b()
+        require_view_b()
         return action(checkup.reset)
 
     @app.post("/api/checkup/go-to")
     async def start_checkup_go_to(request: GoToRequest):
-        require_panel_b()
+        require_view_b()
         return action(lambda: checkup.start_go_to(request.pose_id))
 
     @app.post("/api/checkup/go-to/stop")
     async def stop_checkup_go_to():
-        require_panel_b()
+        require_view_b()
         return action(checkup.stop_go_to)
 
     @app.get("/api/session/browse")
     async def browse(path: str = ""):
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
-        require_panel_c()
+            raise HTTPException(status_code=404, detail="View C is not configured.")
+        require_view_c()
         return action(lambda: enrollment.browse(path))
 
     @app.post("/api/session/root")
     async def select_root(selection: FolderSelection):
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+            raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(lambda: enrollment.select_parent(selection.path))
 
     @app.post("/api/session/folders")
     async def create_folder(request: FolderCreation):
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
-        require_panel_c()
+            raise HTTPException(status_code=404, detail="View C is not configured.")
+        require_view_c()
         return action(
             lambda: enrollment.create_folder(request.parent_path, request.name)
         )
@@ -356,20 +356,20 @@ def create_session_app(
     @app.post("/api/session/pseudonym/regenerate")
     async def regenerate_pseudonym():
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
-        require_panel_c()
+            raise HTTPException(status_code=404, detail="View C is not configured.")
+        require_view_c()
         return action(enrollment.generate_pseudonym)
 
     @app.post("/api/session/new")
     async def create_participant(form: ParticipantForm):
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+            raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(lambda: enrollment.create_participant(form.dict()))
 
     @app.post("/api/session/resume")
     async def resume_participant(request: ResumeRequest):
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+            raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(
             lambda: enrollment.resume_participant(
                 request.pseudonym, request.acknowledge_mismatch
@@ -379,30 +379,30 @@ def create_session_app(
     @app.post("/api/session/cancel")
     async def cancel_participant():
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+            raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(enrollment.cancel)
 
     @app.post("/api/session/reset")
     async def reset_session():
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+            raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(enrollment.reset)
 
     @app.post("/api/session/launch")
     async def launch_session():
         if enrollment is None:
-            raise HTTPException(status_code=404, detail="Panel C is not configured.")
+            raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(enrollment.launch)
 
     def experiment_action(callback):
         if experiment is None:
-            raise HTTPException(status_code=404, detail="Panel D is not configured.")
-        if checkup.snapshot().get("current_panel") == "B":
-            raise HTTPException(status_code=409, detail="Validate Panel B first.")
-        if enrollment is None or enrollment.snapshot().get("current_panel") == "C":
+            raise HTTPException(status_code=404, detail="View D is not configured.")
+        if checkup.snapshot().get("current_view") == "B":
+            raise HTTPException(status_code=409, detail="Validate View B first.")
+        if enrollment is None or enrollment.snapshot().get("current_view") == "C":
             raise HTTPException(
                 status_code=409,
-                detail="Prepare a participant from Panel C first.",
+                detail="Prepare a participant from View C first.",
             )
         action(callback)
         return combined_snapshot()

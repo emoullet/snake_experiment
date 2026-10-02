@@ -1,4 +1,4 @@
-"""FastAPI surface for Panel A."""
+"""FastAPI surface for View A."""
 
 from __future__ import annotations
 
@@ -25,11 +25,11 @@ def create_app(
     template_directory: Path,
     pose_topic: str,
 ) -> FastAPI:
-    """Create the Panel A application around injectable services."""
+    """Create the View A application around injectable services."""
     app = FastAPI(title="Snake Experiment Calibration", version="1.0")
     # Colcon's --symlink-install places data files outside the installed share
     # directory. Allow those package-managed links so the browser can load the
-    # panel's JavaScript and CSS during development builds.
+    # view's JavaScript and CSS during development builds.
     app.mount(
         "/static",
         StaticFiles(directory=static_directory, follow_symlink=True),
@@ -53,7 +53,7 @@ def create_app(
             raise HTTPException(status_code=500, detail=str(error)) from error
 
     @app.get("/", include_in_schema=False)
-    async def panel_a():
+    async def calibration_home():
         return FileResponse(template_directory / "index.html")
 
     @app.get("/api/state")

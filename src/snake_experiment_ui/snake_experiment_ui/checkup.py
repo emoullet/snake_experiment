@@ -1,4 +1,4 @@
-"""Panel B workflow, gating rules, and in-memory report construction."""
+"""View B workflow, gating rules, and in-memory report construction."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from .go_to import GoToError
 
 
 class CheckupError(RuntimeError):
-    """An operator-correctable Panel B workflow error."""
+    """An operator-correctable View B workflow error."""
 
 
 def _utc_now() -> str:
@@ -242,7 +242,7 @@ class CheckupController:
             return self.snapshot()
 
     def start_go_to(self, pose_id: str) -> dict:
-        """Command one required Panel B calibration pose."""
+        """Command one required View B calibration pose."""
         allowed = ("target_1", "target_2", "target_3", "starting_point")
         if pose_id not in allowed:
             raise CheckupError(f"Unknown check-up Go-to pose: {pose_id}")
@@ -378,7 +378,7 @@ class CheckupController:
             }
             return {
                 "workflow": self._workflow,
-                "current_panel": "C" if self._workflow == "validated" else "B",
+                "current_view": "C" if self._workflow == "validated" else "B",
                 "error": self._error,
                 "stack": self._stack.snapshot(),
                 "mode_process": self._modes.snapshot(),

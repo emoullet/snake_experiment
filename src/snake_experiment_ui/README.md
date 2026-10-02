@@ -1,18 +1,18 @@
 # Snake experiment operator interfaces
 
 This ROS 2 package implements the independent operator interfaces for the Snake
-experiment. Panel A controls
+experiment. The calibration interface controls
 the experiment stack and the selected joystick mapper as separate processes,
 records seven end-effector poses from `/ee_pose`, and writes a versioned JSON
-calibration file. The session interface implements Panel B (LOT 2) and Panel C
-(LOT 3), then reserves the sequential Panel D and E workflow.
+calibration file. The session interface handles system check-up, participant
+enrolment, and the subsequent experiment sequence.
 
 Experiment-owned bringup resources are kept under `bringup/cartesian_manager`
 and `bringup/joystick_mapper`. Mapper configurations are installed under the
 same relative path, while mapper launch files are installed only once in the
 package's top-level `launch` directory. The cartesian-manager launch snapshot
 mirrors the currently pinned submodule version but remains source-only to avoid
-a duplicate `explorer.launch.py` in ROS 2 launch discovery. The panel launch
+a duplicate `explorer.launch.py` in ROS 2 launch discovery. The view launch
 files in `launch/` remain the executable entry points used by the interfaces.
 
 ## Install, build, and run
@@ -60,7 +60,7 @@ only their corresponding joystick mapper and publish the selected geometric
 mode. Stack launches use simulation by default; setting
 `stack_use_simulation:=false` selects the hardware path.
 
-Calibration files are stored relative to the directory from which the panel
+Calibration files are stored relative to the directory from which the view
 process is launched. The current calibration is written to
 `calibrations/latest_calib.json`. When it is replaced, the previous file is
 moved to `calibrations/calib_archives/` with a unique UTC-stamped name.
@@ -82,20 +82,20 @@ moved to `calibrations/calib_archives/` with a unique UTC-stamped name.
 The server binds to loopback by default and has no authentication. Do not expose
 it on another interface without an appropriate network access policy.
 
-## Explorer POC2 3D preview (participant interface, lot 1)
+## Explorer POC2 3D preview (participant interface)
 
 Open <http://127.0.0.1:8081/participant/3d-preview> after starting
 `session_interface.launch.py`. This separate development page shows two
 independent, read-only URDF views of the Explorer POC2 arm and gripper. Both
 follow fresh `/joint_states`; a missing or stale stream is reported instead of
-claiming the pose is live. The participant Panel C, its images, and its webcam
-are unchanged. No joystick mapping is animated in this lot, and the preview
+claiming the pose is live. The participant task screen, its images, and its webcam
+are unchanged. No joystick mapping is animated in this preview, and it
 sends no ROS commands.
 
 The installed `explorer_description` and `gripper_pincette` packages provide
 the Xacro and visual meshes. Only opaque, allowlisted visual-asset URLs are
 served; package paths are not exposed to the browser. The model provider is a
-separate boundary so that a Kinova Gen3 model can be introduced in a later lot.
+separate boundary so that a Kinova Gen3 model can be introduced later.
 
 The compiled JavaScript bundle is versioned with the package. A normal
 `colcon build` requires no Node installation. Only when changing the 3D
@@ -110,7 +110,7 @@ pnpm run build
 Commit the resulting `snake_experiment_ui/static/participant_3d.bundle.js`
 together with the frontend source and lockfile.
 
-## Panel B: system check-up
+## View B: system check-up
 
 Build the same package and launch the second interface independently:
 
@@ -120,7 +120,7 @@ ros2 launch snake_experiment_ui session_interface.launch.py \
 ```
 
 Open <http://127.0.0.1:8081>. Hardware is selected by default; use
-`stack_use_simulation:=true` for simulation. Panel B owns only the processes it
+`stack_use_simulation:=true` for simulation. View B owns only the processes it
 starts and refuses to adopt or stop a stack or joystick mapper launched from a
 different terminal or interface.
 
@@ -129,14 +129,14 @@ ROS graph, active controllers, topic types and rates, message validity, mapper
 parameters, joystick activity, and an operator confirmation. Baseline loads
 `b1`, `b2`, and `b3`; Snake loads only `b1` and `b2`.
 
-Panel B also requires one successful Cartesian motion to each of `target_1`,
+View B also requires one successful Cartesian motion to each of `target_1`,
 `target_2`, `target_3`, and `starting_point`. The interface freezes and hashes
 the global `calibration_file` when the stack first starts, asks for confirmation
 before every motion, and exposes a permanent emergency `Stop motion` action.
 Validation remains blocked until all four poses have been reached within 5 mm
 and 5 degrees for 0.5 seconds. A motion is cancelled after 30 seconds, when the
 stack stops, or when the last browser disconnects. Every attempt is retained in
-the in-memory Panel B report.
+the in-memory View B report.
 
 Diagnostic expectations live in `config/system_checkup.yaml`. Commit
 constraints are optional: Git provenance is always recorded, while a mismatch
@@ -144,8 +144,8 @@ blocks validation only when `expected_revisions` contains an expected commit.
 The Baseline and Snake mapper profiles live in
 `bringup/joystick_mapper/config`; these are their only source copies and are
 installed with the package.
-The completed report remains in backend memory until Panel C creates or resumes
-a participant. Panel C then copies it into the participant's check-up history
+The completed report remains in backend memory until View C creates or resumes
+a participant. View C then copies it into the participant's check-up history
 and marks it as the active report.
 
 | Parameter | Default | Purpose |
@@ -170,9 +170,9 @@ and marks it as the active report.
 | `go_to_timeout_sec` | `30.0` | Maximum duration of a Cartesian motion. |
 | `go_to_dwell_sec` | `0.5` | Continuous time required inside the pose tolerances. |
 
-## Panel C: enrolment and session resume
+## View C: enrolment and session resume
 
-After Panel B validation, select an experiment folder below `sessions_root`.
+After View B validation, select an experiment folder below `sessions_root`.
 The interface creates `experiment_state.csv` when absent, using the columns
 `session_date`, `pseudonym`, `gathered_consent`, `handedness`,
 `joystick_experience`, `visual_or_motor_impairment`, `starting_time`,
@@ -180,33 +180,33 @@ The interface creates `experiment_state.csv` when absent, using the columns
 
 New participants receive a collision-safe six-character pseudonym and the least
 represented experimental plan. Their folder contains the current calibration,
-the packaged bringup and experiment-profile snapshots, the Panel B report
+the packaged bringup and experiment-profile snapshots, the View B report
 history, a Git provenance record, and a SHA-256 manifest. Partial sessions can
 be resumed; any bringup, profile, or calibration difference requires explicit
 operator acknowledgement and never overwrites the saved environment.
 
-Cancelling a participant created during the current Panel C visit removes its
+Cancelling a participant created during the current View C visit removes its
 new folder and CSV row. Cancelling a resumed participant only clears the UI
 selection. Closing the browser or stopping the interface preserves partial
-sessions. Launching prepares durable experiment progress and advances to Panel D
+sessions. Launching prepares durable experiment progress and advances to View D
 without starting the stack or a mapper.
 
-## Panel D: experiment sequence
+## View D: experiment sequence
 
 Before the six robot blocks, new sessions require the separate “Experiment
 presentation” step. Open <http://127.0.0.1:8081/participant> on the second
-screen, then use `Display experiment presentation` in Panel D. The participant
-page begins on a neutral waiting screen and switches to Panel A. The participant
+screen, then use `Display experiment presentation` in View D. The participant
+page begins on a neutral waiting screen and switches to View A. The participant
 starts the video manually; the operator confirms with `Presentation done`.
 Until then, the six blocks remain locked on the server. If no MP4 is configured
-or the file is missing, Panel A displays a development placeholder and the
+or the file is missing, View A displays a development placeholder and the
 operator may still validate; the missing video is noted in progress. Existing
 sessions created before this step are not retroactively blocked.
 
 Set `videos.experiment_presentation` in
 `config/participant_interface.yaml` to use a video. The same file reserves
 `videos.mode_explanation.baseline` and `.snake` for the future participant
-Panel B; these paths are not used yet. Empty values keep the placeholder.
+View B; these paths are not used yet. Empty values keep the placeholder.
 Paths may be absolute or relative to the YAML file. For a different config,
 launch with `participant_interface_profile:=/absolute/path/to/participant_interface.yaml`.
 Only `.mp4` files are accepted. Use H.264 video and AAC audio for broad
@@ -217,7 +217,7 @@ launch argument overrides only the presentation path. The
 participant page receives only a read-only presentation state, not the
 participant pseudonym, session paths, or operator actions.
 
-Panel D resolves `mode_1` and `mode_2` from the participant's counterbalanced
+View D resolves `mode_1` and `mode_2` from the participant's counterbalanced
 plan and enforces the six blocks in `config/experiment.yaml`: both discovery
 blocks, then training and recording for mode 1, followed by training and
 recording for mode 2. Starting a block starts the owned stack when needed and
@@ -230,7 +230,7 @@ in `<mode>_<phase>/block.json`. Backend shutdown interrupts an active block,
 while a browser disconnect alone does not. The final block stops the mapper and
 stack but deliberately leaves the participant CSV state as `partial`.
 
-## Panel E: discovery
+## View E: discovery
 
 Discovery opens with the owned stack active and control disabled. The operator
 reads the standardised instruction text from the participant's snapshotted
@@ -240,13 +240,13 @@ folder; existing recordings are never overwritten. Deactivation closes the
 segment and verifies that `/joy`, `/ee_pose`, and `/joint_states` each contain
 messages before discovery can be completed.
 
-`Restart stack` is available from Panels E, F, and G. It restarts only processes
+`Restart stack` is available from Views E, F, and G. It restarts only processes
 owned by this interface and restores the previous control state. During
 discovery, an active recording is closed before restart and restoration creates
 a new numbered segment. The packaged instruction is intentionally marked as a
 placeholder and must be replaced before participant data collection.
 
-## Panel F: training
+## View F: training
 
 Training expands the configured target sequence into globally numbered trials
 for every cycle. The mapper remains active throughout the block. Before each
@@ -270,7 +270,7 @@ after arrival, an operator stop, a timeout, or an error. A Go-to is unavailable
 while an MCAP acquisition is active and is cancelled when the last browser
 disconnects. All outcomes are persisted in the block history.
 
-## Panel G: official recordings
+## View G: official recordings
 
 Recording uses the same pose gates, automatic success detection, MCAP
 validation, incidents, retries, deviations, and process-ownership rules as
@@ -281,15 +281,15 @@ Trial folders use `<mode>_trial_<id>_<cycle>_<start>_<end>`, with each acquisiti
 stored below it as a new `attempt_###`. The mapper and stack remain active between
 trials. Completing the final recording block stops both owned processes and marks
 the six-block sequence complete. Questionnaires, pause timing, and final manifest
-locking remain outside this lot.
+locking are not yet implemented.
 
-Panel G exposes the same confirmed Go-to, Stop motion, mapper suspension, timeout,
-disconnect cancellation, and persistent motion history as Panel F.
+View G exposes the same confirmed Go-to, Stop motion, mapper suspension, timeout,
+disconnect cancellation, and persistent motion history as View F.
 
 ## Cartesian Go-to API
 
-Panel B exposes `POST /api/checkup/go-to` and
-`POST /api/checkup/go-to/stop`. Panels F and G expose
+View B exposes `POST /api/checkup/go-to` and
+`POST /api/checkup/go-to/stop`. Views F and G expose
 `POST /api/experiment/blocks/{block_id}/go-to` and
 `POST /api/experiment/blocks/{block_id}/go-to/stop`. The live HTTP and WebSocket
 state includes the current motion, terminal result, available targets, and full

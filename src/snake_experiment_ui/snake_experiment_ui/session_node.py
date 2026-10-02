@@ -1,4 +1,4 @@
-"""ROS node hosting the independent Snake experiment Panels B-G interface."""
+"""ROS node hosting the independent Snake experiment Views B-G interface."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ CONTROLLER_REQUEST_TIMEOUT_SEC = 5.0
 
 
 class SessionInterfaceNode(Node):
-    """Bridge Panel B state, ROS diagnostics, and launch ownership to the web UI."""
+    """Bridge View B state, ROS diagnostics, and launch ownership to the web UI."""
 
     def __init__(self) -> None:
         super().__init__("snake_experiment_session_interface")
@@ -304,7 +304,7 @@ class SessionInterfaceNode(Node):
         self._server_thread.start()
         host = self.get_parameter("host").value
         port = self.get_parameter("port").value
-        self.get_logger().info(f"Panels B-G available at http://{host}:{port}")
+        self.get_logger().info(f"Views B-G available at http://{host}:{port}")
 
     def _record_ee_pose(self, message: PoseStamped) -> None:
         self._diagnostics.record("/ee_pose", message)

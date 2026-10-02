@@ -1,4 +1,4 @@
-"""Configurable, ROS-agnostic diagnostics for the Panel B system check-up."""
+"""Configurable, ROS-agnostic diagnostics for the View B system check-up."""
 
 from __future__ import annotations
 

@@ -17,7 +17,7 @@ class FakeCheckup:
         self.confirmations = []
 
     def snapshot(self):
-        return {"workflow": self.workflow, "current_panel": "C" if self.workflow == "validated" else "B"}
+        return {"workflow": self.workflow, "current_view": "C" if self.workflow == "validated" else "B"}
 
     def start_stack(self):
         self.workflow = "stack_ready"
@@ -64,10 +64,10 @@ class FakeEnrollment:
     def __init__(self):
         self.parent = None
         self.participant = None
-        self.panel = "C"
+        self.view = "C"
 
     def snapshot(self):
-        return {"workflow": "participant_ready" if self.participant else "awaiting_parent", "current_panel": self.panel, "participant": self.participant}
+        return {"workflow": "participant_ready" if self.participant else "awaiting_parent", "current_view": self.view, "participant": self.participant}
 
     def browse(self, path=""):
         return {"path": path or "/sessions", "directories": [], "parent": None}
@@ -100,24 +100,24 @@ class FakeEnrollment:
         self.parent = None
 
     def launch(self):
-        self.panel = "D"
+        self.view = "D"
 
 
 class FakeExperiment:
     def __init__(self):
-        self.panel = "D"
+        self.view = "D"
         self.calls = []
         self.public_state = None
 
     def snapshot(self):
         return {
             "workflow": "ready",
-            "current_panel": self.panel,
+            "current_view": self.view,
             "progress": {"workflow": "ready", "blocks": []},
         }
 
     def participant_snapshot(self):
-        return self.public_state or {"panel": "A", "presentation_status": "showing", "video_available": False}
+        return self.public_state or {"view": "A", "presentation_status": "showing", "video_available": False}
 
     def presentation_video_available(self):
         return False
@@ -136,15 +136,15 @@ class FakeExperiment:
 
     def start(self, block_id):
         self.calls.append(("start", block_id))
-        self.panel = "E"
+        self.view = "E"
 
     def end(self, block_id, confirmed):
         self.calls.append(("end", block_id, confirmed))
-        self.panel = "D"
+        self.view = "D"
 
     def abort(self, block_id):
         self.calls.append(("abort", block_id))
-        self.panel = "D"
+        self.view = "D"
 
     def set_control(self, block_id, active):
         self.calls.append(("control", block_id, active))
@@ -220,7 +220,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         static.mkdir()
         templates.mkdir()
         (static / "session_app.js").write_text("window.session = true;\n", encoding="utf-8")
-        (templates / "session_index.html").write_text("Panel B", encoding="utf-8")
+        (templates / "session_index.html").write_text("View B", encoding="utf-8")
         (templates / "participant_index.html").write_text("Participant A", encoding="utf-8")
         self.checkup = FakeCheckup()
         self.enrollment = FakeEnrollment()
@@ -246,20 +246,20 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.checkup.confirmations, [("snake", True)])
         response = await self.request("POST", "/api/checkup/validate")
-        self.assertEqual(response.json()["current_panel"], "C")
+        self.assertEqual(response.json()["current_view"], "C")
 
     async def test_participant_projection_and_presentation_routes(self):
         registered = {route.path for route in self.app.routes}
         self.assertTrue({"/participant", "/participant/api/state", "/participant/ws"}.issubset(registered))
         response = await self.request("GET", "/participant/api/state")
         self.assertEqual(response.json(), {
-            "panel": "A", "presentation_status": "showing", "video_available": False,
+            "view": "A", "presentation_status": "showing", "video_available": False,
         })
         self.assertNotIn("participant", response.text)
         self.assertEqual((await self.request("GET", "/participant/video")).status_code, 404)
         self.assertEqual((await self.request("POST", "/api/experiment/presentation/show")).status_code, 409)
         self.checkup.workflow = "validated"
-        self.enrollment.panel = "D"
+        self.enrollment.view = "D"
         self.assertEqual((await self.request("POST", "/api/experiment/presentation/show")).status_code, 200)
         self.assertEqual((await self.request("POST", "/api/experiment/presentation/complete")).status_code, 200)
         self.assertEqual(self.experiment.calls[-2:], [("presentation", "show"), ("presentation", "complete")])
@@ -283,7 +283,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             self.checkup.confirmations,
             [("go_to", "target_1"), ("go_to", "stop")],
         )
-    async def test_panel_c_routes_and_transition_to_d(self):
+    async def test_view_c_routes_and_transition_to_d(self):
         self.checkup.workflow = "validated"
         response = await self.request("GET", "/api/session/browse")
         self.assertEqual(response.json()["path"], "/sessions")
@@ -301,13 +301,13 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request("POST", "/api/session/new", json=form)
         self.assertEqual(response.json()["enrollment"]["participant"]["pseudonym"], "A1B2C3")
         response = await self.request("POST", "/api/session/launch")
-        self.assertEqual(response.json()["current_panel"], "D")
+        self.assertEqual(response.json()["current_view"], "D")
 
         response = await self.request(
             "POST", "/api/experiment/blocks/mode_1_discovery/start"
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["current_panel"], "E")
+        self.assertEqual(response.json()["current_view"], "E")
         response = await self.request(
             "POST",
             "/api/experiment/blocks/mode_1_discovery/end",
@@ -321,7 +321,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_discovery_control_and_restart_routes(self):
         self.checkup.workflow = "validated"
-        self.enrollment.panel = "D"
+        self.enrollment.view = "D"
         response = await self.request(
             "POST",
             "/api/experiment/blocks/mode_1_discovery/control",
@@ -344,7 +344,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         from snake_experiment_ui.session_web_app import create_session_app
 
         self.checkup.workflow = "validated"
-        self.enrollment.panel = "D"
+        self.enrollment.view = "D"
         block = "mode_1_discovery"
         for action in ("show", "complete"):
             response = await self.request(
@@ -370,7 +370,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
                 self.experiment, mode_explanation_videos=videos,
             )
             self.experiment.public_state = {
-                "panel": "B", "mode": "snake", "video_available": True,
+                "view": "B", "mode": "snake", "video_available": True,
             }
             video_route = next(
                 route for route in self.app.routes
@@ -383,7 +383,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
                 (await self.request("GET", "/participant/video/mode/baseline")).status_code,
                 404,
             )
-            self.experiment.public_state = {"panel": "waiting", "mode": None}
+            self.experiment.public_state = {"view": "waiting", "mode": None}
             self.assertEqual(
                 (await self.request("GET", "/participant/video/mode/snake")).status_code,
                 404,
@@ -406,7 +406,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
                 state_images=images,
             )
             self.experiment.public_state = {
-                "panel": "C", "mode": "snake", "local_mode": "b2",
+                "view": "C", "mode": "snake", "local_mode": "b2",
             }
             image_route = next(
                 route for route in self.app.routes
@@ -423,7 +423,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
                 (await self.request("GET", "/participant/state-image/snake/b1")).status_code,
                 404,
             )
-            self.experiment.public_state = {"panel": "waiting"}
+            self.experiment.public_state = {"view": "waiting"}
             self.assertEqual(
                 (await self.request("GET", "/participant/state-image/snake/b2")).status_code,
                 404,
@@ -431,7 +431,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_training_routes(self):
         self.checkup.workflow = "validated"
-        self.enrollment.panel = "D"
+        self.enrollment.view = "D"
         block = "mode_1_training"
         for action in ("prepare", "ready", "start", "stop"):
             response = await self.request(
@@ -471,7 +471,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_experiment_go_to_routes(self):
         self.checkup.workflow = "validated"
-        self.enrollment.panel = "D"
+        self.enrollment.view = "D"
         block = "mode_1_training"
         response = await self.request(
             "POST",
@@ -490,7 +490,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_recording_routes(self):
         self.checkup.workflow = "validated"
-        self.enrollment.panel = "D"
+        self.enrollment.view = "D"
         block = "mode_1_recording"
         for action in ("prepare", "ready", "start", "stop"):
             response = await self.request(
@@ -530,7 +530,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
 
 class SessionTemplateTest(unittest.TestCase):
-    def test_participant_panel_c_has_stable_preview_and_no_robot_controls(self):
+    def test_participant_view_c_has_stable_preview_and_no_robot_controls(self):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         html = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
         script = (package_root / "static/participant_app.js").read_text(encoding="utf-8")
@@ -549,7 +549,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('Retry camera</button>', html)
         self.assertNotIn('Enable camera</button>', html)
         self.assertIn('window.addEventListener("pagehide", stopCamera)', script)
-        self.assertIn('if (!showC && currentPanel === "C") stopCamera()', script)
+        self.assertIn('if (!showC && currentView === "C") stopCamera()', script)
         self.assertIn('if (element.textContent !== value) element.textContent = value', script)
         self.assertIn('workspace.classList.toggle("participant-workspace--trial", showC)', script)
         self.assertIn('.participant-workspace--trial { width: min(1540px, calc(100% - 32px)); }', style)
@@ -562,7 +562,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertNotIn('innerHTML', script)
         self.assertNotIn('/api/experiment/', script)
 
-    def test_participant_panel_b_and_operator_gate_are_present(self):
+    def test_participant_view_b_and_operator_gate_are_present(self):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         participant_html = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
         participant_script = (package_root / "static/participant_app.js").read_text(encoding="utf-8")
@@ -575,7 +575,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('data-mode-explanation="complete"', operator_script)
         self.assertIn('this.busy || (!controlActive && !explanationDone)', operator_script)
 
-    def test_participant_panel_a_and_operator_step_are_present(self):
+    def test_participant_view_a_and_operator_step_are_present(self):
         package_root = Path(__file__).resolve().parents[1] / "snake_experiment_ui"
         operator = (package_root / "templates/session_index.html").read_text(encoding="utf-8")
         participant = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
@@ -610,12 +610,12 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("this.resetParticipantForm();", script)
         self.assertIn('["/api/session/cancel", "/api/session/reset"]', script)
 
-    def test_lot_4_panels_and_actions_are_present(self):
+    def test_experiment_views_and_actions_are_present(self):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         html = (package_root / "templates/session_index.html").read_text(encoding="utf-8")
         script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
-        for panel in ("D", "E", "F", "G"):
-            self.assertIn(f'data-panel-step="{panel}"', html)
+        for view in ("D", "E", "F", "G"):
+            self.assertIn(f'data-view-step="{view}"', html)
         self.assertIn("data-block-start", script)
         self.assertIn("data-block-end", script)
         self.assertIn("data-block-abort", script)
@@ -685,8 +685,8 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("successfully reached", script)
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
-        self.assertIn("session_style.css?v=participant-lot-1", html)
-        self.assertIn("session_app.js?v=participant-lot-2", html)
+        self.assertIn("session_style.css?v=session-style-3", html)
+        self.assertIn("session_app.js?v=session-app-3", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(
@@ -694,12 +694,12 @@ class SessionTemplateTest(unittest.TestCase):
             html.index('data-checkup-go-to="target_1"'),
         )
 
-    def test_trial_panels_use_sticky_two_column_layout_and_starting_point_first(self):
+    def test_trial_views_use_sticky_two_column_layout_and_starting_point_first(self):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
         style = (package_root / "static/session_style.css").read_text(encoding="utf-8")
         trial_render = script[
-            script.index("  renderTrialPanel(") : script.index("\n  title(value)")
+            script.index("  renderTrialView(") : script.index("\n  title(value)")
         ]
         self.assertIn('class="trial-workspace"', trial_render)
         self.assertIn('class="trial-main-column"', trial_render)

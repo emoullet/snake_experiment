@@ -277,7 +277,7 @@ class ExperimentControllerTest(unittest.TestCase):
 
     def test_prepare_legacy_session_snapshots_profile_and_resolves_plan(self):
         state = self.prepare_session()
-        self.assertEqual(state["current_panel"], "D")
+        self.assertEqual(state["current_view"], "D")
         self.assertTrue(state["progress"]["late_initialization"])
         self.assertEqual(
             [block["mode"] for block in state["progress"]["blocks"]],
@@ -291,7 +291,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.mark_as_new_session()
         state = self.controller.prepare(self.participant)
         self.assertEqual(state["progress"]["presentation"]["status"], "pending")
-        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
         with self.assertRaisesRegex(ExperimentError, "Display the experiment presentation"):
             self.controller.complete_presentation()
         with self.assertRaisesRegex(ExperimentError, "Validate the experiment presentation"):
@@ -299,7 +299,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(self.stack.start_count, 0)
         self.controller.show_presentation()
         public = self.controller.participant_snapshot()
-        self.assertEqual(public["panel"], "A")
+        self.assertEqual(public["view"], "A")
         self.assertNotIn("pseudonym", public)
         self.assertNotIn("folder", public)
         self.assertNotIn("axes", public)
@@ -328,7 +328,7 @@ class ExperimentControllerTest(unittest.TestCase):
             self.rosbag, utc_clock=self.clock, presentation_video=video,
         )
         resumed.prepare(self.participant)
-        self.assertEqual(resumed.participant_snapshot()["panel"], "A")
+        self.assertEqual(resumed.participant_snapshot()["view"], "A")
         self.assertEqual(resumed.snapshot()["progress"]["presentation"]["status"], "completed")
 
     def test_mode_explanation_gates_discovery_and_persists_across_resume(self):
@@ -340,10 +340,10 @@ class ExperimentControllerTest(unittest.TestCase):
             self.controller.set_control("mode_1_discovery", True)
         with self.assertRaisesRegex(ExperimentError, "mode explanation"):
             self.controller.end("mode_1_discovery", True)
-        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
         self.controller.show_mode_explanation("mode_1_discovery")
         public = self.controller.participant_snapshot()
-        self.assertEqual((public["panel"], public["mode"]), ("B", "snake"))
+        self.assertEqual((public["view"], public["mode"]), ("B", "snake"))
         self.assertNotIn("pseudonym", public)
         self.assertNotIn("folder", public)
         state = self.controller.complete_mode_explanation("mode_1_discovery")
@@ -352,22 +352,22 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertTrue(explanation["shown_at_utc"])
         self.assertTrue(explanation["completed_at_utc"])
         self.assertTrue(explanation["video_missing"])
-        self.assertEqual(self.controller.participant_snapshot()["panel"], "B")
+        self.assertEqual(self.controller.participant_snapshot()["view"], "B")
         self.controller.abort("mode_1_discovery")
-        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
         resumed = ExperimentController(
             ExperimentProfile(self.source_profile), self.stack, self.modes,
             self.rosbag, utc_clock=self.clock,
         )
         resumed.prepare(self.participant)
         resumed.start("mode_1_discovery")
-        self.assertEqual(resumed.participant_snapshot()["panel"], "B")
+        self.assertEqual(resumed.participant_snapshot()["view"], "B")
         resumed.set_control("mode_1_discovery", True)
         resumed.set_control("mode_1_discovery", False)
         resumed.end("mode_1_discovery", True)
-        self.assertEqual(resumed.participant_snapshot()["panel"], "waiting")
+        self.assertEqual(resumed.participant_snapshot()["view"], "waiting")
         resumed.start("mode_2_discovery")
-        self.assertEqual(resumed.participant_snapshot()["panel"], "waiting")
+        self.assertEqual(resumed.participant_snapshot()["view"], "waiting")
         with self.assertRaisesRegex(ExperimentError, "mode explanation"):
             resumed.set_control("mode_2_discovery", True)
         resumed.show_mode_explanation("mode_2_discovery")
@@ -396,7 +396,7 @@ class ExperimentControllerTest(unittest.TestCase):
         controller.start("mode_2_discovery")
         controller.show_mode_explanation("mode_2_discovery")
         public = controller.participant_snapshot()
-        self.assertEqual((public["panel"], public["mode"]), ("B", "baseline"))
+        self.assertEqual((public["view"], public["mode"]), ("B", "baseline"))
         self.assertTrue(public["video_available"])
         controller.complete_mode_explanation("mode_2_discovery")
         self.assertFalse(controller.snapshot()["progress"]["blocks"][1]["mode_explanation"]["video_missing"])
@@ -444,7 +444,7 @@ class ExperimentControllerTest(unittest.TestCase):
         with self.assertRaisesRegex(ExperimentError, "next required"):
             self.controller.start("mode_2_discovery")
         state = self.controller.start("mode_1_discovery")
-        self.assertEqual(state["current_panel"], "E")
+        self.assertEqual(state["current_view"], "E")
         self.assertIsNone(self.modes.active)
         self.assertFalse(state["control_active"])
         folder = self.participant_folder / "snake_discovery"
@@ -583,13 +583,13 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertIsNotNone(state["training"]["current_trial"]["ready_at_utc"])
         self.controller.stop_training_attempt("mode_1_training")
 
-    def test_participant_panel_c_shows_target_only_during_recording(self):
+    def test_participant_view_c_shows_target_only_during_recording(self):
         self.prepare_session()
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
         public = self.controller.participant_snapshot()
-        self.assertEqual((public["panel"], public["mode"], public["phase"]),
+        self.assertEqual((public["view"], public["mode"], public["phase"]),
                          ("C", "snake", "training"))
         self.assertEqual(public["state"], "Waiting")
         self.assertIsNone(public["linear_mm"])
@@ -625,11 +625,11 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.update_ee_pose(self.pose("target_2"))
         self.assertEqual(self.controller.participant_snapshot()["state"], "Target reached")
         self.controller.abort("mode_1_training")
-        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
         self.controller.start("mode_1_training")
-        self.assertEqual(self.controller.participant_snapshot()["panel"], "C")
+        self.assertEqual(self.controller.participant_snapshot()["view"], "C")
 
-    def test_participant_panel_c_works_for_recording_and_baseline_b3(self):
+    def test_participant_view_c_works_for_recording_and_baseline_b3(self):
         self.participant["experimental_plan"] = "baseline->snake"
         self.prepare_session()
         self.complete_discovery("mode_1_discovery")
@@ -644,10 +644,10 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.end("mode_1_training", True)
         self.controller.start("mode_1_recording")
         public = self.controller.participant_snapshot()
-        self.assertEqual((public["panel"], public["mode"], public["phase"]),
+        self.assertEqual((public["view"], public["mode"], public["phase"]),
                          ("C", "baseline", "recording"))
         self.controller.abort("mode_1_recording")
-        self.assertEqual(self.controller.participant_snapshot()["panel"], "waiting")
+        self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
 
     def test_training_go_to_suspends_and_restores_mapper(self):
         self.prepare_session()
@@ -948,6 +948,7 @@ class ExperimentControllerTest(unittest.TestCase):
         progress_path = self.participant_folder / "experiment_progress.json"
         progress = json.loads(progress_path.read_text(encoding="utf-8"))
         progress["profile"]["sha256"] = digest
+        progress["blocks"][2].pop("view")
         for index in (2, 3):
             trial_block = progress["blocks"][index]
             if index == 2:
@@ -979,13 +980,14 @@ class ExperimentControllerTest(unittest.TestCase):
         training_block = migrated["progress"]["blocks"][2]
         recording_block = migrated["progress"]["blocks"][3]
         self.assertEqual(len(training_block["training_trials"]), 6)
+        self.assertEqual(training_block["view"], "F")
         self.assertEqual(len(recording_block["training_trials"]), 30)
         self.assertEqual(training_block["success_thresholds"]["linear_mm"], 5.0)
         self.assertTrue(
-            any("LOT 6 training fields" in warning for warning in migrated["progress"]["warnings"])
+            any("Training fields" in warning for warning in migrated["progress"]["warnings"])
         )
         self.assertTrue(
-            any("LOT 7 recording fields" in warning for warning in migrated["progress"]["warnings"])
+            any("Recording fields" in warning for warning in migrated["progress"]["warnings"])
         )
 
     def test_manual_stop_incident_retry_and_deviation(self):
@@ -1103,7 +1105,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(trials[0]["folder"], "snake_trial_001_01_1_2")
         self.assertEqual(trials[-1]["folder"], "snake_trial_030_10_3_1")
         self.assertEqual(state["recording"]["progress"], {"resolved": 0, "total": 30})
-        with self.assertRaisesRegex(ExperimentError, "Panel F"):
+        with self.assertRaisesRegex(ExperimentError, "View F"):
             self.controller.prepare_training_trial("mode_1_recording")
         with self.assertRaisesRegex(ExperimentError, "Resolve every trial"):
             self.controller.end("mode_1_recording", True)

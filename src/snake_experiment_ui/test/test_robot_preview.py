@@ -291,7 +291,7 @@ class PreviewAssetsTest(unittest.TestCase):
         self.assertNotIn("_refresh_mode_request", node)
         self.assertIn("publish_mode_request=self._publish_mode_request", node)
 
-    def test_mapper_publishes_latched_local_mode_for_participant_panel(self):
+    def test_mapper_publishes_latched_local_mode_for_participant_view(self):
         mapper = (
             PACKAGE_ROOT.parents[1] / "dependencies/input_interfaces/joystick_mapper"
             / "src/joystick_mapper.cpp"

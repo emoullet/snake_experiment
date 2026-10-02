@@ -40,11 +40,10 @@ h2 { margin-bottom: 0; font-size: 1.25rem; }
 h3 { margin: 0; font-size: 1.03rem; }
 .supporting-copy { margin-bottom: 0; color: var(--muted); line-height: 1.55; }
 .stepper { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 18px; }
-.step { display: flex; align-items: center; gap: 11px; padding: 12px 14px; color: var(--muted); border: 1px solid var(--line); border-radius: 12px; background: rgb(255 255 255 / 70%); }
-.step strong { display: grid; width: 28px; height: 28px; place-items: center; color: var(--blue-dark); border-radius: 8px; background: var(--blue-soft); }
-.step span { font-size: .84rem; font-weight: 700; }
+.step { display: flex; min-height: 58px; align-items: center; justify-content: center; padding: 12px 10px; color: var(--muted); text-align: center; border: 1px solid var(--line); border-radius: 12px; background: rgb(255 255 255 / 70%); }
+.step span { font-size: .84rem; font-weight: 700; line-height: 1.2; }
 .step.is-current { color: var(--ink); border-color: #8fb6ec; background: var(--surface); box-shadow: 0 6px 20px rgb(28 45 70 / 8%); }
-.step.is-complete strong { color: white; background: var(--green); }
+.step.is-complete { color: var(--green); border-color: #a9ddca; background: var(--green-soft); }
 .step.is-locked { opacity: .55; }
 .hero-card, .card, .validation-card, .placeholder { margin-top: 18px; padding: 26px; border: 1px solid rgb(219 227 237 / 88%); border-radius: 18px; background: rgb(255 255 255 / 94%); box-shadow: var(--shadow); }
 .hero-card h2 { margin-bottom: 8px; font-size: 1.55rem; }
@@ -206,7 +205,6 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
 @media (max-width: 520px) {
   .workspace { width: min(100% - 20px, 1080px); padding-top: 24px; }
   .page-header { align-items: flex-start; flex-direction: column; }
-  .step span { display: none; }
   .goto-grid { grid-template-columns: 1fr; }
   .trial-process-summary { gap: 6px; }
   .trial-process-summary dt { font-size: .62rem; letter-spacing: .03em; }

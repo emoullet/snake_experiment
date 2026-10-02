@@ -14,7 +14,7 @@ from snake_experiment_ui.session_web_app import create_session_app
 
 class FakeCheckup:
     def snapshot(self):
-        return {"workflow": "idle", "current_panel": "B"}
+        return {"workflow": "idle", "current_view": "B"}
 
 
 class FakeModel:

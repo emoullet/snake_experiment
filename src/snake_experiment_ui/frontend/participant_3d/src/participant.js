@@ -16,7 +16,7 @@ let lastBlock = null;
 function update(state) {
   latestState = state;
   if (!animator.config) return;
-  if (state?.panel !== 'C') {
+  if (state?.view !== 'C') {
     animator.stop();
     animator.setSelection(null, null);
     lastBlock = null;

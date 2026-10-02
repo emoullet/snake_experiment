@@ -45,7 +45,7 @@ button {
 
 .page-header,
 .section-heading,
-.save-panel {
+.save-view {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -122,10 +122,10 @@ h2 {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
-.stack-panel,
-.mode-panel,
-.capture-panel,
-.save-panel {
+.stack-view,
+.mode-view,
+.capture-view,
+.save-view {
   margin-top: 18px;
   padding: 26px;
   border: 1px solid rgb(219 227 237 / 88%);
@@ -426,7 +426,7 @@ button:disabled {
   font-size: 0.78rem;
 }
 
-.save-panel {
+.save-view {
   align-items: flex-end;
   border-color: #b9d0f0;
   background: linear-gradient(135deg, #f9fcff, #edf5ff);
@@ -492,15 +492,15 @@ button:disabled {
 
   .page-header,
   .section-heading,
-  .save-panel {
+  .save-view {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .stack-panel,
-  .mode-panel,
-  .capture-panel,
-  .save-panel {
+  .stack-view,
+  .mode-view,
+  .capture-view,
+  .save-view {
     padding: 20px;
     border-radius: 14px;
   }

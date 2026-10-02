@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Snake experiment · Session</title>
-    <link rel="stylesheet" href="/session-static/session_style.css?v=participant-lot-1" />
+    <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-3" />
   </head>
   <body>
     <main class="workspace">
@@ -19,19 +19,19 @@
         </div>
       </header>
 
-      <nav class="stepper" aria-label="Session panels">
-        <div class="step is-current" data-panel-step="B"><strong>B</strong><span>System check-up</span></div>
-        <div class="step is-locked" data-panel-step="C"><strong>C</strong><span>Session setup</span></div>
-        <div class="step is-locked" data-panel-step="D"><strong>D</strong><span>Experiment</span></div>
-        <div class="step is-locked" data-panel-step="E"><strong>E</strong><span>Discovery</span></div>
-        <div class="step is-locked" data-panel-step="F"><strong>F</strong><span>Training</span></div>
-        <div class="step is-locked" data-panel-step="G"><strong>G</strong><span>Recording</span></div>
+      <nav class="stepper" aria-label="Session steps">
+        <div class="step is-current" data-view-step="B"><span>System check-up</span></div>
+        <div class="step is-locked" data-view-step="C"><span>Session setup</span></div>
+        <div class="step is-locked" data-view-step="D"><span>Experiment</span></div>
+        <div class="step is-locked" data-view-step="E"><span>Discovery</span></div>
+        <div class="step is-locked" data-view-step="F"><span>Training</span></div>
+        <div class="step is-locked" data-view-step="G"><span>Recording</span></div>
       </nav>
 
-      <section id="panel-b" class="panel-page">
+      <section id="view-b" class="view-page">
         <section class="hero-card">
           <div>
-            <p class="step-number">Panel B · Lot 2</p>
+            <p class="step-number">System check-up</p>
             <h2>Pre-participant system check-up</h2>
             <p class="supporting-copy">Start the robot stack, validate both control modes, then continue to session setup.</p>
           </div>
@@ -109,14 +109,14 @@
         <p id="global-error" class="inline-error" hidden></p>
       </section>
 
-      <section id="panel-c" class="panel-page" hidden>
+      <section id="view-c" class="view-page" hidden>
         <section class="hero-card">
-          <div><p class="step-number">Panel C · Lot 3</p><h2>Pseudonymised enrolment</h2><p class="supporting-copy">Select the experiment folder, create or resume a participant, then launch the assigned condition.</p></div>
+          <div><p class="step-number">Session setup</p><h2>Pseudonymised enrolment</h2><p class="supporting-copy">Select the experiment folder, create or resume a participant, then launch the assigned condition.</p></div>
           <span id="enrollment-status" class="pill pill--neutral">Awaiting folder</span>
         </section>
 
         <section class="card">
-          <div class="section-heading"><div><p class="step-number">01</p><h2>Experiment folder</h2></div><span class="report-ready"><span class="status-dot status-dot--ok"></span><strong>Panel B report ready</strong></span></div>
+          <div class="section-heading"><div><p class="step-number">01</p><h2>Experiment folder</h2></div><span class="report-ready"><span class="status-dot status-dot--ok"></span><strong>System check-up report ready</strong></span></div>
           <p id="selected-parent" class="path-display">No folder selected.</p>
           <div class="button-row"><button id="browse-button" class="secondary-button" type="button">Browse folders</button><button id="change-parent-button" class="text-button" type="button" hidden>Change folder</button></div>
           <div id="session-warnings" class="warning-list" hidden></div>
@@ -145,9 +145,9 @@
         <p id="enrollment-error" class="inline-error" hidden></p>
       </section>
 
-      <section id="panel-d" class="panel-page" hidden>
+      <section id="view-d" class="view-page" hidden>
         <section class="hero-card">
-          <div><p class="step-number">Panel D · Lot 4</p><h2>Experiment sequence</h2><p class="supporting-copy">Start each block in the prescribed order. The assigned Baseline and Snake modes are shown explicitly.</p></div>
+          <div><p class="step-number">Experiment</p><h2>Experiment sequence</h2><p class="supporting-copy">Start each block in the prescribed order. The assigned Baseline and Snake modes are shown explicitly.</p></div>
           <span id="experiment-status" class="pill pill--neutral">Ready</span>
         </section>
         <div id="experiment-warning" class="warning-list" hidden></div>
@@ -168,9 +168,9 @@
         <p id="experiment-error" class="inline-error" hidden></p>
       </section>
 
-      <section id="panel-e" class="panel-page placeholder block-placeholder" hidden></section>
-      <section id="panel-f" class="panel-page placeholder block-placeholder" hidden></section>
-      <section id="panel-g" class="panel-page placeholder block-placeholder" hidden></section>
+      <section id="view-e" class="view-page placeholder block-placeholder" hidden></section>
+      <section id="view-f" class="view-page placeholder block-placeholder" hidden></section>
+      <section id="view-g" class="view-page placeholder block-placeholder" hidden></section>
     </main>
     <div id="folder-dialog" class="dialog-backdrop" hidden>
       <section class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title">
@@ -185,6 +185,6 @@
       </section>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/session-static/session_app.js?v=participant-lot-2"></script>
+    <script src="/session-static/session_app.js?v=session-app-3"></script>
   </body>
 </html>

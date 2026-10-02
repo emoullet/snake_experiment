@@ -21,7 +21,7 @@ const MODE_COPY = {
   },
 };
 
-class PanelA {
+class TargetCalibrationApp {
   constructor() {
     this.state = null;
     this.websocket = null;
@@ -323,4 +323,4 @@ class PanelA {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => new PanelA());
+document.addEventListener("DOMContentLoaded", () => new TargetCalibrationApp());

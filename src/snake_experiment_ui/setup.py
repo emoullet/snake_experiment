@@ -47,7 +47,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "panel_a_node = snake_experiment_ui.node:main",
+            "target_calibration_node = snake_experiment_ui.node:main",
             "session_interface_node = snake_experiment_ui.session_node:main",
         ],
     },

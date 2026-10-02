@@ -380,27 +380,27 @@ class SessionInterface {
 
   render() {
     if (!this.state) return;
-    const currentPanel = this.state.current_panel;
-    const onPanelC = currentPanel === "C";
-    const onPanelD = currentPanel === "D";
-    const onBlockPanel = ["E", "F", "G"].includes(currentPanel);
-    this.setHidden(document.getElementById("panel-b"), currentPanel !== "B");
-    this.setHidden(document.getElementById("panel-c"), !onPanelC);
-    this.setHidden(document.getElementById("panel-d"), !onPanelD);
-    for (const panel of ["E", "F", "G"]) {
-      this.setHidden(document.getElementById(`panel-${panel.toLowerCase()}`), currentPanel !== panel);
+    const currentView = this.state.current_view;
+    const onViewC = currentView === "C";
+    const onViewD = currentView === "D";
+    const onBlockView = ["E", "F", "G"].includes(currentView);
+    this.setHidden(document.getElementById("view-b"), currentView !== "B");
+    this.setHidden(document.getElementById("view-c"), !onViewC);
+    this.setHidden(document.getElementById("view-d"), !onViewD);
+    for (const view of ["E", "F", "G"]) {
+      this.setHidden(document.getElementById(`view-${view.toLowerCase()}`), currentView !== view);
     }
-    document.querySelectorAll("[data-panel-step]").forEach((step) => {
-      const current = step.dataset.panelStep === currentPanel;
+    document.querySelectorAll("[data-view-step]").forEach((step) => {
+      const current = step.dataset.viewStep === currentView;
       step.classList.toggle("is-current", current);
-      const panelOrder = ["B", "C", "D", "E", "F", "G"];
-      const completed = panelOrder.indexOf(step.dataset.panelStep) < panelOrder.indexOf(currentPanel);
+      const viewOrder = ["B", "C", "D", "E", "F", "G"];
+      const completed = viewOrder.indexOf(step.dataset.viewStep) < viewOrder.indexOf(currentView);
       step.classList.toggle("is-locked", !current && !completed);
       step.classList.toggle("is-complete", completed);
     });
-    if (onPanelC) return this.renderEnrollment();
-    if (onPanelD) return this.renderExperiment();
-    if (onBlockPanel) return this.renderActiveBlock();
+    if (onViewC) return this.renderEnrollment();
+    if (onViewD) return this.renderExperiment();
+    if (onBlockView) return this.renderActiveBlock();
 
     const workflow = this.state.workflow.replaceAll("_", " ");
     const workflowPill = document.getElementById("workflow-status");
@@ -470,7 +470,7 @@ class SessionInterface {
     this.setDisabled(stopMotion, this.busy || !goToActive);
     this.setDisabled(document.getElementById("validate-button"), this.busy || !this.state.can_validate);
     this.setText(document.getElementById("validation-help"), this.state.can_validate
-      ? "Both modes passed. Validation will stop the stack and continue to Panel C."
+      ? "Both modes passed. Validation will stop the stack and continue to View C."
       : "Both modes and all four Go-to checks must pass before validation.");
     this.setDisabled(document.getElementById("reset-button"), this.busy);
     const error = document.getElementById("global-error");
@@ -575,21 +575,21 @@ class SessionInterface {
     if (!progress) return;
     const block = progress.blocks.find((item) => item.id === progress.current_block);
     if (!block) return;
-    const panel = document.getElementById(`panel-${block.panel.toLowerCase()}`);
-    if (block.phase === "discovery") return this.renderDiscovery(panel, block, experiment);
-    if (block.phase === "training") return this.renderTraining(panel, block, experiment);
-    if (block.phase === "recording") return this.renderRecording(panel, block, experiment);
+    const view = document.getElementById(`view-${block.view.toLowerCase()}`);
+    if (block.phase === "discovery") return this.renderDiscovery(view, block, experiment);
+    if (block.phase === "training") return this.renderTraining(view, block, experiment);
+    if (block.phase === "recording") return this.renderRecording(view, block, experiment);
     const phase = this.title(block.phase);
     const settings = Object.entries(block.settings)
       .map(([key, value]) => `<div><dt>${this.escape(key.replaceAll("_", " "))}</dt><dd>${this.escape(JSON.stringify(value))}</dd></div>`).join("");
-    this.patchMarkup(panel, `<p class="step-number">Panel ${block.panel} · ${phase}</p>
+    this.patchMarkup(view, `<p class="step-number">View ${block.view} · ${phase}</p>
       <h2>${this.escape(this.title(block.mode))} ${this.escape(block.phase)}</h2>
-      <p class="supporting-copy">The experiment stack and the ${this.escape(this.title(block.mode))} mapper are active. Detailed ${this.escape(block.phase)} logic will be implemented in its dedicated lot.</p>
+      <p class="supporting-copy">The experiment stack and the ${this.escape(this.title(block.mode))} mapper are active. Detailed ${this.escape(block.phase)} logic is not yet implemented.</p>
       <dl class="participant-summary block-metadata"><div><dt>Block</dt><dd>${this.escape(block.id)}</dd></div><div><dt>Folder</dt><dd>${this.escape(block.folder)}</dd></div><div><dt>Attempt</dt><dd>${block.attempts}</dd></div>${settings}</dl>
       <div class="block-actions"><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="${this.escape(block.phase)}" type="button" ${this.busy ? "disabled" : ""}>End ${this.escape(block.phase)}</button></div>`, `${experiment.participant.folder}:${block.id}`);
   }
 
-  renderDiscovery(panel, block, experiment) {
+  renderDiscovery(view, block, experiment) {
     const instructions = block.settings.instructions || {};
     const explanation = block.mode_explanation || { status: "pending" };
     const explanationDone = explanation.status === "completed";
@@ -609,24 +609,24 @@ class SessionInterface {
       ["Recorder", recorder.status],
       ["Storage", recorder.storage || "mcap"],
     ].map(([term, value]) => `<div data-dom-key="summary:${term}"><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
-    this.setClass(panel, "panel-page");
-    this.patchMarkup(panel, `<section class="hero-card"><div><p class="step-number">Panel E · Discovery</p><h2>${this.escape(this.title(block.mode))} discovery</h2><p class="supporting-copy">Free movement without specified or validated targets.</p></div><span class="pill ${controlActive ? "pill--active" : "pill--neutral"}">${controlActive ? "Control and recording active" : "Control inactive"}</span></section>
-      <section class="card"><div class="section-heading"><div><p class="step-number">Participant panel B</p><h2>Mode explanation</h2></div><span class="pill ${explanationDone ? "pill--active" : explanation.status === "showing" ? "pill--warning" : "pill--neutral"}">${explanationDone ? "Done" : explanation.status === "showing" ? "On participant screen" : "Pending"}</span></div><p class="supporting-copy">Show the ${this.escape(this.title(block.mode))} video on the participant screen, then confirm the explanation.</p>${!experiment.mode_explanation_video_available ? '<p class="inline-warning">Mode explanation video is unavailable. Manual validation remains possible for development.</p>' : ""}<div class="discovery-controls"><button class="text-button" data-mode-explanation="show" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || explanationDone ? "disabled" : ""}>Show mode explanation</button><button class="primary-button" data-mode-explanation="complete" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || explanation.status !== "showing" ? "disabled" : ""}>Explanation done</button></div></section>
+    this.setClass(view, "view-page");
+    this.patchMarkup(view, `<section class="hero-card"><div><p class="step-number">View E · Discovery</p><h2>${this.escape(this.title(block.mode))} discovery</h2><p class="supporting-copy">Free movement without specified or validated targets.</p></div><span class="pill ${controlActive ? "pill--active" : "pill--neutral"}">${controlActive ? "Control and recording active" : "Control inactive"}</span></section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Participant view B</p><h2>Mode explanation</h2></div><span class="pill ${explanationDone ? "pill--active" : explanation.status === "showing" ? "pill--warning" : "pill--neutral"}">${explanationDone ? "Done" : explanation.status === "showing" ? "On participant screen" : "Pending"}</span></div><p class="supporting-copy">Show the ${this.escape(this.title(block.mode))} video on the participant screen, then confirm the explanation.</p>${!experiment.mode_explanation_video_available ? '<p class="inline-warning">Mode explanation video is unavailable. Manual validation remains possible for development.</p>' : ""}<div class="discovery-controls"><button class="text-button" data-mode-explanation="show" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || explanationDone ? "disabled" : ""}>Show mode explanation</button><button class="primary-button" data-mode-explanation="complete" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || explanation.status !== "showing" ? "disabled" : ""}>Explanation done</button></div></section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Instructions</p><h2>Standardised instructions</h2></div>${instructions.placeholder ? '<span class="pill pill--warning">Placeholder</span>' : ""}</div><p class="instruction-copy">${this.escape(instructions.text || "")}</p>${instructions.placeholder ? '<p class="inline-warning">Replace this placeholder before running participant sessions.</p>' : ""}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Control</p><h2>Mode and recording</h2></div><span class="supporting-copy">${this.escape(block.folder)}</span></div><dl class="participant-summary process-summary">${processItems}</dl><div class="discovery-controls"><button class="${controlActive ? "reject-button" : "primary-button"}" data-block-control="${this.escape(block.id)}" data-active="${controlActive ? "false" : "true"}" type="button" ${this.busy || (!controlActive && !explanationDone) ? "disabled" : ""}>${controlActive ? "Deactivate mode and recording" : "Activate mode and recording"}</button><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button></div>${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Recordings</p><h2>MCAP segments</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--warning"}">${experiment.can_end ? "Required data verified" : "Valid segment required"}</span></div><div class="segment-list">${segmentRows}</div></section>
       <section class="validation-card"><div><p class="step-number">Complete discovery</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">Confirm the explanation and collect at least one segment with messages for all three expected topics.</p></div><div class="validation-actions"><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="discovery" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>End discovery</button></div></section>`, `${experiment.participant.folder}:${block.id}`);
   }
 
-  renderTraining(panel, block, experiment) {
-    return this.renderTrialPanel(panel, block, experiment, "training", "F", "Training");
+  renderTraining(view, block, experiment) {
+    return this.renderTrialView(view, block, experiment, "training", "F", "Training");
   }
 
-  renderRecording(panel, block, experiment) {
-    return this.renderTrialPanel(panel, block, experiment, "recording", "G", "Recording");
+  renderRecording(view, block, experiment) {
+    return this.renderTrialView(view, block, experiment, "recording", "G", "Recording");
   }
 
-  renderTrialPanel(panel, block, experiment, phase, panelLetter, title) {
+  renderTrialView(view, block, experiment, phase, viewLetter, title) {
     const training = experiment[phase] || {};
     const trials = training.trials || [];
     const workflow = training.workflow || "awaiting_prepare";
@@ -654,7 +654,7 @@ class SessionInterface {
     const technicalLabel = technicalOutcome?.completed
       ? "Technical result: successful"
       : "Technical result: invalid";
-    const incidentPanel = `<p class="supporting-copy" ${recording ? "" : "hidden"}>Click once for every observed occurrence. Descriptions will be requested when the attempt ends.</p>
+    const incidentView = `<p class="supporting-copy" ${recording ? "" : "hidden"}>Click once for every observed occurrence. Descriptions will be requested when the attempt ends.</p>
       <button class="reject-button" data-incident-occurrence data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${recording ? "" : "hidden"} ${this.busy || !recording ? "disabled" : ""}>Signal incident occurrence</button>
       <div data-dom-key="incident-history" ${reviewRequired ? "hidden" : ""}>${incidentRows}</div>
       <p class="inline-warning" ${reviewRequired ? "" : "hidden"}>Describe every occurrence, then decide whether the incidents invalidate this attempt. ${this.escape(technicalLabel)}.</p>
@@ -671,9 +671,9 @@ class SessionInterface {
       && live.start_within_thresholds
       && !experiment.go_to?.motion?.active
       && mapperReady;
-    this.setClass(panel, "panel-page");
-    this.patchMarkup(panel, `<section class="hero-card trial-hero-card">
-        <div class="trial-hero-heading"><p class="step-number">Panel ${panelLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div>
+    this.setClass(view, "view-page");
+    this.patchMarkup(view, `<section class="hero-card trial-hero-card">
+        <div class="trial-hero-heading"><p class="step-number">View ${viewLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div>
         <div class="trial-hero-status"><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span><dl class="participant-summary trial-process-summary" aria-label="Process status">${processItems}</dl></div>
       </section>
       <div class="trial-workspace">
@@ -684,7 +684,7 @@ class SessionInterface {
             <div class="training-actions"><button class="secondary-button" data-trial-action="prepare" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canPrepare ? "disabled" : ""}>Prepare next trial and move to start</button><button class="primary-button" data-trial-action="start" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canStart ? "disabled" : ""}>Start recording</button><button class="reject-button" data-trial-action="stop" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !recording ? "disabled" : ""}>Stop recording</button></div>
             <div class="decision-card" ${workflow === "decision_required" ? "" : "hidden"}><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-trial-resolve="retry" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-trial-resolve="advance_with_deviation" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Continue with deviation</button></div></div>
             <p class="inline-error" ${block.error ? "" : "hidden"}>${this.escape(block.error || "")}</p></section>
-          <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Incident occurrences</h2></div><span class="pill ${reviewRequired ? "pill--warning" : incidents.length ? "pill--error" : "pill--neutral"}">${incidents.length} occurrence${incidents.length === 1 ? "" : "s"}</span></div>${incidentPanel}</section>
+          <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Incident occurrences</h2></div><span class="pill ${reviewRequired ? "pill--warning" : incidents.length ? "pill--error" : "pill--neutral"}">${incidents.length} occurrence${incidents.length === 1 ? "" : "s"}</span></div>${incidentView}</section>
           <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Calibrated start positioning</h2></div><span class="pill ${experiment.go_to?.motion?.active ? "pill--warning" : "pill--neutral"}">${experiment.go_to?.motion?.active ? this.escape(this.title(experiment.go_to.motion.current?.status)) : reviewRequired ? "Review required" : "Ready"}</span></div><p class="supporting-copy">Manual control is suspended during motion and restored afterwards. Target buttons use the calibrated target_out poses.</p><div class="go-to-grid"><button class="secondary-button" data-block-go-to="starting_point" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to starting point</button>${[1, 2, 3].map((target) => `<button class="secondary-button" data-block-go-to="target_out_${target}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to target ${target}</button>`).join("")}</div><button class="reject-button" data-block-go-to-stop data-block-id="${this.escape(block.id)}" type="button" ${experiment.go_to?.motion?.active ? "" : "hidden"} ${this.busy || !experiment.go_to?.motion?.active ? "disabled" : ""}>Stop motion</button></section>
         </div>
         <section class="card trial-progress-card"><div class="section-heading"><div><p class="step-number">Protocol progress</p><h2>${title} trials</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--neutral"}">${completed}/${trials.length}</span></div><div class="segment-list">${trialRows}</div></section>
