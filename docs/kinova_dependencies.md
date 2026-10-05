@@ -8,7 +8,12 @@ do not use `--remote` for reproducible experiment deployments.
 
 The selected packages are `kortex_api`, `kortex_driver`, `kortex_description`,
 and `kortex_bringup`. MoveIt packages are not build targets for this experiment.
-ROS dependencies, including Robotiq description and PickNik controllers, are
+The compatible Robotiq description is built from the pinned
+`dependencies/ros2_robotiq_gripper` submodule at
+`a74d007d8f2f06dc6a503ad21038ba869d4999a6`. The Jazzy binary description uses
+older macro arguments and fails to expand this Kortex revision's gripper.
+Only `robotiq_description` is needed from this repository for the Gen3 internal
+bus configuration. Other ROS dependencies, including PickNik controllers, are
 installed with rosdep from the Jazzy package repository. The upstream `.repos`
 files are not imported: they would also introduce source overlays of shared
 ROS control packages already provided by Jazzy.
@@ -28,18 +33,20 @@ full experiment build and the optional Python web virtual environment.
 cd /home/emoullet/dev/robot_experiments/snake_experiment
 source /opt/ros/jazzy/setup.bash
 snake_src="$(git rev-parse --show-toplevel)"
-git submodule update --init --recursive dependencies/ros2_kortex
+git submodule update --init --recursive dependencies/ros2_kortex dependencies/ros2_robotiq_gripper
 snake_ws="$(dirname "$snake_src")/workspaces/snake_experiment"
 mkdir -p "$snake_ws"
 cd "$snake_ws"
 
 mapfile -t kinova_packages < <(
   colcon list --base-paths "$snake_src/dependencies/ros2_kortex" \
+    "$snake_src/dependencies/ros2_robotiq_gripper" \
     --packages-up-to kortex_bringup --paths-only
 )
 rosdep install --from-paths "${kinova_packages[@]}" \
   --ignore-src --rosdistro jazzy -y
 colcon build --base-paths "$snake_src/dependencies/ros2_kortex" \
+  "$snake_src/dependencies/ros2_robotiq_gripper" \
   --packages-up-to kortex_bringup --symlink-install --parallel-workers 2 \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
@@ -84,7 +91,7 @@ that the launched controllers are active, and that `/joint_states` contains
 `joint_1` through `joint_7` with finite positions. Stop the standalone launch
 with Ctrl+C. No web-page refresh is needed at this stage.
 
-## Validation performed during integration
+## Validation performed during step 1
 
 - All four packages compiled successfully against the local ROS 2 Jazzy in
   `/tmp/snake-kinova-step1`; only upstream CMake timestamp-policy warnings were
@@ -101,6 +108,25 @@ with Ctrl+C. No web-page refresh is needed at this stage.
   password. Runtime validation with the Robotiq model, RViz, and mock hardware
   remains to be performed after installation. No physical robot was started.
 
-The calibration and session interfaces still start Explorer. Their robot
-selection, experiment-specific Kinova launch and parameters, and participant
-preview require the following integration steps.
+The calibration and session interfaces now select Kinova with
+`stack_robot:=kinova` and accept `stack_robot_ip`. See the
+[interface guide](../src/snake_experiment_ui/README.md#select-the-robot).
+Robot-specific control profiles and the participant preview remain to be adapted.
+
+### Robot selection integration checks
+
+During step 2, the interface package and compatible `robotiq_description` were
+built in `/tmp/snake-kinova-step2`. Calibration and session were tested
+separately on isolated ROS domains and HTTP ports, with `stack_robot:=kinova`,
+a custom IP, and fake hardware. Both returned the selected robot/IP in their
+API state, started and stopped their owned stack, and published `/joint_states`
+and `/ee_pose` in `base_link`. All three experiment controllers activated and
+no joystick mapper was started. Session used a synthetic temporary calibration;
+no pose-target or joystick commands were sent. Physical operation and browser
+visual verification were not tested.
+
+The Python suite finished with 148 passing tests and one pre-existing failure:
+`test_cartesian_manager_launch_matches_submodule` compares the old Explorer
+launch snapshot with a newer dependency launch. Neither launch was modified by
+step 2. The ten selection/lifecycle/layout checks passed when excluding that
+comparison. Both edited JavaScript files passed Node's syntax check.

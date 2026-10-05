@@ -129,7 +129,9 @@ The Kinova Gen3 driver is pinned in `dependencies/ros2_kortex` and built through
 the `kortex_bringup` target above. See the
 [Kinova dependency guide](docs/kinova_dependencies.md) for installation,
 verification, and a standalone mock-hardware check. The experiment interfaces
-still launch Explorer; selecting Kinova in those interfaces is not implemented.
+accept `stack_robot:=kinova`; Explorer remains the default. The compatible
+Robotiq description is also pinned in `dependencies/ros2_robotiq_gripper`.
+Robot-specific control profiles and participant visuals still require adaptation.
 
 The [`snake_experiment_ui` package guide](src/snake_experiment_ui/README.md)
 explains how to launch each interface, where to open it, how a session works,

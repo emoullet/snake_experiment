@@ -158,9 +158,12 @@ class TargetCalibrationApp {
           : "Start experiment stack";
     stackButton.classList.toggle("is-stop", stackIsActive);
     stackButton.disabled = this.busy || ["starting", "stopping"].includes(stack.status);
-    document.getElementById("stack-help").textContent = stack.use_simulation
-      ? "Simulation stack · joystick mapper controlled separately below."
-      : "Hardware stack · joystick mapper controlled separately below.";
+    const robotLabel = stack.robot === "kinova" ? `Kinova Gen3 · ${stack.robot_ip}` : "Explorer";
+    const environmentLabel = stack.use_simulation
+      ? (stack.robot === "kinova" ? "Simulation (fake hardware)" : "Simulation")
+      : "Hardware";
+    document.getElementById("stack-help").textContent =
+      `${robotLabel} · ${environmentLabel} · joystick mapper controlled separately below.`;
     const stackError = document.getElementById("stack-error");
     stackError.hidden = !stack.error;
     stackError.textContent = stack.error || "";

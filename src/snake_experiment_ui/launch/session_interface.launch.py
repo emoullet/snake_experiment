@@ -10,6 +10,8 @@ def generate_launch_description():
     arguments = [
         DeclareLaunchArgument("host", default_value="127.0.0.1"),
         DeclareLaunchArgument("port", default_value="8081"),
+        DeclareLaunchArgument("stack_robot", default_value="explorer", choices=["explorer", "kinova"]),
+        DeclareLaunchArgument("stack_robot_ip", default_value="192.168.1.10"),
         DeclareLaunchArgument("stack_use_simulation", default_value="false"),
         DeclareLaunchArgument("diagnostic_profile", default_value=""),
         DeclareLaunchArgument("experiment_profile", default_value=""),
@@ -37,6 +39,8 @@ def generate_launch_description():
             {
                 "host": LaunchConfiguration("host"),
                 "port": LaunchConfiguration("port"),
+                "stack_robot": LaunchConfiguration("stack_robot"),
+                "stack_robot_ip": LaunchConfiguration("stack_robot_ip"),
                 "stack_use_simulation": LaunchConfiguration(
                     "stack_use_simulation"
                 ),

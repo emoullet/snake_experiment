@@ -42,6 +42,8 @@ class SessionInterfaceNode(Node):
         super().__init__("snake_experiment_session_interface")
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("port", 8081)
+        self.declare_parameter("stack_robot", "explorer")
+        self.declare_parameter("stack_robot_ip", "192.168.1.10")
         self.declare_parameter("stack_use_simulation", False)
         self.declare_parameter("diagnostic_profile", "")
         self.declare_parameter("experiment_profile", "")
@@ -113,6 +115,8 @@ class SessionInterfaceNode(Node):
         )
         use_simulation = bool(self.get_parameter("stack_use_simulation").value)
         self._stack_manager = StackManager(
+            robot=str(self.get_parameter("stack_robot").value),
+            robot_ip=str(self.get_parameter("stack_robot_ip").value),
             node_names=self._node_names,
             use_simulation=use_simulation,
             startup_timeout_sec=float(

@@ -39,6 +39,50 @@ Each interface controls only the processes it started. Avoid starting the
 robot stack from both interfaces at the same time. The servers bind to
 `127.0.0.1` and have no authentication.
 
+## Select the robot
+
+Both interfaces accept `stack_robot:=explorer|kinova` (default: `explorer`)
+and `stack_robot_ip:=192.168.1.10`. The IP must be a valid IPv4 address for
+Kinova and is ignored for Explorer. Selection is fixed when the interface
+starts; relaunch it to select another robot or IP. The operator page displays
+the robot, simulation/hardware mode, and the Kinova IP.
+
+After building and sourcing the workspace as above, launch calibration for
+the seven-axis Kinova Gen3 with Robotiq 2F-85 in fake hardware:
+
+```bash
+ros2 launch snake_experiment_ui target_calibration.launch.py \
+  stack_robot:=kinova stack_robot_ip:=192.168.1.10 stack_use_simulation:=true
+```
+
+Stop its stack from the page and stop the interface with Ctrl+C before testing
+the session interface separately. The session check-up requires an existing
+calibration file before it will start the stack; use the file saved by calibration
+or pass `calibration_file:=/absolute/path/to/latest_calib.json`:
+
+```bash
+ros2 launch snake_experiment_ui session_interface.launch.py \
+  repository_root:="$snake_src" stack_robot:=kinova \
+  stack_robot_ip:=192.168.1.10 stack_use_simulation:=true
+```
+
+Open port 8080 for calibration or 8081 for session. Verify the displayed
+selection, then use the stack Start/Stop button. The Kinova stack starts the
+robot controllers, cartesian manager, and joystick input; mapper launch remains
+owned by the Baseline/Snake buttons. `stack_use_simulation:=true` uses fake
+hardware, not Gazebo. `false` selects physical hardware; the session interface
+defaults to `false`, so explicitly pass `true` for simulated checks.
+RViz opens automatically when the Kinova stack starts in simulation, using
+`config/kinova.rviz` to display the arm and gripper in `base_link`. Stopping
+the stack closes its RViz process. The physical Kinova stack does not launch RViz.
+
+Robot-specific joystick frames, gripper commands, and the participant 3D view
+still require adaptation before a full Kinova session can be validated. The
+current Kinova manager profile references `effector_frame`; verify its transform
+before calibration or movement. The participant preview still displays Explorer.
+See the [dependency guide](../../docs/kinova_dependencies.md) for the pinned
+Robotiq description required by Kortex.
+
 ## Session workflow
 
 1. **Calibration:** activate Baseline or Snake, capture the seven poses, and
