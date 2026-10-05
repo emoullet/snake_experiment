@@ -41,6 +41,7 @@ class TargetCalibrationNode(Node):
         self._active_mode_request = None
         self._mode_refresh_timer = self.create_timer(1.0, self._refresh_mode_request)
         self._mode_manager = ModeManager(
+            robot=str(self.get_parameter("stack_robot").value),
             node_names=self._node_names,
             publish_mode_request=self._publish_mode_request,
             startup_timeout_sec=float(

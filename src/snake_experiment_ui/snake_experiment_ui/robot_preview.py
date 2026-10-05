@@ -56,7 +56,7 @@ class PreviewConfiguration:
                 raise RobotPreviewError("Cartesian manager command frames are invalid.")
             mapper = {}
             for mode, expected in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2"))):
-                mapper_path = share / "bringup/joystick_mapper/config" / f"joystick_2d_{mode}.yaml"
+                mapper_path = share / "bringup/joystick_mapper/config" / f"joystick_2d_{mode}_explorer.yaml"
                 parameters = self._read_yaml(mapper_path)["joystick_mapper"]["ros__parameters"]
                 modes = parameters["modes"]
                 if tuple(modes["names"]) != expected:

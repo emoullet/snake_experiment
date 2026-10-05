@@ -38,7 +38,11 @@ class ModeManager:
         shutdown_timeout_sec: float = 5.0,
         popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
         sleep: Callable[[float], None] = time.sleep,
+        robot: str = "explorer",
     ) -> None:
+        if robot not in ("explorer", "kinova"):
+            raise ModeError(f"Unknown experiment robot: {robot}")
+        self._robot = robot
         self._node_names = node_names
         self._publish_mode_request = publish_mode_request
         self._mapper_transition = mapper_transition
@@ -121,6 +125,8 @@ class ModeManager:
                 "snake_experiment_ui",
                 MODES[mode]["launch_file"],
             ]
+            if self._robot == "kinova":
+                command.append("robot:=kinova")
             try:
                 self._process = self._popen_factory(command, start_new_session=True)
             except OSError as error:

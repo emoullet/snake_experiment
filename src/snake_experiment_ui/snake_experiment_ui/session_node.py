@@ -67,7 +67,11 @@ class SessionInterfaceNode(Node):
         profile_path = (
             Path(configured_profile)
             if configured_profile
-            else share / "config/system_checkup.yaml"
+            else share / "config" / (
+                "system_checkup_kinova.yaml"
+                if self.get_parameter("stack_robot").value == "kinova"
+                else "system_checkup.yaml"
+            )
         )
         self._profile = DiagnosticProfile(profile_path)
         measurement_window = float(
@@ -103,6 +107,7 @@ class SessionInterfaceNode(Node):
             PoseStamped, "/pose_target", 10
         )
         self._mode_manager = ModeManager(
+            robot=str(self.get_parameter("stack_robot").value),
             node_names=self._node_names,
             publish_mode_request=self._publish_mode_request,
             mapper_transition=self._request_mapper_client_reset,

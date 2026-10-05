@@ -26,8 +26,8 @@ class PreviewConfigurationTest(unittest.TestCase):
         self.share = Path(self.temporary_directory.name)
         original = PACKAGE_ROOT
         for relative in (
-            "bringup/joystick_mapper/config/joystick_2d_baseline.yaml",
-            "bringup/joystick_mapper/config/joystick_2d_snake.yaml",
+            "bringup/joystick_mapper/config/joystick_2d_baseline_explorer.yaml",
+            "bringup/joystick_mapper/config/joystick_2d_snake_explorer.yaml",
             "bringup/cartesian_manager/config/explorer_params.yaml",
             "config/robot_preview.yaml",
         ):
@@ -59,7 +59,7 @@ class PreviewConfigurationTest(unittest.TestCase):
         self.assertEqual(public["snake_gain"], 3.0)
         self.assertEqual(public["animation"], {"linear_mm": 100.0, "angular_deg": 20.0, "loop_sec": 2.0})
         self.assertEqual(public["physical_axis_signs"], {"right": 1, "up": 1})
-        snake_mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake.yaml"
+        snake_mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake_explorer.yaml"
         self.assertEqual(
             self.profile().snake_button_index,
             self.mapper_parameters(snake_mapper)["snake_button_index"],
@@ -69,18 +69,18 @@ class PreviewConfigurationTest(unittest.TestCase):
         self.assertNotIn(str(self.share), str(public))
 
     def test_invalid_mapper_and_animation_are_rejected(self):
-        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake.yaml"
+        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake_explorer.yaml"
         self.edit_mapper(mapper, lambda parameters: parameters["modes"]["names"].append("b3"))
         with self.assertRaises(RobotPreviewError):
             self.profile()
-        mapper.write_text((PACKAGE_ROOT / "bringup/joystick_mapper/config/joystick_2d_snake.yaml").read_text())
+        mapper.write_text((PACKAGE_ROOT / "bringup/joystick_mapper/config/joystick_2d_snake_explorer.yaml").read_text())
         preview = self.share / "config/robot_preview.yaml"
         preview.write_text(preview.read_text().replace("linear_mm: 100", "linear_mm: .nan"))
         with self.assertRaises(RobotPreviewError):
             self.profile()
 
     def test_unmapped_axis_is_rejected(self):
-        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_baseline.yaml"
+        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_baseline_explorer.yaml"
         self.edit_mapper(
             mapper,
             lambda parameters: parameters["modes"]["b1"]["axes"]["linear_y"].update(index=-1),
@@ -89,7 +89,7 @@ class PreviewConfigurationTest(unittest.TestCase):
             self.profile()
 
     def test_mapper_frame_must_match_cartesian_manager_configuration(self):
-        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_baseline.yaml"
+        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_baseline_explorer.yaml"
         self.edit_mapper(
             mapper,
             lambda parameters: parameters["modes"]["b2"].update(
@@ -114,7 +114,7 @@ class PreviewConfigurationTest(unittest.TestCase):
             self.profile()
 
     def test_snake_button_must_be_a_hold_binding(self):
-        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake.yaml"
+        mapper = self.share / "bringup/joystick_mapper/config/joystick_2d_snake_explorer.yaml"
         mapper.write_text(mapper.read_text().replace("snake_button_mode: hold", "snake_button_mode: toggle"))
         with self.assertRaises(RobotPreviewError):
             self.profile()

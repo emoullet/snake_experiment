@@ -20,6 +20,25 @@ class FakeProcess:
 
 
 class ModeManagerTest(unittest.TestCase):
+    def test_kinova_modes_select_the_kinova_profiles(self):
+        for mode in ("baseline", "snake"):
+            with self.subTest(mode=mode):
+                names = []
+                processes = []
+
+                def create_process(*args, **kwargs):
+                    process = FakeProcess(*args, **kwargs)
+                    processes.append(process)
+                    names.append("joystick_mapper")
+                    return process
+
+                manager = ModeManager(
+                    node_names=lambda: names, publish_mode_request=lambda _: None,
+                    robot="kinova", popen_factory=create_process,
+                )
+                manager.activate(mode)
+                self.assertEqual(processes[0].command[-1], "robot:=kinova")
+
     def test_activation_is_idempotent_and_publishes_control_mode(self):
         names = []
         requests = []

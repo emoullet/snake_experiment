@@ -76,10 +76,20 @@ RViz opens automatically when the Kinova stack starts in simulation, using
 `config/kinova.rviz` to display the arm and gripper in `base_link`. Stopping
 the stack closes its RViz process. The physical Kinova stack does not launch RViz.
 
-Robot-specific joystick frames, gripper commands, and the participant 3D view
-still require adaptation before a full Kinova session can be validated. The
-current Kinova manager profile references `effector_frame`; verify its transform
-before calibration or movement. The participant preview still displays Explorer.
+Each mapper launch selects its YAML file with `robot:=explorer|kinova`; the
+interfaces supply the robot automatically. The four profiles are
+`joystick_2d_baseline_explorer.yaml`, `joystick_2d_snake_explorer.yaml`,
+`joystick_2d_baseline_kinova.yaml`, and `joystick_2d_snake_kinova.yaml` in
+`bringup/joystick_mapper/config/`. They replace the old filenames without a robot
+suffix. `config_file` remains available for an explicit custom profile; there
+are no angular-frame parameter overrides after loading the YAML.
+
+Kinova profiles use `end_effector_link` for b2/b3; Explorer profiles retain
+`ft_frame`. The Kinova manager also uses `end_effector_link`. The default session
+check-up selects `system_checkup_kinova.yaml` for Kinova and `system_checkup.yaml`
+for Explorer, so it verifies the matching mapper profile. An explicit
+`diagnostic_profile` still takes precedence. Gripper commands and participant
+3D visuals require further adaptation; the participant preview remains Explorer.
 See the [dependency guide](../../docs/kinova_dependencies.md) for the pinned
 Robotiq description required by Kortex.
 
@@ -111,7 +121,7 @@ run**. With the commands above, this is the build workspace.
 | Current calibration | `calibrations/latest_calib.json`; the previous version moves to `calibrations/calib_archives/`. |
 | Sessions | `sessions_root` (default: launch directory); each participant has a folder and `experiment_progress.json`. |
 | Calibration used by sessions | `calibration_file` (default: `calibrations/latest_calib.json` in the launch directory). |
-| Diagnostics and sequence | `config/system_checkup.yaml` and `config/experiment.yaml`. |
+| Diagnostics and sequence | `config/system_checkup.yaml` (Explorer), `config/system_checkup_kinova.yaml` (Kinova), and `config/experiment.yaml`. |
 | Participant videos | `config/participant_interface.yaml`; MP4 paths may be absolute or relative to this file. |
 
 Pass another path to ROS as `name:=value`, for example

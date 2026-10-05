@@ -53,7 +53,8 @@ def generate_launch_description():
         TimerAction(period=2.0, actions=[spawner("qontrol_explorer")]),
         spawner("gripper_controller"),
         Node(package="cartesian_manager", executable="cartesian_manager_node",
-             name="cartesian_manager", parameters=[config], output="screen"),
+             name="cartesian_manager",
+             parameters=[config, {"frames.ee_frame": "end_effector_link"}], output="screen"),
         Node(package="joy", executable="joy_node", name="joy_node", output="screen"),
         Node(
             package="rviz2", executable="rviz2", name="rviz2", output="screen",
