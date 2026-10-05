@@ -53,6 +53,7 @@ colcon list --base-paths "$snake_src/dependencies" "$snake_src/src" \
 snake_targets=(
   cartesian_manager joystick_mapper qontrol_controller explorer_bringup
   explorer_description explorer_gazebo gripper_pincette snake_experiment_ui
+  kortex_bringup
 )
 mapfile -t snake_packages < <(
   colcon list --base-paths "$snake_src/dependencies" "$snake_src/src" \
@@ -123,6 +124,12 @@ imports work in your shell but launch still reports a missing module, check
 the node interpreter in the [interface guide](src/snake_experiment_ui/README.md#missing-python-module).
 
 ## Run the interfaces
+
+The Kinova Gen3 driver is pinned in `dependencies/ros2_kortex` and built through
+the `kortex_bringup` target above. See the
+[Kinova dependency guide](docs/kinova_dependencies.md) for installation,
+verification, and a standalone mock-hardware check. The experiment interfaces
+still launch Explorer; selecting Kinova in those interfaces is not implemented.
 
 The [`snake_experiment_ui` package guide](src/snake_experiment_ui/README.md)
 explains how to launch each interface, where to open it, how a session works,
