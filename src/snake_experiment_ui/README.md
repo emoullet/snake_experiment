@@ -16,6 +16,7 @@ The `snake_experiment_ui` package provides two independent web interfaces:
 source /opt/ros/jazzy/setup.bash
 snake_src="$(git rev-parse --show-toplevel)"
 cd "$(dirname "$snake_src")/workspaces/snake_experiment"
+if [ -f .venv/bin/activate ]; then source .venv/bin/activate; fi
 source install/setup.bash
 ```
 
@@ -80,6 +81,21 @@ ros2 launch snake_experiment_ui target_calibration.launch.py --show-args
 The <http://127.0.0.1:8081/participant/3d-preview> page shows a read-only 3D
 preview of the Explorer POC2 arm and gripper. It follows fresh `/joint_states`
 data and sends no ROS commands.
+
+## Missing Python module
+
+If launching an interface reports a missing `uvicorn` or `fastapi` module,
+follow the matching [installation option](../../README.md#install-and-build).
+Check which interpreter the installed calibration node uses:
+
+```bash
+head -n 1 "$(ros2 pkg prefix snake_experiment_ui)/lib/snake_experiment_ui/target_calibration_node"
+```
+
+Run the import check for your option in the same shell as `ros2 launch`. If its
+interpreter differs from the one used to install the packages, rebuild in a
+fresh workspace using that option, then relaunch. `colcon build` does not
+install Python dependencies.
 
 ## Develop the 3D preview
 
