@@ -243,3 +243,100 @@ test('Explorer POC2 demo pose yields feasible motion for every configured axis',
     }
   }
 });
+
+// Geometry and limits from the pinned Gen3 7-DoF visual URDF.
+function kinovaFixture() {
+  const robot = new Group();
+  const base = new Group(); robot.add(base);
+  let parent = base;
+  const geometry = [
+    [[0, 0, .15643], Math.PI, [-2*Math.PI, 2*Math.PI]],
+    [[0, .005375, -.12838], Math.PI/2, [-2.24, 2.24]],
+    [[0, -.21038, -.006375], -Math.PI/2, [-2*Math.PI, 2*Math.PI]],
+    [[0, .006375, -.21038], Math.PI/2, [-2.57, 2.57]],
+    [[0, -.20843, -.006375], -Math.PI/2, [-2*Math.PI, 2*Math.PI]],
+    [[0, .00017505, -.10593], Math.PI/2, [-2.09, 2.09]],
+    [[0, -.10593, -.00017505], -Math.PI/2, [-2*Math.PI, 2*Math.PI]],
+  ];
+  robot.joints = {};
+  geometry.forEach(([position, roll, limits], i) => {
+    const joint = new Group(); joint.position.set(...position);
+    joint.originRotation = new Quaternion().setFromEuler(new Euler(roll, 0, 0, 'ZYX'));
+    joint.quaternion.copy(joint.originRotation);
+    joint.jointType = 'revolute'; joint.limit = { lower: limits[0], upper: limits[1] };
+    parent.add(joint); parent = joint; robot.joints[`joint_${i+1}`] = joint;
+  });
+  const tool = new Group(); tool.position.z = -.061525;
+  tool.rotation.x = Math.PI; parent.add(tool);
+  robot.links = { base_link: base, end_effector_link: tool };
+  robot.setJointValue = (name, value) => {
+    const joint = robot.joints[name];
+    if (joint) joint.quaternion.copy(joint.originRotation).multiply(
+      new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), value));
+  };
+  return robot;
+}
+const kinovaConfig = {
+  ...config, robot: 'kinova_gen3', arm_joints: Array.from({length: 7}, (_, i) => `joint_${i+1}`),
+  gripper_joint: 'robotiq_85_left_knuckle_joint', frames: { base: 'base_link', ee: 'end_effector_link' },
+  demo_pose: {joint_1: 0, joint_2: .2617, joint_3: 3.1415, joint_4: -2.26,
+    joint_5: 0, joint_6: .96, joint_7: 1.57, robotiq_85_left_knuckle_joint: 0},
+  mapper: Object.fromEntries(Object.entries(config.mapper).map(([mode, mappings]) => [mode,
+    Object.fromEntries(Object.entries(mappings).map(([name, mapping]) => [name, {
+      ...mapping, angular_frame: mapping.angular_frame === 'ft_frame' ? 'end_effector_link' : mapping.angular_frame,
+    }]))])),
+};
+test('Kinova live pose requires all seven axes and falls back to home with missing or wrong states', () => {
+  const live = {robot: 'kinova_gen3', status: 'live', joints: {...kinovaConfig.demo_pose, joint_7: 2.1}};
+  assert.equal(cycleBasePose(kinovaConfig, live).pose.joint_7, 2.1);
+  delete live.joints.robotiq_85_left_knuckle_joint;
+  assert.equal(cycleBasePose(kinovaConfig, live).source, 'Live pose');
+  assert.equal(cycleBasePose(kinovaConfig, live).pose.robotiq_85_left_knuckle_joint, 0);
+  for (const state of [{...live, status: 'stale'}, {...live, robot: 'explorer_poc2'},
+    {...live, joints: {...live.joints, joint_7: NaN}}]) {
+    assert.deepEqual(cycleBasePose(kinovaConfig, state).pose, kinovaConfig.demo_pose);
+    assert.equal(cycleBasePose(kinovaConfig, state).source, 'Demo pose');
+  }
+});
+test('Kinova seven-axis IK animates every mapping and Snake state, participates in redundancy and returns neutral', () => {
+  let seventhMoved = false;
+  for (const [mode, mappings] of Object.entries(kinovaConfig.mapper)) {
+    for (const submode of Object.keys(mappings)) for (const axis of [0, 1]) {
+      for (const held of mode === 'snake' ? [false, true] : [false]) {
+        const robot = kinovaFixture();
+        const endpoints = solveAxisEndpoints(robot, kinovaConfig.demo_pose, kinovaConfig, mode, submode, axis, held);
+        assert.ok(endpoints.fraction > 0, `${mode}/${submode}/${axis}/${held}`);
+        seventhMoved ||= Math.abs(endpoints.positive.joint_7 - endpoints.start.joint_7) > 1e-5;
+        for (const pose of [endpoints.positive, endpoints.negative]) for (const name of kinovaConfig.arm_joints) {
+          assert.ok(Number.isFinite(pose[name]));
+          assert.ok(pose[name] >= robot.joints[name].limit.lower && pose[name] <= robot.joints[name].limit.upper);
+        }
+        assert.deepEqual(cyclePose(endpoints, .5), endpoints.start);
+        assert.deepEqual(cyclePose(endpoints, 1), endpoints.start);
+        setArmPose(robot, endpoints.start, kinovaConfig);
+        const neutral = effectorPose(robot, kinovaConfig);
+        const command = commandForAxis(kinovaConfig, mode, submode, axis, 1, held, neutral.rotation);
+        setArmPose(robot, endpoints.positive, kinovaConfig);
+        const moved = effectorPose(robot, kinovaConfig);
+        if (command.linear.length()) assert.ok(moved.position.clone().sub(neutral.position).dot(command.linear) > 0);
+        if (command.angular.length()) assert.ok(rotationVector(moved.rotation.clone().multiply(neutral.rotation.clone().invert())).dot(command.angular) > 0);
+      }
+    }
+  }
+  assert.ok(seventhMoved);
+});
+test('continuous joints stay near their unwrapped seed; unreachable Kinova targets remain neutral', () => {
+  const robot = kinovaFixture();
+  robot.joints.joint_7.jointType = 'continuous';
+  const start = {...kinovaConfig.demo_pose, joint_7: 4*Math.PI + 1.57};
+  const result = solveAxisEndpoints(robot, start, kinovaConfig, 'baseline', 'b2', 1, false);
+  assert.equal(result.start.joint_7, start.joint_7);
+  assert.ok(Math.abs(result.positive.joint_7 - start.joint_7) < 1);
+  const locked = kinovaFixture();
+  for (const name of kinovaConfig.arm_joints) locked.joints[name].limit = {
+    lower: kinovaConfig.demo_pose[name], upper: kinovaConfig.demo_pose[name],
+  };
+  const impossible = solveAxisEndpoints(locked, kinovaConfig.demo_pose, {...kinovaConfig, animation: {...kinovaConfig.animation, linear_mm: 200}}, 'baseline', 'b1', 0, false);
+  assert.equal(impossible.fraction, 0);
+  assert.deepEqual(impossible.positive, impossible.start);
+});

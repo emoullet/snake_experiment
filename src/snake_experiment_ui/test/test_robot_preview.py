@@ -10,6 +10,8 @@ import yaml
 
 from snake_experiment_ui.robot_preview import (
     ExplorerModelProvider,
+    KinovaModelProvider,
+    RobotPreview,
     PreviewConfiguration,
     RobotPoseMonitor,
     RobotPreviewError,
@@ -228,6 +230,89 @@ class RobotPoseMonitorTest(unittest.TestCase):
                 self.assertEqual(self.monitor.snapshot()["status"], "unavailable")
 
 
+class KinovaPreviewTest(unittest.TestCase):
+    def test_monitor_requires_seven_joints_and_retains_arm_without_gripper(self):
+        now = [1.0]
+        monitor = RobotPoseMonitor(robot="kinova", clock=lambda: now[0])
+        names = [f"joint_{i}" for i in range(1, 8)]
+        def record(names, positions):
+            monitor.record(types.SimpleNamespace(name=names, position=positions))
+        record(names[:-1], [0.1] * 6)
+        self.assertEqual(monitor.snapshot()["status"], "unavailable")
+        record(names, [0.1] * 7)
+        self.assertEqual(monitor.snapshot()["robot"], "kinova_gen3")
+        self.assertEqual(monitor.snapshot()["status"], "live")
+        self.assertFalse(monitor.snapshot()["gripper_available"])
+        record(names + ["robotiq_85_left_knuckle_joint"], [0.1] * 7 + [0.4])
+        self.assertTrue(monitor.snapshot()["gripper_available"])
+        now[0] += 1.1
+        self.assertEqual(monitor.snapshot()["status"], "stale")
+        for invalid_names, values in [(names, [0.1]*6 + [float("nan")]),
+                                      (names + [names[0]], [0.1]*8)]:
+            record(invalid_names, values)
+            self.assertEqual(monitor.snapshot()["status"], "unavailable")
+        self.assertIsInstance(RobotPreview(robot="kinova").model, KinovaModelProvider)
+
+    def test_config_uses_pinned_manager_home_and_kinova_mappings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dependency = Path(directory)
+            (dependency / "config").mkdir()
+            original = PACKAGE_ROOT.parents[1] / "dependencies/cartesian_manager/bringup/config/kinova_params.yaml"
+            target = dependency / "config/kinova_params.yaml"
+            shutil.copy2(original, target)
+            def config():
+                return PreviewConfiguration(PACKAGE_ROOT / "config/robot_preview.yaml", PACKAGE_ROOT,
+                    robot="kinova", dependency_share=lambda name: dependency)
+            public = config().public
+            self.assertEqual(public["robot"], "kinova_gen3")
+            self.assertEqual(len(public["arm_joints"]), 7)
+            self.assertEqual(public["demo_pose"]["joint_7"], 1.57)
+            self.assertEqual(public["demo_pose"][public["gripper_joint"]], 0)
+            self.assertEqual(public["frames"]["ee"], "end_effector_link")
+            self.assertEqual(public["mapper"]["baseline"]["b3"]["angular_frame"], "end_effector_link")
+            data = yaml.safe_load(target.read_text())
+            data["cartesian_manager"]["ros__parameters"]["behaviours"]["joint_targets"]["positions"].pop()
+            target.write_text(yaml.safe_dump(data))
+            with self.assertRaisesRegex(RobotPreviewError, "home joint target"):
+                config()
+
+    def test_model_and_assets_stay_inside_pinned_visual_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shares = {name: Path(directory) / name for name in KinovaModelProvider.PACKAGES}
+            for name, anchor in KinovaModelProvider.ANCHORS.items():
+                path = shares[name] / anchor
+                path.parent.mkdir(parents=True)
+                path.touch()
+            mesh = shares["kortex_description"] / "arms/gen3/7dof/meshes/base_link.dae"
+            mesh.parent.mkdir(parents=True)
+            mesh.write_text("<COLLADA/>")
+            uri = ["package://kortex_description/arms/gen3/7dof/meshes/base_link.dae"]
+            def process(path, mappings):
+                self.assertEqual(Path(path).name, "gen3.xacro")
+                self.assertEqual(mappings["use_fake_hardware"], "true")
+                self.assertEqual(mappings["dof"], "7")
+                return types.SimpleNamespace(toxml=lambda: f"<robot><link name='base'><visual><geometry><mesh filename='{uri[0]}'/></geometry></visual></link><ros2_control/><joint name='mimic'><mimic joint='gripper'/></joint></robot>")
+            def provider():
+                return KinovaModelProvider(package_share=lambda name: shares[name], xacro_processor=process)
+            model = provider()
+            xml = model.urdf()
+            root = ElementTree.fromstring(xml)
+            self.assertIsNone(root.find("ros2_control"))
+            self.assertIsNotNone(root.find("joint/mimic"))
+            asset = root.find(".//mesh").get("filename").split("/")[-1]
+            self.assertEqual(model.asset(asset), mesh)
+            for forbidden in ["https://example.com/mesh.dae", "package://other/mesh.dae", mesh.parent.parent.as_uri() + "/secret.dae"]:
+                uri[0] = forbidden
+                with self.assertRaises(RobotPreviewError):
+                    provider().urdf()
+            uri[0] = mesh.as_uri()
+            external = Path(directory) / "external.dae"
+            external.write_text("<COLLADA/>")
+            mesh.unlink(); mesh.symlink_to(external)
+            with self.assertRaises(RobotPreviewError):
+                provider().urdf()
+
+
 class SnakeButtonMonitorTest(unittest.TestCase):
     def test_pressed_released_stale_invalid_and_reset(self):
         now = [10.0]
@@ -275,7 +360,7 @@ class PreviewAssetsTest(unittest.TestCase):
         self.assertIn('id="preview-mode"', html)
         self.assertIn('id="preview-submode"', html)
         self.assertIn('id="preview-snake-held"', html)
-        self.assertIn('v=participant-3d-4', html)
+        self.assertIn('v=participant-3d-5', html)
         participant = (PACKAGE_ROOT / "snake_experiment_ui/templates/participant_index.html").read_text(
             encoding="utf-8"
         )

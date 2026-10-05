@@ -45,15 +45,14 @@ export function joystickDisplacement(config, axisIndex, phase, radius = 32) {
 
 /** Select a fresh server pose at every loop boundary, never a stale cached pose. */
 export function cycleBasePose(config, state) {
-  const names = Array.from({ length: 6 }, (_, index) => `joint_${index + 1}`);
-  const live = state?.robot === 'explorer_poc2' && state.status === 'live'
+  const names = config.arm_joints || Array.from({ length: 6 }, (_, index) => `joint_${index + 1}`);
+  const live = state?.robot === (config.robot || 'explorer_poc2') && state.status === 'live'
     && names.every(name => Number.isFinite(state.joints?.[name]));
   const pose = { ...config.demo_pose };
   if (live) {
     for (const name of names) pose[name] = state.joints[name];
-    if (Number.isFinite(state.joints.right_finger_joint)) {
-      pose.right_finger_joint = state.joints.right_finger_joint;
-    }
+    const gripper = config.gripper_joint || 'right_finger_joint';
+    if (Number.isFinite(state.joints[gripper])) pose[gripper] = state.joints[gripper];
   }
   return {
     pose,

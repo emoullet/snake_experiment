@@ -141,8 +141,9 @@ class SessionInterfaceNode(Node):
             ),
         )
         self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
-        preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share)
-        self._robot_preview = RobotPreview(configuration=preview_configuration)
+        preview_robot = str(self.get_parameter("stack_robot").value)
+        preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share, robot=preview_robot)
+        self._robot_preview = RobotPreview(configuration=preview_configuration, robot=preview_robot)
         self._snake_button_monitor = SnakeButtonMonitor(preview_configuration.snake_button_index)
         go_to_options = {
             "publish_target": self._publish_pose_target,

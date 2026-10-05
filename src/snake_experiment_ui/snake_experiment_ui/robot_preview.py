@@ -1,7 +1,8 @@
-"""Read-only Explorer POC2 model and joint pose for the 3D preview."""
+"""Read-only robot models and joint poses for the 3D preview."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import math
 import os
@@ -18,6 +19,32 @@ class RobotPreviewError(RuntimeError):
     """The preview model or an allowed visual asset is unavailable."""
 
 
+@dataclass(frozen=True)
+class RobotDefinition:
+    identifier: str
+    label: str
+    arm_joints: tuple[str, ...]
+    gripper_joint: str
+    base_frame: str
+    ee_frame: str
+
+
+ROBOT_DEFINITIONS = {
+    "explorer": RobotDefinition("explorer_poc2", "Explorer POC2",
+        tuple(f"joint_{i}" for i in range(1, 7)), "right_finger_joint", "base_link", "ft_frame"),
+    "kinova": RobotDefinition("kinova_gen3", "Kinova Gen3",
+        tuple(f"joint_{i}" for i in range(1, 8)), "robotiq_85_left_knuckle_joint",
+        "base_link", "end_effector_link"),
+}
+
+
+def robot_definition(robot):
+    try:
+        return ROBOT_DEFINITIONS[robot]
+    except KeyError as error:
+        raise RobotPreviewError(f"Unknown preview robot: {robot}") from error
+
+
 class PreviewConfiguration:
     """Validate installed mapper/manager profiles and expose browser-safe mapping data."""
 
@@ -26,7 +53,9 @@ class PreviewConfiguration:
         "angular_x", "angular_y", "angular_z",
     )
 
-    def __init__(self, preview_path: Path, package_share: Path) -> None:
+    def __init__(self, preview_path: Path, package_share: Path, robot="explorer", dependency_share=None) -> None:
+        self.robot = robot
+        definition = robot_definition(robot)
         share = Path(package_share)
         preview = self._read_yaml(preview_path)
         if preview.get("schema_version") != 1:
@@ -38,25 +67,43 @@ class PreviewConfiguration:
             loop_sec = self._positive(animation["loop_sec"], "loop_sec")
             if not (1 <= linear_mm <= 200 and 1 <= angular_deg <= 45 and 1 <= loop_sec <= 30):
                 raise RobotPreviewError("Robot preview animation values are outside safe display ranges.")
-            demo = preview["demo_pose"]
+            if robot == "kinova":
+                if dependency_share is None:
+                    from ament_index_python.packages import get_package_share_directory
+                    dependency_share = get_package_share_directory
+                manager_path = Path(dependency_share("cartesian_manager")) / "config/kinova_params.yaml"
+            else:
+                manager_path = share / "bringup/cartesian_manager/config/explorer_params.yaml"
+            manager_parameters = self._read_yaml(manager_path)["cartesian_manager"]["ros__parameters"]
+            frames = dict(manager_parameters["frames"])
+            if robot == "kinova":
+                # Match the experiment launch's EE override and controller tip.
+                frames["ee_frame"] = definition.ee_frame
+                targets = manager_parameters["behaviours"]["joint_targets"]
+                names = targets["joint_names"]
+                home_index = targets["target_names"].index("home")
+                positions = targets["positions"]
+                if tuple(names) != definition.arm_joints or len(positions) != len(names) * len(targets["target_names"]):
+                    raise RobotPreviewError("Kinova home joint target is incomplete.")
+                demo = dict(zip(names, positions[home_index * len(names):(home_index + 1) * len(names)]))
+                demo[definition.gripper_joint] = 0.0
+            else:
+                demo = preview["demo_pose"]
             demo_joints = {
                 name: self._finite(demo[name], name)
-                for name in RobotPoseMonitor.ARM_JOINTS + (RobotPoseMonitor.GRIPPER_JOINT,)
+                for name in definition.arm_joints + (definition.gripper_joint,)
             }
             signs = preview["physical_axis_signs"]
             physical_signs = {
                 "right": self._sign(signs["right"]),
                 "up": self._sign(signs["up"]),
             }
-            manager_path = share / "bringup/cartesian_manager/config/explorer_params.yaml"
-            manager_parameters = self._read_yaml(manager_path)["cartesian_manager"]["ros__parameters"]
-            frames = manager_parameters["frames"]
             allowed_frames = {frames[name] for name in ("base_frame", "ee_frame")}
             if any(type(frame) is not str or not frame.strip() for frame in allowed_frames):
                 raise RobotPreviewError("Cartesian manager command frames are invalid.")
             mapper = {}
             for mode, expected in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2"))):
-                mapper_path = share / "bringup/joystick_mapper/config" / f"joystick_2d_{mode}_explorer.yaml"
+                mapper_path = share / "bringup/joystick_mapper/config" / f"joystick_2d_{mode}_{robot}.yaml"
                 parameters = self._read_yaml(mapper_path)["joystick_mapper"]["ros__parameters"]
                 modes = parameters["modes"]
                 if tuple(modes["names"]) != expected:
@@ -105,6 +152,10 @@ class PreviewConfiguration:
             raise RobotPreviewError("Robot preview configuration is incomplete or invalid.") from error
         self.public = {
             "schema_version": 1,
+            "robot": definition.identifier,
+            "robot_label": definition.label,
+            "arm_joints": list(definition.arm_joints),
+            "gripper_joint": definition.gripper_joint,
             "frames": {"base": frames["base_frame"], "ee": frames["ee_frame"]},
             "animation": {
                 "linear_mm": linear_mm,
@@ -156,6 +207,14 @@ class ExplorerModelProvider:
     """Build a browser-safe visual URDF from the installed Apache-2.0 packages."""
 
     PACKAGES = ("explorer_description", "gripper_pincette")
+    XACRO_PACKAGE = "explorer_description"
+    ANCHORS = {
+        "explorer_description": Path("urdf/explorer.urdf.xacro"),
+        "gripper_pincette": Path("description/urdf/gripper_pincette.urdf.xacro"),
+    }
+    MAPPINGS = {"use_POC2": "true", "simulation": "false"}
+    LABEL = "Explorer POC2"
+    VISUAL_PREFIXES = None
 
     def __init__(self, package_share=None, xacro_processor=None) -> None:
         if package_share is None:
@@ -193,11 +252,8 @@ class ExplorerModelProvider:
                 package: Path(self._package_share(package)).absolute()
                 for package in self.PACKAGES
             }
-            xacro_path = shares["explorer_description"] / "urdf/explorer.urdf.xacro"
-            anchors = {
-                "explorer_description": Path("urdf/explorer.urdf.xacro"),
-                "gripper_pincette": Path("description/urdf/gripper_pincette.urdf.xacro"),
-            }
+            xacro_path = shares[self.XACRO_PACKAGE] / self.ANCHORS[self.XACRO_PACKAGE]
+            anchors = self.ANCHORS
             sources = {}
             for package, anchor in anchors.items():
                 anchor_path = shares[package] / anchor
@@ -205,7 +261,7 @@ class ExplorerModelProvider:
                     raise RobotPreviewError("Installed robot description is incomplete.")
                 sources[package] = anchor_path.resolve().parents[len(anchor.parts) - 1]
             document = self._xacro_processor(
-                str(xacro_path), mappings={"use_POC2": "true", "simulation": "false"}
+                str(xacro_path), mappings=dict(self.MAPPINGS)
             )
             root = ElementTree.fromstring(document.toxml())
             assets: dict[str, Path] = {}
@@ -234,11 +290,11 @@ class ExplorerModelProvider:
         except RobotPreviewError:
             raise
         except Exception as error:
-            raise RobotPreviewError("Explorer POC2 model is unavailable.") from error
+            raise RobotPreviewError(f"{self.LABEL} model is unavailable.") from error
 
-    @staticmethod
+    @classmethod
     def _visual_path(
-        uri: str, shares: dict[str, Path], sources: dict[str, Path]
+        cls, uri: str, shares: dict[str, Path], sources: dict[str, Path]
     ) -> tuple[str, Path, Path]:
         parsed = urlparse(uri)
         if parsed.scheme == "file" and not parsed.netloc:
@@ -258,7 +314,9 @@ class ExplorerModelProvider:
             if (
                 not path.is_file()
                 or path.suffix.lower() not in (".dae", ".stl")
-                or "visual" not in relative.parts
+                or (cls.VISUAL_PREFIXES is None and "visual" not in relative.parts)
+                or (cls.VISUAL_PREFIXES is not None
+                    and not relative.is_relative_to(cls.VISUAL_PREFIXES[package]))
                 or path.resolve() != sources[package] / relative
             ):
                 break
@@ -266,13 +324,38 @@ class ExplorerModelProvider:
         raise RobotPreviewError("Robot visual asset is outside allowed package files.")
 
 
+class KinovaModelProvider(ExplorerModelProvider):
+    """Expand Gen3/Robotiq visual geometry without connecting to hardware."""
+
+    PACKAGES = ("kortex_description", "robotiq_description")
+    XACRO_PACKAGE = "kortex_description"
+    ANCHORS = {
+        "kortex_description": Path("robots/gen3.xacro"),
+        "robotiq_description": Path("urdf/robotiq_2f_85_macro.urdf.xacro"),
+    }
+    MAPPINGS = {
+        "arm": "gen3", "dof": "7", "gripper": "robotiq_2f_85",
+        "use_fake_hardware": "true", "use_internal_bus_gripper_comm": "true",
+        "gripper_joint_name": "robotiq_85_left_knuckle_joint",
+        "use_external_cable": "true",
+    }
+    LABEL = "Kinova Gen3"
+    VISUAL_PREFIXES = {
+        "kortex_description": Path("arms/gen3/7dof/meshes"),
+        "robotiq_description": Path("meshes/visual/2f_85"),
+    }
+
+
 class RobotPoseMonitor:
-    """Publish only the joints needed by the Explorer preview."""
+    """Publish only the joints needed by the selected robot preview."""
 
     ARM_JOINTS = tuple(f"joint_{index}" for index in range(1, 7))
     GRIPPER_JOINT = "right_finger_joint"
 
-    def __init__(self, clock=time.monotonic, max_age_sec: float = 1.0) -> None:
+    def __init__(self, clock=time.monotonic, max_age_sec: float = 1.0, robot="explorer") -> None:
+        self.definition = robot_definition(robot)
+        self.ARM_JOINTS = self.definition.arm_joints
+        self.GRIPPER_JOINT = self.definition.gripper_joint
         if max_age_sec <= 0:
             raise ValueError("max_age_sec must be positive")
         self._clock = clock
@@ -310,7 +393,7 @@ class RobotPoseMonitor:
             else:
                 status = "live"
             return {
-                "robot": "explorer_poc2",
+                "robot": self.definition.identifier,
                 "status": status,
                 "joints": dict(self._positions) if status == "live" else None,
                 "gripper_available": bool(
@@ -355,11 +438,13 @@ class SnakeButtonMonitor:
 
 
 class RobotPreview:
-    """Model-provider boundary; Kinova can supply another provider later."""
+    """Read-only model and pose for the selected experiment robot."""
 
-    def __init__(self, model=None, pose=None, configuration=None) -> None:
-        self.model = model if model is not None else ExplorerModelProvider()
-        self.pose = pose if pose is not None else RobotPoseMonitor()
+    def __init__(self, model=None, pose=None, configuration=None, robot="explorer") -> None:
+        robot_definition(robot)
+        provider = KinovaModelProvider if robot == "kinova" else ExplorerModelProvider
+        self.model = model if model is not None else provider()
+        self.pose = pose if pose is not None else RobotPoseMonitor(robot=robot)
         self._configuration = configuration
 
     def record(self, message) -> None:

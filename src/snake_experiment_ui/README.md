@@ -88,8 +88,8 @@ Kinova profiles use `end_effector_link` for b2/b3; Explorer profiles retain
 `ft_frame`. The Kinova manager also uses `end_effector_link`. The default session
 check-up selects `system_checkup_kinova.yaml` for Kinova and `system_checkup.yaml`
 for Explorer, so it verifies the matching mapper profile. An explicit
-`diagnostic_profile` still takes precedence. Gripper commands and participant
-3D visuals require further adaptation; the participant preview remains Explorer.
+`diagnostic_profile` still takes precedence. Gripper commands and a complete
+Kinova experiment still require validation.
 See the [dependency guide](../../docs/kinova_dependencies.md) for the pinned
 Robotiq description required by Kortex.
 
@@ -133,8 +133,18 @@ ros2 launch snake_experiment_ui target_calibration.launch.py --show-args
 ```
 
 The <http://127.0.0.1:8081/participant/3d-preview> page shows a read-only 3D
-preview of the Explorer POC2 arm and gripper. It follows fresh `/joint_states`
-data and sends no ROS commands.
+preview of the robot selected by `stack_robot`, as do the animations embedded
+in the participant page. Explorer has six arm joints; Kinova Gen3 has seven
+and a Robotiq 2F-85 gripper. The model is expanded from the installed description
+packages without starting robot processes. Changing robots requires relaunching
+the interface.
+
+The animations follow fresh `/joint_states` only when all arm joints are valid.
+Otherwise, they use the existing Explorer demo pose or the `home` pose from the
+installed Kinova `cartesian_manager` profile. A missing gripper joint leaves the
+arm live and displays an open demo gripper. Animations use the selected robot's
+Baseline/Snake mappings and an illustrative damped inverse kinematics solver;
+they send no ROS commands and do not reproduce the controller exactly.
 
 ## Missing Python module
 
@@ -160,7 +170,29 @@ bundles from the repository root:
 ```bash
 cd src/snake_experiment_ui/frontend/participant_3d
 pnpm install --frozen-lockfile
+pnpm test
 pnpm run build
 ```
 
 Commit the generated bundles alongside the changed source files.
+
+After rebuilding the bundles, rebuild the ROS package and relaunch the session
+interface (stop the previous instance first). For the configured workspace:
+
+```bash
+cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
+source /opt/ros/jazzy/setup.bash
+colcon build --base-paths /home/emoullet/dev/robot_experiments/snake_experiment/src --packages-select snake_experiment_ui --symlink-install
+source install/setup.bash
+ros2 launch snake_experiment_ui session_interface.launch.py \
+  repository_root:=/home/emoullet/dev/robot_experiments/snake_experiment \
+  stack_robot:=kinova stack_use_simulation:=true
+```
+
+Use `stack_robot:=explorer` to check Explorer separately. Refresh
+<http://127.0.0.1:8081/participant> and
+<http://127.0.0.1:8081/participant/3d-preview> with Ctrl+Shift+R. In participant
+view C and on the dedicated page, check Baseline b1/b2/b3 and Snake with the
+button released/held, the complete meshes, labels, framing, and return to
+neutral. Check both demo fallback without joint states and live poses with
+fresh joint states. Run only one robot stack at a time.
