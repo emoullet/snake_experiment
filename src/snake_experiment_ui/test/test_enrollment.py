@@ -48,7 +48,7 @@ class EnrollmentControllerTest(unittest.TestCase):
         self.experiment.mkdir()
         self.calibration = self.root / "calibrations" / "latest_calib.json"
         self.calibration.parent.mkdir()
-        self.calibration.write_text('{"schema_version": 1}\n', encoding="utf-8")
+        self.calibration.write_text('{"schema_version": 1, "robot": {"id": "explorer", "ee_frame": "ft_frame"}}\n', encoding="utf-8")
         self.bringup = self.root / "bringup"
         config = self.bringup / "joystick_mapper" / "config" / "profile.yaml"
         config.parent.mkdir(parents=True)
@@ -150,6 +150,9 @@ class EnrollmentControllerTest(unittest.TestCase):
                                  "robot_ip": "192.168.1.10" if robot == "kinova" else None,
                                  "joystick_profiles": {"baseline": f"joystick_2d_baseline_{robot}.yaml"}}
                 expected = json.loads(json.dumps(configuration))
+                self.calibration.write_text(json.dumps({"robot": {
+                    "id": robot, "ee_frame": "ft_frame" if robot == "explorer" else "end_effector_link",
+                }}))
                 controller = self.make_controller(robot_configuration=configuration)
                 configuration["joystick_profiles"]["baseline"] = "changed-after-launch.yaml"
                 controller.select_parent(str(self.experiment))
@@ -163,6 +166,7 @@ class EnrollmentControllerTest(unittest.TestCase):
                 controller.cancel()
 
     def test_resume_records_robot_changes_without_overwriting_origin(self):
+        self.calibration.write_text(json.dumps({"robot": {"id": "kinova", "ee_frame": "end_effector_link"}}))
         original = {"id": "kinova", "use_simulation": True}
         current = {"id": "kinova", "use_simulation": False}
         controller = self.make_controller(robot_configuration=original)
@@ -181,8 +185,8 @@ class EnrollmentControllerTest(unittest.TestCase):
         self.assertTrue(again.resume_participant("A1B2C3")["participant"]["resumed"])
         changed_robot = self.make_controller("check-4", robot_configuration={"id": "explorer", "use_simulation": False})
         changed_robot.select_parent(str(self.experiment))
-        with self.assertRaisesRegex(EnrollmentError, "Acknowledge"):
-            changed_robot.resume_participant("A1B2C3")
+        with self.assertRaisesRegex(EnrollmentError, "differs from selected robot"):
+            changed_robot.resume_participant("A1B2C3", acknowledge_mismatch=True)
 
     def test_legacy_session_robot_remains_unknown_until_first_recorded_resume(self):
         self.controller.select_parent(str(self.experiment))
@@ -197,6 +201,15 @@ class EnrollmentControllerTest(unittest.TestCase):
         manifest = state["participant"]["manifest"]
         self.assertNotIn("robot", manifest)
         self.assertEqual(manifest["robot_history"][0]["configuration"], configuration)
+
+    def test_incompatible_calibration_cannot_create_a_session(self):
+        self.controller.select_parent(str(self.experiment))
+        for robot in [None, {"id": "kinova", "ee_frame": "end_effector_link"}]:
+            self.calibration.write_text(json.dumps({"robot": robot}))
+            with self.assertRaises(EnrollmentError):
+                self.controller.create_participant(self.form())
+            self.assertFalse((self.experiment / "A1B2C3").exists())
+            self.assertEqual(list(self.experiment.glob(".A1B2C3-*")), [])
 
     def test_counterbalancing_uses_least_represented_plan(self):
         self.controller.select_parent(str(self.experiment))

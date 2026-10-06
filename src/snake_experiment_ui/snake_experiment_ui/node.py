@@ -66,6 +66,7 @@ class TargetCalibrationNode(Node):
         self._calibration_state = CalibrationState(
             max_pose_age_sec=float(self.get_parameter("pose_max_age_sec").value),
             mode_provider=self._mode_manager.active_mode,
+            robot=str(self.get_parameter("stack_robot").value),
         )
         self._pose_subscription = self.create_subscription(
             PoseStamped,

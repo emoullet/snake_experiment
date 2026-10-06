@@ -17,6 +17,9 @@ import threading
 from typing import Callable, Optional
 
 
+from .calibration import CalibrationError, validate_calibration_robot
+
+
 CSV_FIELDS = [
     "session_date",
     "pseudonym",
@@ -268,6 +271,7 @@ class EnrollmentController:
                 raise EnrollmentError(
                     f"Participant manifest is unreadable: {pseudonym}"
                 ) from error
+            self._validate_calibration_robot(folder / "calibration/latest_calib.json")
             mismatches = self._compare_environment(manifest)
             self._mismatches = mismatches
             if mismatches and not acknowledge_mismatch:
@@ -497,6 +501,14 @@ class EnrollmentController:
             if path.is_file() and "config" in path.relative_to(self._bringup_root).parts:
                 yield path
 
+    def _validate_calibration_robot(self, path: Path) -> None:
+        robot = self._robot_configuration["id"] if self._robot_configuration else "explorer"
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+            validate_calibration_robot(document, robot)
+        except (OSError, UnicodeError, json.JSONDecodeError, CalibrationError) as error:
+            raise EnrollmentError(f"Invalid session calibration: {error}") from error
+
     def _populate_environment(self, folder: Path, row: dict, report: dict, now: str) -> dict:
         if not self._calibration_file.is_file():
             raise EnrollmentError(f"Calibration file not found: {self._calibration_file}")
@@ -528,6 +540,7 @@ class EnrollmentController:
             )
         calibration_destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self._calibration_file, calibration_destination)
+        self._validate_calibration_robot(calibration_destination)
         checkup_destination.parent.mkdir(parents=True, exist_ok=True)
         checkup_destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         manifest = {

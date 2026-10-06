@@ -224,6 +224,7 @@ class SessionInterfaceNode(Node):
             else Path.cwd() / "calibrations/latest_calib.json"
         )
         self._checkup = CheckupController(
+            robot=preview_robot,
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
             diagnostics=self._diagnostics,
@@ -267,6 +268,7 @@ class SessionInterfaceNode(Node):
             for mode, states in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2")))
         }
         self._experiment = ExperimentController(
+            robot=preview_robot,
             profile=self._experiment_profile,
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,

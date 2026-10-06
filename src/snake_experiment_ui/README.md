@@ -107,6 +107,14 @@ Robotiq description required by Kortex.
    in order. Acquisitions are saved as MCAP files; interrupted attempts can be
    retried or recorded as deviations.
 
+Calibrations record their source robot (`explorer` or `kinova`), model, and
+end-effector frame under `robot` in `latest_calib.json`. The check-up, enrolment,
+session resume, and experiment preparation require the same robot and tool frame.
+A robot mismatch is blocking even when an environment mismatch is acknowledged.
+Older calibrations without this metadata have an unknown origin and must be
+recreated with the selected robot. Simulation and hardware may share a calibration
+for the same robot; the existing reference-frame checks still apply.
+
 Each new participant's `manifest.json` records the launch-selected configuration
 under `robot`: robot ID/model/label, `use_simulation`, Kinova IP (null for
 Explorer), and paths to the snapshotted Baseline/Snake joystick profiles.

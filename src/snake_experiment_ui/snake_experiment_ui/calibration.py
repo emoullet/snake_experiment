@@ -43,6 +43,22 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def validate_calibration_robot(document: dict, expected_robot: str) -> None:
+    """Reject unknown origins and calibrations belonging to another robot/tool."""
+    from .robot_preview import robot_definition
+
+    metadata = document.get("robot") if isinstance(document, dict) else None
+    if not isinstance(metadata, dict) or metadata.get("id") not in ("explorer", "kinova"):
+        raise CalibrationError("Calibration robot is unknown. Create a new calibration with the selected robot.")
+    if metadata["id"] != expected_robot:
+        raise CalibrationError(
+            f"Calibration robot '{metadata['id']}' differs from selected robot '{expected_robot}'. "
+            "Use a calibration created with the selected robot."
+        )
+    if metadata.get("ee_frame") != robot_definition(expected_robot).ee_frame:
+        raise CalibrationError("Calibration end-effector frame differs from the selected robot. Create a new calibration.")
+
+
 class CalibrationState:
     """Own the latest ROS pose and the seven calibration captures."""
 
@@ -52,9 +68,14 @@ class CalibrationState:
         mode_provider: Callable[[], Optional[str]],
         monotonic_clock: Callable[[], float] = time.monotonic,
         utc_clock: Callable[[], str] = _utc_now,
+        robot: str = "explorer",
     ) -> None:
         if max_pose_age_sec <= 0.0:
             raise ValueError("max_pose_age_sec must be positive")
+        from .robot_preview import robot_definition
+
+        self._robot = robot
+        self._robot_definition = robot_definition(robot)
         self._max_pose_age_sec = max_pose_age_sec
         self._mode_provider = mode_provider
         self._monotonic_clock = monotonic_clock
@@ -168,6 +189,11 @@ class CalibrationState:
                 "saved_at_utc": self._utc_clock(),
                 "pose_topic": None,
                 "reference_frame": frame_id,
+                "robot": {
+                    "id": self._robot,
+                    "model": self._robot_definition.identifier,
+                    "ee_frame": self._robot_definition.ee_frame,
+                },
                 "active_mode": mode,
                 "poses": {
                     pose_id: asdict(self._captures[pose_id]) for pose_id in POSE_IDS

@@ -12,6 +12,8 @@ import time
 from typing import Callable, Optional
 import uuid
 
+from .calibration import CalibrationError, validate_calibration_robot
+
 from .diagnostics import evaluate_provenance
 from .go_to import GoToError
 
@@ -39,7 +41,9 @@ class CheckupController:
         utc_clock: Callable[[], str] = _utc_now,
         go_to_controller=None,
         calibration_file: Optional[Path] = None,
+        robot: str = "explorer",
     ) -> None:
+        self._robot = robot
         self._stack = stack_manager
         self._modes = mode_manager
         self._diagnostics = diagnostics
@@ -311,6 +315,10 @@ class CheckupController:
         missing = [pose_id for pose_id in required if pose_id not in poses]
         if missing:
             raise CheckupError("Go-to calibration is missing: " + ", ".join(missing))
+        try:
+            validate_calibration_robot(calibration, self._robot)
+        except CalibrationError as error:
+            raise CheckupError(str(error)) from error
         self._go_to_calibration = calibration
         self._go_to_calibration_sha256 = hashlib.sha256(raw).hexdigest()
 

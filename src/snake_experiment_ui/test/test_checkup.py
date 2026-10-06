@@ -111,6 +111,7 @@ class CheckupControllerTest(unittest.TestCase):
             json.dumps(
                 {
                     "schema_version": 1,
+                    "robot": {"id": "explorer", "ee_frame": "ft_frame"},
                     "poses": {
                         pose_id: pose
                         for pose_id in (
@@ -140,6 +141,16 @@ class CheckupControllerTest(unittest.TestCase):
             go_to_controller=FakeGoTo(),
             calibration_file=calibration,
         )
+
+    def test_robot_mismatch_and_unknown_origin_block_before_stack_start(self):
+        path = self.controller._calibration_file
+        document = json.loads(path.read_text())
+        for robot in [None, {"id": "kinova", "ee_frame": "end_effector_link"}]:
+            document["robot"] = robot
+            path.write_text(json.dumps(document))
+            with self.assertRaises(CheckupError):
+                self.controller.start_stack()
+            self.assertEqual(self.stack.status, "inactive")
 
     def tearDown(self):
         self.temporary_directory.cleanup()

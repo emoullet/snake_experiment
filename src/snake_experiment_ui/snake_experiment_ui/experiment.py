@@ -15,6 +15,8 @@ from typing import Callable, Optional
 
 import yaml
 
+from .calibration import CalibrationError, validate_calibration_robot
+
 from .go_to import GoToError
 from .participant_profile import STATE_NAMES, state_image_is_available
 from .training import (
@@ -259,7 +261,9 @@ class ExperimentController:
         mode_explanation_videos: Optional[dict] = None,
         state_images: Optional[dict] = None,
         snake_button_provider: Optional[Callable[[], Optional[bool]]] = None,
+        robot: str = "explorer",
     ) -> None:
+        self._robot = robot
         self._source_profile = profile
         self._profile = profile
         self._stack = stack_manager
@@ -1568,8 +1572,7 @@ class ExperimentController:
         except (KeyError, TypeError) as error:
             raise TrainingError(f"Calibration pose {name} is missing.") from error
 
-    @staticmethod
-    def _load_calibration(folder: Path) -> dict:
+    def _load_calibration(self, folder: Path) -> dict:
         path = folder / "calibration" / "latest_calib.json"
         try:
             calibration = json.loads(path.read_text(encoding="utf-8"))
@@ -1577,6 +1580,10 @@ class ExperimentController:
             raise ExperimentError("Participant calibration is unreadable.") from error
         if not isinstance(calibration, dict) or calibration.get("schema_version") != 1:
             raise ExperimentError("Participant calibration must use schema_version 1.")
+        try:
+            validate_calibration_robot(calibration, self._robot)
+        except CalibrationError as error:
+            raise ExperimentError(str(error)) from error
         poses = calibration.get("poses")
         required = {
             *(f"target_{index}" for index in (1, 2, 3)),

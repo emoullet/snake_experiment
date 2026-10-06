@@ -136,6 +136,7 @@ class ExperimentControllerTest(unittest.TestCase):
         calibration_folder.mkdir()
         self.calibration = {
             "schema_version": 1,
+            "robot": {"id": "explorer", "ee_frame": "ft_frame"},
             "poses": {
                 name: {
                     "frame_id": "base_link",
@@ -189,6 +190,15 @@ class ExperimentControllerTest(unittest.TestCase):
             "experimental_plan": "snake->baseline",
             "folder": str(self.participant_folder),
         }
+
+    def test_experiment_rejects_calibration_with_other_or_unknown_robot(self):
+        path = self.participant_folder / "calibration/latest_calib.json"
+        for robot in [None, {"id": "kinova", "ee_frame": "end_effector_link"}]:
+            document = dict(self.calibration, robot=robot)
+            path.write_text(json.dumps(document))
+            with self.assertRaises(ExperimentError):
+                self.controller.prepare(self.participant)
+            self.assertEqual(self.stack.start_count, 0)
 
     def tearDown(self):
         self.temporary_directory.cleanup()
