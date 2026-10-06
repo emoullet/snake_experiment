@@ -107,6 +107,16 @@ Robotiq description required by Kortex.
    in order. Acquisitions are saved as MCAP files; interrupted attempts can be
    retried or recorded as deviations.
 
+Each new participant's `manifest.json` records the launch-selected configuration
+under `robot`: robot ID/model/label, `use_simulation`, Kinova IP (null for
+Explorer), and paths to the snapshotted Baseline/Snake joystick profiles.
+`robot_history` records that configuration with the check-up ID and timestamp
+at creation and each resume. A configuration change uses the existing
+environment-mismatch acknowledgement before resuming and preserves the original
+`robot` record. Older manifests without robot metadata are treated as unknown;
+acknowledging their first resume records the current configuration in the history
+without assigning a robot retrospectively to the original session.
+
 The supplied success thresholds (5 mm and 5 degrees) are provisional development
 values. The supplied discovery instructions are also placeholders and must be
 replaced before collecting participant data.

@@ -287,6 +287,17 @@ class SessionInterfaceNode(Node):
             mode_manager=self._mode_manager,
             experiment_profile=experiment_profile_path,
             experiment_prepare=self._experiment.prepare,
+            robot_configuration={
+                "id": preview_robot,
+                "model": preview_configuration.public["robot"],
+                "label": preview_configuration.public["robot_label"],
+                "use_simulation": bool(self.get_parameter("stack_use_simulation").value),
+                "robot_ip": self._stack_manager.snapshot()["robot_ip"],
+                "joystick_profiles": {
+                    mode: f"experimental_environment/bringup/joystick_mapper/config/joystick_2d_{mode}_{preview_robot}.yaml"
+                    for mode in ("baseline", "snake")
+                },
+            },
         )
         app = create_session_app(
             self._checkup,
