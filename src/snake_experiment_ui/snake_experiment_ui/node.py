@@ -32,7 +32,7 @@ class TargetCalibrationNode(Node):
         self.declare_parameter("mode_shutdown_timeout_sec", 5.0)
         self.declare_parameter("stack_robot", "explorer")
         self.declare_parameter("stack_robot_ip", "192.168.1.10")
-        self.declare_parameter("stack_use_simulation", True)
+        self.declare_parameter("stack_use_simulation", False)
         self.declare_parameter("stack_startup_timeout_sec", 15.0)
         self.declare_parameter("stack_shutdown_timeout_sec", 10.0)
 

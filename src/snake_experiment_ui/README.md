@@ -33,8 +33,8 @@ ros2 launch snake_experiment_ui session_interface.launch.py \
   repository_root:="$snake_src" stack_use_simulation:=true
 ```
 
-Open the addresses in the table above. Calibration uses simulation by default;
-the session interface selects hardware unless `stack_use_simulation` is set.
+Open the addresses in the table above. Both interfaces select hardware by
+default; pass `stack_use_simulation:=true` to use simulation.
 Each interface controls only the processes it started. Avoid starting the
 robot stack from both interfaces at the same time. The servers bind to
 `127.0.0.1` and have no authentication.
