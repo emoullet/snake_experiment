@@ -23,12 +23,18 @@
   const cameraPlaceholder = document.getElementById("participant-camera-placeholder");
   const cameraRetry = document.getElementById("participant-camera-retry");
   const cameraError = document.getElementById("participant-camera-error");
+  const soundRetry = document.getElementById("participant-sound-retry");
+  // Local copy of https://www.myinstants.com/media/sounds/mario_coin_sound.mp3.
+  const successSound = new Audio("/session-static/mario_coin_sound.mp3");
+  successSound.preload = "auto";
   const connection = document.getElementById("participant-connection");
   let reconnectDelay = 500;
   let cameraStream = null;
   let cameraRequest = 0;
   let cameraStarting = false;
   let currentView = "waiting";
+  let successEventInitialized = false;
+  let lastSuccessEventId = null;
   const setText = (element, value) => { if (element.textContent !== value) element.textContent = value; };
   video.addEventListener("error", () => { videoError.hidden = false; });
   video.addEventListener("loadedmetadata", () => { videoError.hidden = true; });
@@ -81,11 +87,40 @@
   cameraRetry.addEventListener("click", startCamera);
   window.addEventListener("pagehide", stopCamera);
 
+  async function playSuccessSound() {
+    try {
+      successSound.currentTime = 0;
+      await successSound.play();
+      soundRetry.hidden = true;
+    } catch {
+      // Audible autoplay can be blocked until the participant interacts with the page.
+      if (currentView === "C") soundRetry.hidden = false;
+    }
+  }
+
+  soundRetry.addEventListener("click", () => { void playSuccessSound(); });
+
   function render(state) {
     const showA = state.view === "A";
     const showB = state.view === "B" && ["baseline", "snake"].includes(state.mode);
     const showC = state.view === "C" && ["baseline", "snake"].includes(state.mode);
     const enteringC = showC && currentView !== "C";
+    if (!showC) {
+      successEventInitialized = false;
+      lastSuccessEventId = null;
+      soundRetry.hidden = true;
+      if (currentView === "C") {
+        successSound.pause();
+        successSound.currentTime = 0;
+      }
+    } else if (!successEventInitialized) {
+      // A page reload or resumed block must not replay an earlier success.
+      successEventInitialized = true;
+      lastSuccessEventId = state.success_event_id || null;
+    } else if (state.success_event_id && state.success_event_id !== lastSuccessEventId) {
+      lastSuccessEventId = state.success_event_id;
+      void playSuccessSound();
+    }
     workspace.classList.toggle("participant-workspace--trial", showC);
     if (!showC && currentView === "C") stopCamera();
     currentView = showC ? "C" : state.view;

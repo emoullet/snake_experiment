@@ -569,7 +569,19 @@ class ExperimentController:
                     key=lambda item: item["id"],
                     default=None,
                 )
-                reached = workflow in ("awaiting_prepare", "ready_to_end") and latest_completed is not None
+                latest_resolved = max(
+                    (
+                        item for item in active.get("training_trials", [])
+                        if item.get("status") in ("completed", "completed_with_deviation")
+                    ),
+                    key=lambda item: item["id"],
+                    default=None,
+                )
+                reached = (
+                    workflow in ("awaiting_prepare", "ready_to_end")
+                    and latest_resolved is not None
+                    and latest_resolved["status"] == "completed"
+                )
                 return {
                     "view": "C",
                     "phase": active["phase"],
@@ -580,6 +592,10 @@ class ExperimentController:
                         else "Waiting for next trial"
                     ),
                     "state": "Recording" if recording else "Target reached" if reached else "Waiting",
+                    "success_event_id": (
+                        f"{active['id']}:{latest_completed['id']}"
+                        if latest_completed else None
+                    ),
                     "linear_mm": target_error.get("linear_mm") if target_error else None,
                     "angular_deg": target_error.get("angular_deg") if target_error else None,
                     "local_mode": state,

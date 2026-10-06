@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-3" />
     <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-mapping-1" />
     <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
-    <script src="/session-static/participant_app.js?v=participant-mapping-1" defer></script>
+    <script src="/session-static/participant_app.js?v=participant-success-sound-1" defer></script>
     <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-3" defer></script>
   </head>
   <body>
@@ -45,6 +45,7 @@
       <section id="participant-trial" class="participant-card" hidden>
         <p class="step-number">Current task</p>
         <h1 id="participant-trial-title">Training</h1>
+        <button id="participant-sound-retry" class="secondary-button" type="button" hidden>Enable success sound</button>
         <div class="participant-trial-grid">
           <div class="participant-trial-information">
             <div class="participant-task"><span>Current task</span><strong id="participant-task">Waiting for next trial</strong></div>

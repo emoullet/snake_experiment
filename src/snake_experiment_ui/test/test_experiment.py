@@ -602,6 +602,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual((public["view"], public["mode"], public["phase"]),
                          ("C", "snake", "training"))
         self.assertEqual(public["state"], "Waiting")
+        self.assertIsNone(public["success_event_id"])
         self.assertIsNone(public["linear_mm"])
         self.assertNotIn("pseudonym", public)
         self.assertNotIn("folder", public)
@@ -634,6 +635,30 @@ class ExperimentControllerTest(unittest.TestCase):
         self.monotonic_value += 0.6
         self.controller.update_ee_pose(self.pose("target_2"))
         self.assertEqual(self.controller.participant_snapshot()["state"], "Target reached")
+        self.assertEqual(
+            self.controller.participant_snapshot()["success_event_id"],
+            "mode_1_training:1",
+        )
+        self.controller.prepare_training_trial("mode_1_training")
+        self.complete_go_to("target_out_2")
+        self.controller.start_training_attempt("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_3"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_3"))
+        self.assertEqual(
+            self.controller.participant_snapshot()["success_event_id"],
+            "mode_1_training:2",
+        )
+        self.controller.prepare_training_trial("mode_1_training")
+        self.complete_go_to("target_out_3")
+        self.controller.start_training_attempt("mode_1_training")
+        self.controller.stop_training_attempt("mode_1_training")
+        self.controller.resolve_training_attempt(
+            "mode_1_training", "advance_with_deviation"
+        )
+        public = self.controller.participant_snapshot()
+        self.assertEqual(public["state"], "Waiting")
+        self.assertEqual(public["success_event_id"], "mode_1_training:2")
         self.controller.abort("mode_1_training")
         self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
         self.controller.start("mode_1_training")
