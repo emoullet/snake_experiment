@@ -38,6 +38,6 @@ joystick_mapper:
     gripper_button_index: 0
     gripper_button_mode: toggle
     gripper_command_topic: "/gripper_controller/commands"
-    gripper_open_position: 0.2
-    gripper_close_position: 1.1
+    gripper_open_position: 0.0
+    gripper_close_position: 0.8
     debug: false
