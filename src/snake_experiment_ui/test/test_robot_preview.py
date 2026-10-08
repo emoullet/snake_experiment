@@ -253,16 +253,14 @@ class KinovaPreviewTest(unittest.TestCase):
             self.assertEqual(monitor.snapshot()["status"], "unavailable")
         self.assertIsInstance(RobotPreview(robot="kinova").model, KinovaModelProvider)
 
-    def test_config_uses_pinned_manager_home_and_kinova_mappings(self):
+    def test_config_uses_local_manager_home_and_kinova_mappings(self):
         with tempfile.TemporaryDirectory() as directory:
-            dependency = Path(directory)
-            (dependency / "config").mkdir()
-            original = PACKAGE_ROOT.parents[1] / "dependencies/cartesian_manager/bringup/config/kinova_params.yaml"
-            target = dependency / "config/kinova_params.yaml"
-            shutil.copy2(original, target)
+            share = Path(directory)
+            shutil.copytree(PACKAGE_ROOT / "bringup", share / "bringup")
+            target = share / "bringup/cartesian_manager/config/kinova_params.yaml"
             def config():
-                return PreviewConfiguration(PACKAGE_ROOT / "config/robot_preview.yaml", PACKAGE_ROOT,
-                    robot="kinova", dependency_share=lambda name: dependency)
+                return PreviewConfiguration(PACKAGE_ROOT / "config/robot_preview.yaml", share,
+                    robot="kinova")
             public = config().public
             self.assertEqual(public["robot"], "kinova_gen3")
             self.assertEqual(len(public["arm_joints"]), 7)
@@ -271,6 +269,9 @@ class KinovaPreviewTest(unittest.TestCase):
             self.assertEqual(public["frames"]["ee"], "end_effector_link")
             self.assertEqual(public["mapper"]["baseline"]["b3"]["angular_frame"], "end_effector_link")
             data = yaml.safe_load(target.read_text())
+            data["cartesian_manager"]["ros__parameters"]["behaviours"]["joint_targets"]["positions"][-1] = 1.234
+            target.write_text(yaml.safe_dump(data))
+            self.assertEqual(config().public["demo_pose"]["joint_7"], 1.234)
             data["cartesian_manager"]["ros__parameters"]["behaviours"]["joint_targets"]["positions"].pop()
             target.write_text(yaml.safe_dump(data))
             with self.assertRaisesRegex(RobotPreviewError, "home joint target"):

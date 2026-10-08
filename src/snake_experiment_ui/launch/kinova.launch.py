@@ -37,7 +37,8 @@ def generate_launch_description():
         ]), value_type=str)
     }
     config = PathJoinSubstitution([
-        FindPackageShare("cartesian_manager"), "config", "kinova_params.yaml",
+        FindPackageShare("snake_experiment_ui"), "bringup", "cartesian_manager",
+        "config", "kinova_params.yaml",
     ])
 
     def spawner(controller):
@@ -56,7 +57,7 @@ def generate_launch_description():
         OpaqueFunction(function=protected_controllers, kwargs={"robot": "kinova"}),
         Node(package="cartesian_manager", executable="cartesian_manager_node",
              name="cartesian_manager",
-             parameters=[config, {"frames.ee_frame": "end_effector_link"}], output="screen"),
+             parameters=[config], output="screen"),
         Node(package="joy", executable="joy_node", name="joy_node", output="screen"),
         Node(
             package="rviz2", executable="rviz2", name="rviz2", output="screen",

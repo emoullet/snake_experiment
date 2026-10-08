@@ -11,6 +11,23 @@ REPOSITORY_ROOT = Path(__file__).parents[3]
 
 
 class BringupLayoutTest(unittest.TestCase):
+    def test_kinova_launch_uses_local_profile_for_controller_and_manager(self):
+        from launch import LaunchContext
+        from launch.substitutions import TextSubstitution
+        module = self._load_launch("kinova.launch.py")
+        with patch.object(module, "FindPackageShare", side_effect=lambda name: TextSubstitution(text=f"/virtual/{name}")):
+            with patch.object(module, "Node", wraps=module.Node) as node:
+                module.generate_launch_description()
+        calls = {call.kwargs["executable"]: call.kwargs for call in node.call_args_list}
+        expected = "/virtual/snake_experiment_ui/bringup/cartesian_manager/config/kinova_params.yaml"
+        context = LaunchContext()
+        self.assertEqual(calls["ros2_control_node"]["parameters"][1].perform(context), expected)
+        self.assertEqual(calls["cartesian_manager_node"]["parameters"][0].perform(context), expected)
+        self.assertEqual(len(calls["cartesian_manager_node"]["parameters"]), 1)
+        parameters = yaml.safe_load((PACKAGE_ROOT / "bringup/cartesian_manager/config/kinova_params.yaml").read_text())
+        self.assertEqual(parameters["qontrol_explorer"]["ros__parameters"]["tip_frame"], "end_effector_link")
+        self.assertEqual(parameters["cartesian_manager"]["ros__parameters"]["frames"]["ee_frame"], "end_effector_link")
+
     def _load_launch(self, name):
         path = PACKAGE_ROOT / "launch" / name
         if name.startswith("joystick_mapper_"):

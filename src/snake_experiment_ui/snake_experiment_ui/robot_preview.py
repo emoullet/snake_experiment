@@ -53,7 +53,7 @@ class PreviewConfiguration:
         "angular_x", "angular_y", "angular_z",
     )
 
-    def __init__(self, preview_path: Path, package_share: Path, robot="explorer", dependency_share=None) -> None:
+    def __init__(self, preview_path: Path, package_share: Path, robot="explorer") -> None:
         self.robot = robot
         definition = robot_definition(robot)
         share = Path(package_share)
@@ -67,18 +67,10 @@ class PreviewConfiguration:
             loop_sec = self._positive(animation["loop_sec"], "loop_sec")
             if not (1 <= linear_mm <= 200 and 1 <= angular_deg <= 45 and 1 <= loop_sec <= 30):
                 raise RobotPreviewError("Robot preview animation values are outside safe display ranges.")
-            if robot == "kinova":
-                if dependency_share is None:
-                    from ament_index_python.packages import get_package_share_directory
-                    dependency_share = get_package_share_directory
-                manager_path = Path(dependency_share("cartesian_manager")) / "config/kinova_params.yaml"
-            else:
-                manager_path = share / "bringup/cartesian_manager/config/explorer_params.yaml"
+            manager_path = share / "bringup/cartesian_manager/config" / f"{robot}_params.yaml"
             manager_parameters = self._read_yaml(manager_path)["cartesian_manager"]["ros__parameters"]
             frames = dict(manager_parameters["frames"])
             if robot == "kinova":
-                # Match the experiment launch's EE override and controller tip.
-                frames["ee_frame"] = definition.ee_frame
                 targets = manager_parameters["behaviours"]["joint_targets"]
                 names = targets["joint_names"]
                 home_index = targets["target_names"].index("home")

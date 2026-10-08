@@ -140,6 +140,7 @@ run**. With the commands above, this is the build workspace.
 | Current calibration | `calibrations/latest_calib_explorer.json` or `calibrations/latest_calib_kinova.json`, selected by `stack_robot`; previous versions move to `calibrations/calib_archives/` with the robot in their filename. |
 | Sessions | `sessions_root` (default: launch directory); each participant has a folder and `experiment_progress.json`. |
 | Calibration used by sessions | `calibration_file` (default: the selected robot’s current calibration in the launch directory). |
+| Robot controller/manager parameters | `bringup/cartesian_manager/config/explorer_params.yaml` or `kinova_params.yaml` inside this package; launches and 3D previews use these experiment-owned profiles. |
 | Diagnostics and sequence | `config/system_checkup.yaml` (Explorer), `config/system_checkup_kinova.yaml` (Kinova), and `config/experiment.yaml`. |
 | Participant videos | `config/participant_interface.yaml`; MP4 paths may be absolute or relative to this file. |
 
