@@ -74,7 +74,9 @@ class TargetCalibrationNode(Node):
             self._calibration_state.update_live_pose,
             10,
         )
-        self._storage = CalibrationStorage.from_working_directory(pose_topic)
+        self._storage = CalibrationStorage.from_working_directory(
+            pose_topic, robot=str(self.get_parameter("stack_robot").value)
+        )
 
         share = Path(get_package_share_directory("snake_experiment_ui"))
         app = create_app(

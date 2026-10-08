@@ -35,6 +35,7 @@ from .rosbag_manager import RosbagManager
 from .robot_preview import PreviewConfiguration, RobotPreview, SnakeButtonMonitor
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
+from .storage import default_calibration_path
 from .calibration import CalibrationError
 from .overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal
 
@@ -244,7 +245,7 @@ class SessionInterfaceNode(Node):
         calibration_file = (
             Path(configured_calibration)
             if configured_calibration
-            else Path.cwd() / "calibrations/latest_calib.json"
+            else default_calibration_path(Path.cwd(), preview_robot)
         )
         self._protection_calibration_file = calibration_file
         self._checkup = CheckupController(

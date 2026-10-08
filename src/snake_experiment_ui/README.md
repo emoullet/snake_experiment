@@ -58,7 +58,7 @@ ros2 launch snake_experiment_ui target_calibration.launch.py \
 Stop its stack from the page and stop the interface with Ctrl+C before testing
 the session interface separately. The session check-up requires an existing
 calibration file before it will start the stack; use the file saved by calibration
-or pass `calibration_file:=/absolute/path/to/latest_calib.json`:
+or pass `calibration_file:=/absolute/path/to/latest_calib_kinova.json`:
 
 ```bash
 ros2 launch snake_experiment_ui session_interface.launch.py \
@@ -96,7 +96,8 @@ Robotiq description required by Kortex.
 ## Session workflow
 
 1. **Calibration:** activate Baseline or Snake, capture the seven poses, and
-   save them. The current file is `calibrations/latest_calib.json`.
+   save them. The current file is `calibrations/latest_calib_explorer.json` or
+   `calibrations/latest_calib_kinova.json`, selected by `stack_robot`.
 2. **System check-up:** verify both modes, ROS diagnostics, and motions to
    `target_1`, `target_2`, `target_3`, and `starting_point`.
 3. **Enrollment:** choose a folder, then create or resume a participant. A
@@ -108,7 +109,7 @@ Robotiq description required by Kortex.
    retried or recorded as deviations.
 
 Calibrations record their source robot (`explorer` or `kinova`), model, and
-end-effector frame under `robot` in `latest_calib.json`. The check-up, enrolment,
+end-effector frame under `robot` in their current calibration file. The check-up, enrolment,
 session resume, and experiment preparation require the same robot and tool frame.
 A robot mismatch is blocking even when an environment mismatch is acknowledged.
 Older calibrations without this metadata have an unknown origin and must be
@@ -136,11 +137,18 @@ run**. With the commands above, this is the build workspace.
 
 | Item | Path or setting |
 | --- | --- |
-| Current calibration | `calibrations/latest_calib.json`; the previous version moves to `calibrations/calib_archives/`. |
+| Current calibration | `calibrations/latest_calib_explorer.json` or `calibrations/latest_calib_kinova.json`, selected by `stack_robot`; previous versions move to `calibrations/calib_archives/` with the robot in their filename. |
 | Sessions | `sessions_root` (default: launch directory); each participant has a folder and `experiment_progress.json`. |
-| Calibration used by sessions | `calibration_file` (default: `calibrations/latest_calib.json` in the launch directory). |
+| Calibration used by sessions | `calibration_file` (default: the selected robot’s current calibration in the launch directory). |
 | Diagnostics and sequence | `config/system_checkup.yaml` (Explorer), `config/system_checkup_kinova.yaml` (Kinova), and `config/experiment.yaml`. |
 | Participant videos | `config/participant_interface.yaml`; MP4 paths may be absolute or relative to this file. |
+
+Saving one robot’s calibration does not replace or archive the other robot’s
+current file. The old shared `calibrations/latest_calib.json` is not used
+automatically. If it contains valid robot metadata, it may be copied to the
+matching new filename or passed explicitly through `calibration_file`.
+Participant snapshots keep `calibration/latest_calib.json` inside each participant
+folder; their robot compatibility checks still apply.
 
 Pass another path to ROS as `name:=value`, for example
 `calibration_file:=/path/to/latest_calib.json`. List all launch arguments with:

@@ -11,21 +11,29 @@ import threading
 import uuid
 
 
+def default_calibration_path(launch_directory: str | Path, robot: str) -> Path:
+    """Select the current calibration without falling back to another robot."""
+    if robot not in ("explorer", "kinova"):
+        raise ValueError(f"Unknown calibration robot: {robot}")
+    return Path(launch_directory).expanduser().resolve() / "calibrations" / f"latest_calib_{robot}.json"
+
+
 class CalibrationStorage:
     """Maintain the current calibration and archive its previous versions."""
 
-    def __init__(self, launch_directory: str | Path, pose_topic: str) -> None:
+    def __init__(self, launch_directory: str | Path, pose_topic: str, robot: str = "explorer") -> None:
         self.launch_directory = Path(launch_directory).expanduser().resolve()
         self.directory = self.launch_directory / "calibrations"
         self.archive_directory = self.directory / "calib_archives"
-        self.latest_path = self.directory / "latest_calib.json"
+        self.latest_path = default_calibration_path(self.launch_directory, robot)
+        self.robot = robot
         self.pose_topic = pose_topic
         self._save_lock = threading.Lock()
 
     @classmethod
-    def from_working_directory(cls, pose_topic: str) -> "CalibrationStorage":
+    def from_working_directory(cls, pose_topic: str, robot: str = "explorer") -> "CalibrationStorage":
         """Capture the process working directory as the storage root."""
-        return cls(Path.cwd(), pose_topic)
+        return cls(Path.cwd(), pose_topic, robot)
 
     def save(self, document: dict) -> Path:
         """Atomically replace the current calibration and archive the old one."""
@@ -70,7 +78,7 @@ class CalibrationStorage:
     def _next_archive_path(self) -> Path:
         while True:
             path = self.archive_directory / (
-                f"archived-{self._timestamp()}-{uuid.uuid4().hex}.json"
+                f"archived-{self.robot}-{self._timestamp()}-{uuid.uuid4().hex}.json"
             )
             if not path.exists():
                 return path

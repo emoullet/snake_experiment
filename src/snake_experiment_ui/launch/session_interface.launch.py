@@ -20,7 +20,10 @@ def generate_launch_description():
         DeclareLaunchArgument("measurement_window_sec", default_value="2.0"),
         DeclareLaunchArgument("repository_root", default_value=""),
         DeclareLaunchArgument("sessions_root", default_value=""),
-        DeclareLaunchArgument("calibration_file", default_value=""),
+        DeclareLaunchArgument(
+            "calibration_file", default_value="",
+            description="Override calibrations/latest_calib_<stack_robot>.json in the launch directory.",
+        ),
         DeclareLaunchArgument("mode_startup_timeout_sec", default_value="5.0"),
         DeclareLaunchArgument("mode_shutdown_timeout_sec", default_value="5.0"),
         DeclareLaunchArgument("stack_startup_timeout_sec", default_value="30.0"),

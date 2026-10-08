@@ -5,10 +5,34 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from snake_experiment_ui.storage import CalibrationStorage
+from snake_experiment_ui.storage import CalibrationStorage, default_calibration_path
 
 
 class CalibrationStorageTest(unittest.TestCase):
+    def test_robot_calibrations_and_archives_are_independent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            explorer = CalibrationStorage(directory, "/ee_pose", robot="explorer")
+            kinova = CalibrationStorage(directory, "/ee_pose", robot="kinova")
+            explorer.save({"marker": "explorer-first"})
+            kinova.save({"marker": "kinova-first"})
+            kinova_original = kinova.latest_path.read_bytes()
+            explorer.save({"marker": "explorer-second"})
+            self.assertEqual(kinova.latest_path.read_bytes(), kinova_original)
+            explorer_original = explorer.latest_path.read_bytes()
+            kinova.save({"marker": "kinova-second"})
+            self.assertEqual(explorer.latest_path.read_bytes(), explorer_original)
+            self.assertEqual(kinova.latest_path.name, "latest_calib_kinova.json")
+            for storage in (explorer, kinova):
+                self.assertEqual(default_calibration_path(directory, storage.robot), storage.latest_path)
+                archives = list(storage.archive_directory.glob(f"archived-{storage.robot}-*.json"))
+                self.assertEqual(len(archives), 1)
+                self.assertEqual(json.loads(archives[0].read_text())["marker"], f"{storage.robot}-first")
+
+    def test_unknown_robot_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "Unknown calibration robot"):
+                CalibrationStorage(directory, "/ee_pose", robot="other")
+
     def test_first_save_creates_latest_under_launch_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             launch_directory = Path(directory)
@@ -18,7 +42,7 @@ class CalibrationStorageTest(unittest.TestCase):
 
             self.assertEqual(
                 saved,
-                launch_directory / "calibrations" / "latest_calib.json",
+                launch_directory / "calibrations" / "latest_calib_explorer.json",
             )
             self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
             document = json.loads(saved.read_text(encoding="utf-8"))
@@ -99,9 +123,10 @@ class CalibrationStorageTest(unittest.TestCase):
                 "snake_experiment_ui.storage.Path.cwd",
                 return_value=launch_directory,
             ):
-                storage = CalibrationStorage.from_working_directory("/pose")
+                storage = CalibrationStorage.from_working_directory("/pose", robot="kinova")
 
             self.assertEqual(storage.launch_directory, launch_directory.resolve())
+            self.assertEqual(storage.latest_path.name, "latest_calib_kinova.json")
             self.assertEqual(
                 storage.directory,
                 launch_directory.resolve() / "calibrations",
