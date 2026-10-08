@@ -82,6 +82,15 @@ class ModeManager:
             self._refresh_process_state()
             return self._active_mode if self._status == "active" else None
 
+    def try_active_mode(self) -> Optional[str]:
+        """Skip ROS polling during launch/stop instead of blocking its executor."""
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
+            return self.active_mode()
+        finally:
+            self._lock.release()
+
     def snapshot(self) -> dict:
         """Return JSON-compatible lifecycle state."""
         with self._lock:

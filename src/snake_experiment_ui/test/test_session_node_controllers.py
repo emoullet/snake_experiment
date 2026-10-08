@@ -1,4 +1,5 @@
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -7,6 +8,81 @@ from snake_experiment_ui.session_node import (
     CONTROLLER_REQUEST_TIMEOUT_SEC,
     SessionInterfaceNode,
 )
+from snake_experiment_ui.checkup import CheckupController
+from snake_experiment_ui.mode_manager import ModeManager
+from snake_experiment_ui.experiment import ExperimentController
+
+
+class ProtectionCallbackConcurrencyTest(unittest.TestCase):
+    def test_go_to_restoration_does_not_block_feedback_dispatch(self):
+        entered, release, returned = threading.Event(), threading.Event(), threading.Event()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            node = SimpleNamespace(_closing=False, _go_to_finish_executor=executor, get_logger=Mock())
+            node._run_go_to_finish = lambda callback, record: SessionInterfaceNode._run_go_to_finish(node, callback, record)
+            def restore(record):
+                entered.set()
+                release.wait(2)
+            def feedback():
+                SessionInterfaceNode._dispatch_go_to_finish(node, restore, {"status": "succeeded"})
+                returned.set()
+            thread = threading.Thread(target=feedback)
+            thread.start()
+            try:
+                self.assertTrue(entered.wait(1))
+                self.assertTrue(returned.wait(.2), "Feedback waited for mapper restoration")
+            finally:
+                release.set()
+                thread.join(1)
+
+    def test_ros_callbacks_do_not_wait_for_mode_and_checkup_lifecycle_locks(self):
+        modes = ModeManager(node_names=lambda: [], publish_mode_request=lambda _: None)
+        checkup = object.__new__(CheckupController)
+        checkup._lock = threading.RLock()
+        checkup._go_to = Mock()
+        experiment = object.__new__(ExperimentController)
+        experiment._lock = threading.RLock()
+        experiment.update_ee_pose = Mock()
+        experiment.record_mapper_local_mode = Mock()
+        node = SimpleNamespace(
+            _mapper_client_reset_requested=threading.Event(),
+            _refresh_controllers=Mock(), _mode_manager=modes,
+            _parameter_list_client=Mock(), _parameter_get_client=Mock(),
+            _checkup=checkup, _experiment=experiment, _diagnostics=Mock(),
+            _protection=Mock(),
+        )
+        node._protection.snapshot.return_value = {"blocked": False}
+        for mode in ("baseline", "snake"):
+            with self.subTest(mode=mode):
+                locked, release, callbacks_done = threading.Event(), threading.Event(), threading.Event()
+                def lifecycle():
+                    with checkup._lock, modes._lock, experiment._lock:
+                        modes._active_mode, modes._status = mode, "starting"
+                        locked.set()
+                        release.wait(2)
+                def ros_callbacks():
+                    SessionInterfaceNode._refresh_services(node)
+                    SessionInterfaceNode._record_ee_pose(node, object())
+                    SessionInterfaceNode._record_mapper_local_mode(node, SimpleNamespace(data="b1"))
+                    callbacks_done.set()
+                action = threading.Thread(target=lifecycle)
+                action.start()
+                self.assertTrue(locked.wait(1))
+                callback = threading.Thread(target=ros_callbacks)
+                callback.start()
+                try:
+                    self.assertTrue(callbacks_done.wait(.2), "ROS executor blocked behind lifecycle locks")
+                    checkup._go_to.update_pose.assert_not_called()
+                    experiment.update_ee_pose.assert_not_called()
+                    experiment.record_mapper_local_mode.assert_not_called()
+                    node._parameter_list_client.service_is_ready.assert_not_called()
+                finally:
+                    release.set()
+                    action.join(1)
+                    callback.join(1)
+        checkup.try_update_ee_pose("fresh pose")
+        checkup._go_to.update_pose.assert_called_once_with("fresh pose")
+        modes._status, modes._active_mode = "active", "snake"
+        self.assertEqual(modes.try_active_mode(), "snake")
 
 
 class FakeFuture:

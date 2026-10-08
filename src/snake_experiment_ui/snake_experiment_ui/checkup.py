@@ -303,6 +303,14 @@ class CheckupController:
                 raise CheckupError(str(error)) from error
             return self.snapshot()
 
+    def try_update_ee_pose(self, message) -> None:
+        """Keep ROS protection callbacks running while a check-up action waits."""
+        if self._lock.acquire(blocking=False):
+            try:
+                self.update_ee_pose(message)
+            finally:
+                self._lock.release()
+
     def update_ee_pose(self, message) -> None:
         if self._go_to is not None:
             self._go_to.update_pose(message)

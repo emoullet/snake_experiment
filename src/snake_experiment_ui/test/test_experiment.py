@@ -1257,6 +1257,40 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(attempt["stop_reason"], "interface_shutdown")
         self.assertFalse(self.rosbag.active)
 
+    def test_deferred_go_to_finish_cannot_restore_control_after_protection_interruption(self):
+        self.prepare_session()
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        queued = []
+        self.controller._go_to._feedback_finish_dispatch = lambda callback, record: queued.append((callback, record))
+        self.controller.prepare_training_trial("mode_1_training")
+        self.complete_go_to("target_out_1")
+        self.assertEqual(len(queued), 1)
+        self.assertIsNone(self.modes.active)
+        self.controller.interrupt_overload({"event": 1, "state": "locked", "reason": "completed"})
+        callback, record = queued.pop()
+        callback(record)  # Even after a rearm, this old restoration was revoked.
+        self.assertIsNone(self.modes.active)
+        self.assertFalse(self.controller.snapshot()["control_active"])
+
+    def test_training_without_acquisition_reports_telemetry_loss_precisely(self):
+        self.prepare_session()
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller._command_allowed = lambda: False
+        self.controller.interrupt_overload({"event": 0, "state": "unavailable", "reason": "no_fresh_status"})
+        state = self.controller.snapshot()
+        block = next(v for v in state["progress"]["blocks"] if v["id"] == "mode_1_training")
+        self.assertIn("Protection status unavailable or stale", block["error"])
+        self.assertNotIn("Effort overload", block["error"])
+        self.assertFalse(state["control_active"])
+        self.assertFalse(self.rosbag.active)
+        persisted = json.loads((self.participant_folder / "experiment_progress.json").read_text())
+        saved = next(v for v in persisted["blocks"] if v["id"] == "mode_1_training")
+        self.assertEqual(saved["protection_interruption"]["reason"], "no_fresh_status")
+
     def test_overload_invalidates_recording_and_requires_incident_review(self):
         self.start_first_recording_block()
         block_id = "mode_1_recording"

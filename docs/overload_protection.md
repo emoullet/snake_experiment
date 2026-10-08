@@ -36,6 +36,10 @@ L’interface affiche l’alarme, la cible, l’adaptation éventuelle de l’or
 
 L’essai en cours est marqué interrompu avant la finalisation du rosbag, avec un incident `effort_overload` à décrire. Sa réussite n’est pas créditée pendant le recul. Les segments Discovery interrompus sont incomplets et invalides. La revue d’incidents reste disponible lorsque les commandes sont verrouillées.
 
+Une perte de télémétrie de protection affiche « Protection status unavailable or stale » et conserve la raison dans `protection_interruption` du bloc. Pendant une acquisition, son incident porte la source `protection_status_unavailable`. Après rétablissement de la télémétrie, le contrôle nécessite une activation explicite ; le réarmement du contrôleur est nécessaire s’il reste verrouillé. Le terminal journalise chaque coupure avec son état, sa raison, son numéro d’événement et sa force. Les anciens états de démarrage conservés dans la file de transitions ne remplacent pas l’état courant pour décider d’une perte de télémétrie.
+
+La finalisation d’un Go-to arrivé à sa cible utilise un worker séparé : la restauration du mapper ne bloque pas les callbacks ROS de télémétrie. Une intervention de la protection révoque toute restauration différée de ce mouvement, même si le contrôleur est réarmé avant son traitement.
+
 Le journal `safety/overload_events.jsonl` se trouve dans le dossier participant, ou dans `repository_root` pendant le check-up. L’historique des phases est conservé dans le contrôleur, y compris les transitions plus courtes que la période de publication ROS. Le journal enregistre les transitions, la pose initiale, les cibles originale et adaptée, le résultat et le réarmement, séparément des données des essais.
 
 ## Estimation de force et matériel réel

@@ -87,6 +87,7 @@ class GoToController:
         timeout_sec: float = 30.0,
         monotonic_clock: Callable[[], float] = time.monotonic,
         utc_clock: Callable[[], str] = _utc_now,
+        feedback_finish_dispatch: Callable = lambda callback, record: callback(record),
     ) -> None:
         if min(linear_tolerance_m, angular_tolerance_rad, dwell_sec, timeout_sec) <= 0:
             raise ValueError("Go-to tolerances and time limits must be positive.")
@@ -100,6 +101,7 @@ class GoToController:
         self._timeout_sec = timeout_sec
         self._clock = monotonic_clock
         self._utc_clock = utc_clock
+        self._feedback_finish_dispatch = feedback_finish_dispatch
         self._lock = threading.RLock()
         self._current: Optional[dict] = None
         self._started_monotonic: Optional[float] = None
@@ -201,7 +203,7 @@ class GoToController:
             if self._current["dwell_sec"] >= self._dwell_sec:
                 callback, record = self._finish_locked("succeeded", "target_reached")
         if callback:
-            callback(record)
+            self._feedback_finish_dispatch(callback, record)
 
     def stop(self, reason: str = "operator_stop") -> dict:
         callback = None

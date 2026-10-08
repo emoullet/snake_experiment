@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 import json
 import queue
 from pathlib import Path
@@ -37,7 +38,7 @@ from .session_web_app import create_session_app
 from .stack_manager import StackManager
 from .storage import default_calibration_path
 from .calibration import CalibrationError
-from .overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal
+from .overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal, protection_action_state
 
 
 CONTROLLER_REQUEST_TIMEOUT_SEC = 5.0
@@ -164,12 +165,14 @@ class SessionInterfaceNode(Node):
         preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share, robot=preview_robot)
         self._robot_preview = RobotPreview(configuration=preview_configuration, robot=preview_robot)
         self._snake_button_monitor = SnakeButtonMonitor(preview_configuration.snake_button_index)
+        self._go_to_finish_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="go-to-finish")
         go_to_options = {
             "publish_target": self._publish_pose_target,
             "publish_passthrough": self._publish_passthrough,
             "preflight": self._go_to_preflight,
             "timeout_sec": float(self.get_parameter("go_to_timeout_sec").value),
             "dwell_sec": float(self.get_parameter("go_to_dwell_sec").value),
+            "feedback_finish_dispatch": self._dispatch_go_to_finish,
         }
         self._checkup_go_to = GoToController(**go_to_options)
         self._experiment_go_to = GoToController(**go_to_options)
@@ -444,6 +447,9 @@ class SessionInterfaceNode(Node):
                 state = self._protection_events.get_nowait()
             except queue.Empty:
                 state = self._protection.snapshot()
+            journal_state = state
+            current_state = self._protection.snapshot()
+            state = protection_action_state(state, current_state)
             try:
                 if self._stack_manager.snapshot()["status"] not in ("active", "error"):
                     continue
@@ -454,6 +460,10 @@ class SessionInterfaceNode(Node):
                 if state["blocked"] and not self._protection_restarting and (identity != seen or self._protection_cleanup_pending):
                     seen = identity
                     self._protection_cleanup_pending = True
+                    self.get_logger().warning(
+                        f"Session protection cutoff: state={state['state']}, reason={state['reason']}, "
+                        f"event={state.get('event', 0)}, force_N={state.get('force_norm_N')}."
+                    )
                     self._publish_passthrough()
                     self._checkup_go_to.cancel_if_active("effort_overload")
                     self._experiment_go_to.cancel_if_active("effort_overload")
@@ -464,8 +474,9 @@ class SessionInterfaceNode(Node):
                     if active:
                         self._mode_manager.deactivate(active)
                     self._protection_cleanup_pending = False
-                state["robot"] = self._protection.robot
-                journal.append(folder / "safety/overload_events.jsonl", state, {"block": context.get("block")})
+                journal_state["robot"] = self._protection.robot
+                journal.append(folder / "safety/overload_events.jsonl", journal_state, {"block": context.get("block")})
+                state = current_state
                 # Install a complete configuration atomically. Never replace an
                 # ongoing retreat's targets, and never leave an old participant's
                 # targets installed if the next calibration is invalid.
@@ -503,11 +514,24 @@ class SessionInterfaceNode(Node):
                 # A failed cleanup must continue blocking rearm and mode activation.
                 self._protection_shutdown.wait(1.0)
 
+    def _dispatch_go_to_finish(self, callback, record):
+        # Restoring a mapper waits on process discovery. Never run that wait in
+        # the ROS feedback callback that also feeds protection telemetry.
+        if not self._closing:
+            self._go_to_finish_executor.submit(self._run_go_to_finish, callback, record)
+
+    def _run_go_to_finish(self, callback, record):
+        if not self._closing:
+            try:
+                callback(record)
+            except Exception as error:
+                self.get_logger().error(f"Go-to finalisation: {error}")
+
     def _record_ee_pose(self, message: PoseStamped) -> None:
         self._diagnostics.record("/ee_pose", message)
         checkup = getattr(self, "_checkup", None)
         if checkup is not None and not self._protection.snapshot()["blocked"]:
-            checkup.update_ee_pose(message)
+            checkup.try_update_ee_pose(message)
         experiment = getattr(self, "_experiment", None)
         if experiment is not None:
             experiment.try_update_ee_pose(message)
@@ -544,7 +568,7 @@ class SessionInterfaceNode(Node):
         if self._mapper_client_reset_requested.is_set():
             self._reset_mapper_parameter_clients()
         self._refresh_controllers()
-        active_mode = self._mode_manager.active_mode()
+        active_mode = self._mode_manager.try_active_mode()
         if (
             active_mode is not None
             and self._parameter_list_client.service_is_ready()
@@ -775,6 +799,7 @@ class SessionInterfaceNode(Node):
                 self._server_thread.join(timeout=3.0)
             except KeyboardInterrupt:
                 pass
+        self._go_to_finish_executor.shutdown(wait=True, cancel_futures=True)
         self._experiment.shutdown()
         self._checkup.shutdown()
         return super().destroy_node()

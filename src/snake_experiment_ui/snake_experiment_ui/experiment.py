@@ -278,6 +278,7 @@ class ExperimentController:
         self._monotonic_clock = monotonic_clock
         self._thread_factory = thread_factory
         self._go_to = go_to_controller
+        self._go_to_generation = 0
         self._presentation_video = Path(presentation_video).expanduser().resolve() if presentation_video else None
         self._mode_explanation_videos = {
             mode: Path(path).expanduser().resolve() if path else None
@@ -446,6 +447,7 @@ class ExperimentController:
     def interrupt_overload(self, episode: dict) -> None:
         """Called by the protection worker; recorder finalisation cannot delay cutoff."""
         with self._lock:
+            self._go_to_generation += 1
             if self._go_to is not None:
                 self._go_to.cancel_if_active("effort_overload")
             if self._participant is None or self._progress is None:
@@ -456,7 +458,16 @@ class ExperimentController:
                 return
             block = self._block(current)
             block["control_active"] = False
-            block["error"] = "Effort overload: user control remains locked until explicit rearm."
+            unavailable = episode.get("state") == "unavailable" or episode.get("reason") == "no_fresh_status"
+            source = "protection_status_unavailable" if unavailable else "effort_overload"
+            block["protection_interruption"] = {
+                "state": episode.get("state"), "reason": episode.get("reason"),
+                "event": episode.get("event"), "instance": episode.get("instance"),
+            }
+            block["error"] = (
+                "Protection status unavailable or stale: user control stopped. Restore fresh telemetry, then explicitly activate control again."
+                if unavailable else "Effort overload: user control remains locked until explicit rearm."
+            )
             self._error = block["error"]
             if block["phase"] in TRIAL_PHASES and block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload"):
                 trial = self._current_training_trial(block)
@@ -466,7 +477,8 @@ class ExperimentController:
                 attempt["incidents"].append({
                     "id": max((v.get("id", 0) for v in attempt["incidents"]), default=0) + 1,
                     "at_utc": self._utc_clock(), "text": None, "described_at_utc": None,
-                    "source": "effort_overload", "protection_event": episode.get("event"),
+                    "source": source, "protection_event": episode.get("event"),
+                    "protection_reason": episode.get("reason"),
                 })
                 block["training_workflow"] = "stopping_overload"
                 # Persist the interruption before any potentially slow recorder call.
@@ -763,6 +775,8 @@ class ExperimentController:
                 raise ExperimentError("Restart the stack before using Go-to.")
             if self._modes.active_mode() != block["mode"]:
                 raise ExperimentError("The block mapper is not active.")
+            self._go_to_generation += 1
+            generation = self._go_to_generation
             try:
                 pose = self._calibration_pose(pose_id)
                 self._modes.deactivate(block["mode"])
@@ -771,7 +785,7 @@ class ExperimentController:
                     pose_id,
                     pose,
                     context={"scope": "experiment", "block_id": block_id},
-                    on_finish=lambda record: self._finish_go_to(block_id, record),
+                    on_finish=lambda record: self._finish_go_to(block_id, record, generation),
                 )
             except Exception as error:
                 try:
@@ -807,7 +821,7 @@ class ExperimentController:
         if self._go_to is not None:
             self._go_to.cancel_if_active("browser_disconnect")
 
-    def _finish_go_to(self, block_id: str, record: dict) -> None:
+    def _finish_go_to(self, block_id: str, record: dict, generation=None) -> None:
         with self._lock:
             if self._progress is None or self._participant is None:
                 return
@@ -833,6 +847,8 @@ class ExperimentController:
             }
             if (
                 record.get("stop_reason") not in no_restore_reasons
+                and (generation is None or generation == self._go_to_generation)
+                and self._command_allowed()
                 and self._progress.get("current_block") == block_id
                 and block.get("status") == "running"
                 and self._stack.snapshot().get("status") == "active"

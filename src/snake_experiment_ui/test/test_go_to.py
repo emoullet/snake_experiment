@@ -43,6 +43,27 @@ class GoToControllerTest(unittest.TestCase):
             "target_1", pose(1.0), on_finish=self.finished.append
         )
 
+    def test_feedback_completion_can_be_dispatched_without_waiting_for_callback(self):
+        queued = []
+        self.controller = GoToController(
+            publish_target=self.targets.append,
+            publish_passthrough=lambda: self.passthrough.append(True),
+            monotonic_clock=lambda: self.now,
+            feedback_finish_dispatch=lambda callback, record: queued.append((callback, record)),
+        )
+        self.start()
+        self.controller.update_pose(message(pose(1.0)))
+        self.now += .6
+        self.controller.update_pose(message(pose(1.0)))
+        self.assertEqual(self.controller.snapshot()["current"]["status"], "succeeded")
+        self.assertEqual(self.finished, [])
+        self.assertEqual(len(queued), 1)
+        self.controller.update_pose(message(pose(1.0)))
+        self.assertEqual(len(queued), 1)
+        callback, record = queued.pop()
+        callback(record)
+        self.assertEqual(len(self.finished), 1)
+
     def test_requires_stable_arrival_then_finishes(self):
         self.start()
         self.controller.update_pose(message(pose(1.0)))

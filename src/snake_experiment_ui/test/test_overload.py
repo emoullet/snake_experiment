@@ -9,7 +9,7 @@ import pytest
 
 from snake_experiment_ui.calibration import CalibrationError
 from snake_experiment_ui.gripper_gate import GripperGate
-from snake_experiment_ui.overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal
+from snake_experiment_ui.overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal, protection_action_state
 from snake_experiment_ui.session_web_app import create_session_app
 
 
@@ -53,14 +53,27 @@ def test_invalid_calibrations_cannot_install_partial_targets(corruption):
     with pytest.raises(CalibrationError): recovery_parameters(document, "kinova")
 
 
+def test_queued_startup_and_telemetry_states_do_not_override_live_protection():
+    clear = {"state": "normal", "blocked": False, "fresh": True, "event": 0}
+    startup = {"state": "normal", "blocked": True, "fresh": True, "event": 0}
+    stale = {"state": "unavailable", "blocked": True, "fresh": False, "event": 0}
+    assert protection_action_state(startup, clear) is clear
+    assert protection_action_state(stale, clear) is clear
+    assert protection_action_state(clear, stale) is stale
+    episode = {"state": "locked", "blocked": True, "fresh": True, "event": 1}
+    assert protection_action_state(episode, clear) is episode
+    assert protection_action_state(episode, stale) is episode
+
+
 def test_status_fail_closed_and_freshness():
     tick = [0.]
     monitor = ProtectionState("kinova", lambda: tick[0])
-    with pytest.raises(ProtectionError): monitor.require_clear()
+    with pytest.raises(ProtectionError, match="absent ou périmé"): monitor.require_clear()
     assert not monitor.record(status(), ros_now=10.1)["blocked"]
     monitor.require_clear()
     tick[0] = .51
     assert monitor.snapshot()["blocked"]
+    with pytest.raises(ProtectionError, match="absent ou périmé"): monitor.require_clear()
     for invalid in (status(robot="explorer"), status(enabled="false"), status(force_valid="false"), status(force_norm_N="nan"),
                     status(state="locked", blocked="false"), NS(status=[])):
         assert monitor.record(invalid)["blocked"]

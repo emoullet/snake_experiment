@@ -16,6 +16,18 @@ class ProtectionError(RuntimeError):
     pass
 
 
+def protection_action_state(queued, current):
+    """Retain latched controller episodes; decide telemetry loss from live state.
+
+    Startup and unavailable snapshots in the transition queue are historical.
+    Their freshness must not override a subsequently received healthy status.
+    A real controller episode still needs cleanup even if processing was delayed.
+    """
+    if queued.get("blocked") and queued.get("event", 0) > 0 and queued.get("state") != "unavailable":
+        return queued
+    return current
+
+
 def recovery_parameters(document, robot):
     """Validate all three poses together, without transforming unknown frames."""
     validate_calibration_robot(document, robot)
@@ -102,7 +114,10 @@ class ProtectionState:
                     "reason": self._value.get("reason", "no_fresh_status") if fresh else "no_fresh_status"}
 
     def require_clear(self):
-        if self.snapshot()["blocked"]:
+        state = self.snapshot()
+        if state["state"] == "unavailable":
+            raise ProtectionError("État de protection absent ou périmé : commandes verrouillées. Vérifier la stack et la réception de /qontrol_explorer/overload_status.")
+        if state["blocked"]:
             raise ProtectionError("Commandes verrouillées par la protection de surcharge. Vérifier l’alarme puis réarmer explicitement.")
 
 
