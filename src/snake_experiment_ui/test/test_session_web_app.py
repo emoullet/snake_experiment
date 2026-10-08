@@ -319,6 +319,36 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             [("start", "mode_1_discovery"), ("end", "mode_1_discovery", True)],
         )
 
+    async def test_only_inactive_discovery_can_bootstrap_without_protection_status(self):
+        from snake_experiment_ui.overload import ProtectionError
+        from snake_experiment_ui.session_web_app import create_session_app
+        root = Path(self.temporary_directory.name)
+        state = {"phase": "discovery", "status": "inactive"}
+        self.checkup.workflow = "validated"
+        self.enrollment.view = "D"
+        original_snapshot = self.experiment.snapshot
+        def snapshot():
+            result = original_snapshot()
+            result["progress"]["blocks"] = [{"id": "mode_1_discovery", "phase": state["phase"]}]
+            result["stack"] = {"status": state["status"]}
+            return result
+        self.experiment.snapshot = snapshot
+        def guard():
+            raise ProtectionError("No fresh protection status")
+        self.app = create_session_app(self.checkup, root / "static", root / "templates",
+            self.enrollment, self.experiment, protection_guard=guard)
+        start = "/api/experiment/blocks/mode_1_discovery/start"
+        self.assertEqual((await self.request("POST", start)).status_code, 200)
+        self.assertEqual(self.experiment.calls, [("start", "mode_1_discovery")])
+        # Entering the explanation workflow must not unlock control/recording.
+        self.assertEqual((await self.request("POST", "/api/experiment/blocks/mode_1_discovery/control",
+            json={"active": True})).status_code, 409)
+        for phase, status in (("discovery", "active"), ("discovery", "error"),
+                              ("training", "inactive"), ("recording", "inactive")):
+            state.update(phase=phase, status=status)
+            self.assertEqual((await self.request("POST", start)).status_code, 409)
+        self.assertEqual(self.experiment.calls, [("start", "mode_1_discovery")])
+
     async def test_discovery_control_and_restart_routes(self):
         self.checkup.workflow = "validated"
         self.enrollment.view = "D"

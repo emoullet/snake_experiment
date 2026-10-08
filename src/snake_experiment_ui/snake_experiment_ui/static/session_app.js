@@ -399,7 +399,7 @@ class SessionInterface {
     this.setDisabled(document.getElementById("protection-rearm"), this.busy || !state.fresh || !state.rearm_ready || state.cleanup_pending);
     this.setDisabled(document.getElementById("protection-stop"), !state.fresh || !["translating", "waiting_clear", "rotating"].includes(state.state));
     if (blocked) {
-      document.querySelectorAll("[data-mode-start], [data-checkup-go-to], [data-block-start], [data-block-control], [data-restart-stack], [data-block-go-to], [data-trial-action='start'], [data-trial-action='prepare']").forEach(button => this.setDisabled(button, true));
+      document.querySelectorAll("[data-mode-start], [data-checkup-go-to], [data-block-start]:not([data-stack-bootstrap]), [data-block-control], [data-restart-stack], [data-block-go-to], [data-trial-action='start'], [data-trial-action='prepare']").forEach(button => this.setDisabled(button, true));
     }
   }
 
@@ -578,12 +578,13 @@ class SessionInterface {
       const labels = { not_started: "Locked", starting: "Starting", running: "Running", completed: "Complete", interrupted: "Interrupted", error: "Error" };
       const pillClass = block.status === "completed" ? "pill--active" : ["interrupted", "error"].includes(block.status) ? "pill--warning" : "pill--neutral";
       const startable = isNext && ["not_started", "interrupted", "error"].includes(block.status) && progress.workflow !== "sequence_completed" && ["completed", "legacy_skipped"].includes(presentation.status);
+      const stackBootstrap = block.phase === "discovery" && experiment.stack.status === "inactive";
       const verb = block.status === "interrupted" ? "Resume" : block.status === "error" ? "Retry" : "Start";
       return `<article class="block-entry${isNext ? " is-next" : ""}" data-dom-key="block:${this.escape(block.id)}">
         <span class="block-order">${block.order}</span>
         <div class="block-copy"><strong>${this.escape(this.title(block.mode))} · ${this.escape(this.title(block.phase))}</strong><span>${this.escape(block.mode_role.replace("_", " "))} · folder ${this.escape(block.folder)}${block.attempts ? ` · ${block.attempts} attempt${block.attempts === 1 ? "" : "s"}` : ""}</span></div>
         <span class="pill ${pillClass}">${labels[block.status] || this.escape(block.status)}</span>
-        <button class="secondary-button" data-block-start="${this.escape(block.id)}" type="button" ${this.busy || !startable ? "disabled" : ""}>${verb} ${this.escape(block.phase)}</button>
+        <button class="secondary-button" data-block-start="${this.escape(block.id)}" ${stackBootstrap ? "data-stack-bootstrap" : ""} type="button" ${this.busy || !startable ? "disabled" : ""}>${verb} ${this.escape(block.phase)}</button>
       </article>`;
     }).join(""));
     const warnings = document.getElementById("experiment-warning");

@@ -121,7 +121,20 @@ def create_session_app(
             or path == "/api/checkup/go-to"
             or path.startswith("/api/experiment/blocks/") and path.endswith(("/start", "/control", "/restart-stack", "/go-to", "/ready", "/prepare"))
         )
-        if request.method == "POST" and commands and protection_guard is not None:
+        # Discovery starts only the stack and explanation workflow. It does not
+        # activate a mapper or recorder, so it can bootstrap an inactive stack
+        # whose protection status cannot yet be fresh.
+        discovery_bootstrap = False
+        parts = path.split("/")
+        if (request.method == "POST" and experiment is not None
+                and len(parts) == 6 and parts[1:4] == ["api", "experiment", "blocks"]
+                and parts[5] == "start"):
+            snapshot = await asyncio.to_thread(experiment.snapshot)
+            block = next((item for item in (snapshot.get("progress") or {}).get("blocks", [])
+                          if item["id"] == parts[4]), None)
+            discovery_bootstrap = bool(block and block["phase"] == "discovery"
+                                       and snapshot.get("stack", {}).get("status") == "inactive")
+        if request.method == "POST" and commands and not discovery_bootstrap and protection_guard is not None:
             try:
                 protection_guard()
             except ProtectionError as error:

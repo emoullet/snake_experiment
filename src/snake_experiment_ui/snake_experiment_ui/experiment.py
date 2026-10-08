@@ -976,11 +976,11 @@ class ExperimentController:
         with self._lock:
             _, folder = self._require_prepared()
             block = self._running_block(block_id)
+            if active and not self._command_allowed():
+                raise ExperimentError("Rearm overload protection before activating control.")
             if block["phase"] in TRIAL_PHASES:
                 if not active:
                     raise ExperimentError("Stop the acquisition or use the protection stop before disabling trial control.")
-                if not self._command_allowed():
-                    raise ExperimentError("Rearm overload protection before activating control.")
                 if block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload") or (self._go_to and self._go_to.active()):
                     raise ExperimentError("Wait for the current acquisition or motion to stop.")
                 if self._stack.snapshot().get("status") != "active":

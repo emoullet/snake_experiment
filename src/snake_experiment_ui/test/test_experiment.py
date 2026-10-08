@@ -449,6 +449,24 @@ class ExperimentControllerTest(unittest.TestCase):
         recording_block = profile.blocks("snake->baseline")[3]
         self.assertEqual(len(recording_block["training_trials"]), 9)
 
+    def test_discovery_bootstrap_starts_stack_without_control_or_recording(self):
+        self.mark_as_new_session()
+        self.controller.prepare(self.participant)
+        self.controller.show_presentation()
+        self.controller.complete_presentation()
+        self.controller._command_allowed = lambda: False
+        self.assertEqual(self.stack.status, "inactive")
+        state = self.controller.start("mode_1_discovery")
+        self.assertEqual(state["current_view"], "E")
+        self.assertEqual(self.stack.status, "active")
+        self.assertFalse(state["control_active"])
+        self.assertEqual(self.modes.activations, [])
+        self.assertEqual(self.rosbag.starts, [])
+        self.controller.show_mode_explanation("mode_1_discovery")
+        self.controller.complete_mode_explanation("mode_1_discovery")
+        with self.assertRaises(ExperimentError):
+            self.controller.set_control("mode_1_discovery", True)
+
     def test_sequence_is_strict_and_abort_resumes_same_folder(self):
         self.prepare_session()
         with self.assertRaisesRegex(ExperimentError, "next required"):
