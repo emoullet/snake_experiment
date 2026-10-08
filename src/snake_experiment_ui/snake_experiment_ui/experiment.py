@@ -459,14 +459,18 @@ class ExperimentController:
             block = self._block(current)
             block["control_active"] = False
             unavailable = episode.get("state") == "unavailable" or episode.get("reason") == "no_fresh_status"
-            source = "protection_status_unavailable" if unavailable else "effort_overload"
+            feedback_fault = episode.get("reason") in ("invalid_pose", "invalid_force_estimate", "invalid_feedback")
+            source = "protection_status_unavailable" if unavailable else ("protection_feedback_fault" if feedback_fault else "effort_overload")
             block["protection_interruption"] = {
                 "state": episode.get("state"), "reason": episode.get("reason"),
                 "event": episode.get("event"), "instance": episode.get("instance"),
             }
             block["error"] = (
                 "Protection status unavailable or stale: user control stopped. Restore fresh telemetry, then explicitly activate control again."
-                if unavailable else "Effort overload: user control remains locked until explicit rearm."
+                if unavailable else (
+                    f"Invalid robot feedback ({episode.get('reason')}): user control locked; retreat unavailable or stopped. Restore valid feedback, then explicitly rearm protection."
+                    if feedback_fault else "Effort overload: user control remains locked until explicit rearm."
+                )
             )
             self._error = block["error"]
             if block["phase"] in TRIAL_PHASES and block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload"):
@@ -483,9 +487,9 @@ class ExperimentController:
                 block["training_workflow"] = "stopping_overload"
                 # Persist the interruption before any potentially slow recorder call.
                 self._persist_training(folder, block, trial, attempt)
-                self._finish_training_attempt(block, folder, "effort_overload", successful=False)
+                self._finish_training_attempt(block, folder, source, successful=False)
             elif block["phase"] == "discovery" and block.get("current_segment"):
-                self._deactivate_discovery(block, folder, "effort_overload")
+                self._deactivate_discovery(block, folder, source)
             else:
                 self._persist(folder)
                 self._write_block(folder, block)
@@ -1856,7 +1860,7 @@ class ExperimentController:
             segment,
             result,
             reason,
-            "complete" if result.get("valid") and reason != "effort_overload" else "incomplete",
+            "complete" if result.get("valid") and reason not in ("effort_overload", "protection_feedback_fault", "protection_status_unavailable") else "incomplete",
         )
         block["control_active"] = False
         block["current_segment"] = None
@@ -1903,7 +1907,7 @@ class ExperimentController:
         segment["message_counts"] = dict(result.get("message_counts", {}))
         segment["missing_topics"] = list(result.get("missing_topics", segment["topics"]))
         segment["metadata_error"] = result.get("metadata_error")
-        segment["valid"] = bool(result.get("valid")) and reason != "effort_overload"
+        segment["valid"] = bool(result.get("valid")) and reason not in ("effort_overload", "protection_feedback_fault", "protection_status_unavailable")
 
     @staticmethod
     def _can_end(block: dict) -> bool:

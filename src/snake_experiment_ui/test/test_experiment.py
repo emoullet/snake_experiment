@@ -1291,6 +1291,20 @@ class ExperimentControllerTest(unittest.TestCase):
         saved = next(v for v in persisted["blocks"] if v["id"] == "mode_1_training")
         self.assertEqual(saved["protection_interruption"]["reason"], "no_fresh_status")
 
+    def test_feedback_fault_is_not_reported_as_effort_overload(self):
+        self.prepare_session()
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        for reason in ("invalid_pose", "invalid_force_estimate", "invalid_feedback"):
+            self.controller.interrupt_overload({"event": 1, "state": "error", "reason": reason})
+            state = self.controller.snapshot()
+            block = next(v for v in state["progress"]["blocks"] if v["id"] == "mode_1_training")
+            self.assertIn("Invalid robot feedback", block["error"])
+            self.assertIn(reason, block["error"])
+            self.assertNotIn("Effort overload", block["error"])
+            self.assertFalse(state["control_active"])
+
     def test_overload_invalidates_recording_and_requires_incident_review(self):
         self.start_first_recording_block()
         block_id = "mode_1_recording"
@@ -1325,6 +1339,19 @@ class ExperimentControllerTest(unittest.TestCase):
         restored = self.controller.set_control(block_id, True)
         self.assertTrue(restored["control_active"])
         self.assertFalse(self.rosbag.active)  # No automatic acquisition restart.
+
+    def test_feedback_fault_during_discovery_invalidates_segment(self):
+        self.prepare_session()
+        self.controller.start("mode_1_discovery")
+        self.controller.show_mode_explanation("mode_1_discovery")
+        self.controller.complete_mode_explanation("mode_1_discovery")
+        self.controller.set_control("mode_1_discovery", True)
+        self.controller.interrupt_overload({"event": 1, "state": "error", "reason": "invalid_pose"})
+        state = self.controller.snapshot()
+        self.assertFalse(state["control_active"])
+        self.assertFalse(state["segments"][0]["valid"])
+        self.assertEqual(state["segments"][0]["status"], "incomplete")
+        self.assertEqual(state["segments"][0]["stop_reason"], "protection_feedback_fault")
 
     def test_overload_during_discovery_marks_segment_incomplete(self):
         self.prepare_session()

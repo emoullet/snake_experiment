@@ -17,7 +17,7 @@ Le recul comporte deux phases :
 1. Translation vers la cible, en conservant l’orientation initiale.
 2. Après une seconde de force valide et sans surcharge, rotation vers l’orientation choisie, en maintenant la position cible.
 
-Les limites maximales sont 0,02 m/s et 0,15 rad/s. Les tolérances sont 5 mm et 5°, avec un maintien de 0,5 s. Le délai global est de 30 s. Un arrêt opérateur, une estimation invalide, des états articulaires périmés, une erreur du solveur ou une nouvelle surcharge pendant la rotation interrompent le recul et maintiennent le verrou. Une surcharge persistante pendant la translation ne déclenche pas plusieurs reculs.
+Les limites maximales sont 0,02 m/s et 0,15 rad/s. Les tolérances sont 5 mm et 5°, avec un maintien de 0,5 s. Le délai global est de 30 s. Un arrêt opérateur, une estimation invalide, un retour matériel invalide, une erreur du solveur ou une nouvelle surcharge pendant la rotation interrompent le recul et maintiennent le verrou. Une surcharge persistante pendant la translation ne déclenche pas plusieurs reculs.
 
 Le contrôleur protège le bras indépendamment du navigateur et du nœud d’interface. Le relais de pince appartient à la stack, et non au serveur web. Il faut laisser cette stack et ses contrôleurs actifs pour effectuer le recul. Cette trajectoire cartésienne ne planifie pas d’évitement d’obstacles : la position « out » choisie doit être appropriée à l’environnement expérimental.
 
@@ -30,11 +30,11 @@ Les services `std_srvs/srv/Trigger` sont :
 - `/qontrol_explorer/stop_recovery` : arrêt du recul, maintien du verrou.
 - `/qontrol_explorer/rearm_overload` : demande de réarmement explicitement vérifiée dans le contrôleur.
 
-Le réarmement exige une force valide et claire pendant 1 s, les axes joystick 0 et 1 dans la zone neutre et tous les boutons relâchés pendant 0,5 s, des `/joint_states` complets et récents, et un recul terminé ou arrêté. Les messages de joystick et d’état doivent continuer à arriver. Aucun mapper, Go-to ou enregistrement précédent n’est restauré par le réarmement.
+Le réarmement exige une force valide et claire pendant 1 s, les axes joystick 0 et 1 dans la zone neutre et tous les boutons relâchés pendant 0,5 s, ou une absence de messages `/joy` pendant 1 s, un état matériel valide lu directement dans le cycle `ros2_control`, et un recul terminé ou arrêté. Le silence joystick devient acceptable après 0,5 s sans message, puis cette condition doit rester vraie pendant 0,5 s. Un joystick n’ayant jamais publié est également accepté après la temporisation de 0,5 s. Tout nouveau message non neutre ou avec un bouton pressé empêche le réarmement. Les retards de publication de `/joint_states` ne déclenchent pas la protection : ce topic ne fournit pas le retour matériel du contrôleur. Un retour matériel ou une estimation de force invalide verrouille les commandes sans recul ; la cause initiale reste affichée jusqu’au réarmement. Aucun mapper, Go-to ou enregistrement précédent n’est restauré par le réarmement.
 
 L’interface affiche l’alarme, la cible, l’adaptation éventuelle de l’orientation, l’arrêt et le réarmement. Les routes de commande refusent également les actions incompatibles. Après réarmement, réactiver explicitement le mode dans le check-up, ou **Activate control** dans Training/Recording. En Discovery, utiliser le bouton habituel d’activation du contrôle et de l’enregistrement.
 
-L’essai en cours est marqué interrompu avant la finalisation du rosbag, avec un incident `effort_overload` à décrire. Sa réussite n’est pas créditée pendant le recul. Les segments Discovery interrompus sont incomplets et invalides. La revue d’incidents reste disponible lorsque les commandes sont verrouillées.
+L’essai en cours est marqué interrompu avant la finalisation du rosbag, avec un incident `effort_overload` (surcharge) ou `protection_feedback_fault` (retour invalide) à décrire. Sa réussite n’est pas créditée pendant le recul. Les segments Discovery interrompus sont incomplets et invalides. La revue d’incidents reste disponible lorsque les commandes sont verrouillées.
 
 Une perte de télémétrie de protection affiche « Protection status unavailable or stale » et conserve la raison dans `protection_interruption` du bloc. Pendant une acquisition, son incident porte la source `protection_status_unavailable`. Après rétablissement de la télémétrie, le contrôle nécessite une activation explicite ; le réarmement du contrôleur est nécessaire s’il reste verrouillé. Le terminal journalise chaque coupure avec son état, sa raison, son numéro d’événement et sa force. Les anciens états de démarrage conservés dans la file de transitions ne remplacent pas l’état courant pour décider d’une perte de télémétrie.
 
@@ -117,7 +117,7 @@ Terminal 1 :
 cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-ROS_DOMAIN_ID=91 ros2 launch snake_experiment_ui kinova.launch.py \
+ROS_DOMAIN_ID=173 ros2 launch snake_experiment_ui kinova.launch.py \
   use_simulation:=true overload_protection:=true
 ```
 
@@ -127,13 +127,13 @@ Terminal 2 :
 cd /home/emoullet/dev/robot_experiments/snake_experiment
 source /opt/ros/jazzy/setup.bash
 source /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641/install/setup.bash
-ROS_DOMAIN_ID=91 python3 scripts/check_overload_simulation.py
+ROS_DOMAIN_ID=173 python3 scripts/check_overload_simulation.py
 ```
 
-Ce test vérifie le recul, la stabilité de la pince malgré les commandes adverses, le verrouillage et l’absence de reprise des anciennes commandes après réarmement. Arrêter ensuite cette stack avec Ctrl+C ; la relancer recharge la calibration de session.
+Ce test vérifie aussi qu’une pause du diffuseur `/joint_states` ne crée pas de faux défaut du bras, puis le recul, la stabilité de la pince malgré les commandes adverses, le refus de réarmement avec un joystick actif, son autorisation après silence joystick, le verrouillage et l’absence de reprise des anciennes commandes après réarmement. Arrêter ensuite cette stack avec Ctrl+C ; la relancer recharge la calibration de session.
 
 ## Vérifications effectuées et restantes
 
-Exécutées : compilation des deux packages, test C++, tests Python de protection et de sessions, scénario ROS Kinova fictif, suspension/reprise du broadcaster articulaire avec refus de réarmement sur données périmées, et vérification du navigateur (alarme, commandes désactivées, arrêt, réarmement, absence d’erreurs JavaScript). Un échec Python préexistant compare la copie d’un ancien launch Explorer au launch actuellement présent dans le sous-module `cartesian_manager`.
+Exécutées : compilation des deux packages, test C++, tests Python de protection et de sessions, scénario ROS Kinova fictif, suspension/reprise du broadcaster articulaire sans faux défaut du bras, et vérification du navigateur (alarme, commandes désactivées, arrêt, réarmement, absence d’erreurs JavaScript). Un échec Python préexistant compare la copie d’un ancien launch Explorer au launch actuellement présent dans le sous-module `cartesian_manager`.
 
 À vérifier sur le matériel réel : estimation et seuil de force pour chaque robot, maintien de la pince en mouvement, trajectoire de translation puis rotation dans l’environnement de l’expérience, limites articulaires et cible irréalisable, comportement sous charge et arrêt opérateur. Le lancement et le recul Explorer en simulation complète restent également à tester.
