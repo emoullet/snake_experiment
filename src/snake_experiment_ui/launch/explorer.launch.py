@@ -1,7 +1,7 @@
 """Launch the Explorer stack without a joystick mapper."""
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, IncludeLaunchDescription
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
@@ -12,6 +12,8 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
+from snake_experiment_ui.protected_launch import protected_controllers
+
 
 def generate_launch_description():
     gui = LaunchConfiguration("gui")
@@ -21,6 +23,7 @@ def generate_launch_description():
     )
 
     arguments = [
+        DeclareLaunchArgument("overload_protection", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument(
             "gui",
             default_value="true",
@@ -74,18 +77,6 @@ def generate_launch_description():
         condition=UnlessCondition(use_simulation),
     )
 
-    spawner_qontrol = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["qontrol_explorer", "--controller-manager", "/controller_manager"],
-    )
-    delayed_spawner_qontrol = TimerAction(period=2.0, actions=[spawner_qontrol])
-    spawner_gripper_controller = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["gripper_controller", "--controller-manager", "/controller_manager"],
-        output="screen",
-    )
     manager_node = Node(
         package="cartesian_manager",
         executable="cartesian_manager_node",
@@ -100,8 +91,7 @@ def generate_launch_description():
         + [
             robot_simulation,
             robot_hardware,
-            delayed_spawner_qontrol,
-            spawner_gripper_controller,
+            OpaqueFunction(function=protected_controllers, kwargs={"robot": "explorer"}),
             manager_node,
             joy_node,
         ]

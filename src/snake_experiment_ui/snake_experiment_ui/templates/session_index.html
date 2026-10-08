@@ -28,6 +28,16 @@
         <div class="step is-locked" data-view-step="G"><span>Recording</span></div>
       </nav>
 
+      <section id="protection-panel" class="card" role="alert" aria-live="assertive" hidden>
+        <div class="section-heading"><h2>Overload protection</h2><span id="protection-status" class="pill pill--error">Locked</span></div>
+        <p id="protection-message"></p>
+        <p class="supporting-copy">User arm and gripper commands remain blocked. Rearm requires clear force for 1 s, a neutral joystick with all buttons released for 0.5 s, and fresh robot state. Rearming does not restore control automatically.</p>
+        <div class="action-row">
+          <button id="protection-stop" class="reject-button" data-protection="stop" type="button">Stop retreat</button>
+          <button id="protection-rearm" class="secondary-button" data-protection="rearm" type="button">Rearm protection</button>
+        </div>
+      </section>
+
       <section id="view-b" class="view-page">
         <section class="hero-card">
           <div>

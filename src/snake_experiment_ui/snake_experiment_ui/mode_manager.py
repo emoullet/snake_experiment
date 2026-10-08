@@ -39,9 +39,11 @@ class ModeManager:
         popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
         sleep: Callable[[float], None] = time.sleep,
         robot: str = "explorer",
+        command_guard: Callable[[], None] = lambda: None,
     ) -> None:
         if robot not in ("explorer", "kinova"):
             raise ModeError(f"Unknown experiment robot: {robot}")
+        self._command_guard = command_guard
         self._robot = robot
         self._node_names = node_names
         self._publish_mode_request = publish_mode_request
@@ -95,6 +97,7 @@ class ModeManager:
         if mode not in MODES:
             raise ModeError(f"Unknown control mode: {mode}")
         with self._lock:
+            self._command_guard()
             self._refresh_process_state()
             if self._status == "active" and self._active_mode == mode:
                 self._publish_mode_request(MODES[mode]["mode_request"])
@@ -140,6 +143,11 @@ class ModeManager:
                 if self._process is None:
                     raise ModeError(self._error or "Joystick mapper failed to start.")
                 if self._mapper_visible():
+                    try:
+                        self._command_guard()
+                    except Exception:
+                        self._stop_locked()
+                        raise
                     self._active_mode = mode
                     self._status = "active"
                     self._publish_mode_request(MODES[mode]["mode_request"])

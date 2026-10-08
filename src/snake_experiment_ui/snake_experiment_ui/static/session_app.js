@@ -18,6 +18,8 @@ class SessionInterface {
         event.preventDefault();
         return;
       }
+      const protection = event.target.closest("[data-protection]");
+      if (protection) return this.post(`/api/protection/${protection.dataset.protection}`);
       const stack = event.target.closest("[data-stack]");
       if (stack) return this.post(`/api/stack/${stack.dataset.stack}`);
       const start = event.target.closest("[data-mode-start]");
@@ -379,6 +381,29 @@ class SessionInterface {
   }
 
   render() {
+    this.renderPage();
+    this.renderProtection();
+  }
+
+  renderProtection() {
+    const state = this.state?.protection;
+    const panel = document.getElementById("protection-panel");
+    if (!panel) return;
+    const stackActive = this.state?.stack?.status === "active";
+    const blocked = Boolean(state?.blocked || state?.cleanup_pending || state?.configuration === "pending");
+    this.setHidden(panel, !state || !stackActive || (!blocked && state?.configuration === "ready"));
+    if (!state) return;
+    const phases = { translating: "Retreat: translation", waiting_clear: "Waiting for clear force", rotating: "Retreat: rotation", locked: "Retreat complete · locked", error: "Protection locked", unavailable: "Protection status unavailable", normal: "Protection ready" };
+    this.setText(document.getElementById("protection-status"), phases[state.state] || state.state);
+    this.setText(document.getElementById("protection-message"), `${state.force_estimation_verified === false ? "Physical force estimation has not been verified. Validate effort signs and gravity compensation before enabling and rearming protection." : state.reason || ""} · ${state.target || "no retreat target"}${state.flipped ? " · orientation adapted by π around tool Z" : ""} · ${state.configuration || "pending"}`);
+    this.setDisabled(document.getElementById("protection-rearm"), this.busy || !state.fresh || !state.rearm_ready || state.cleanup_pending);
+    this.setDisabled(document.getElementById("protection-stop"), !state.fresh || !["translating", "waiting_clear", "rotating"].includes(state.state));
+    if (blocked) {
+      document.querySelectorAll("[data-mode-start], [data-checkup-go-to], [data-block-start], [data-block-control], [data-restart-stack], [data-block-go-to], [data-trial-action='start'], [data-trial-action='prepare']").forEach(button => this.setDisabled(button, true));
+    }
+  }
+
+  renderPage() {
     if (!this.state) return;
     const currentView = this.state.current_view;
     const onViewC = currentView === "C";
@@ -685,7 +710,7 @@ class SessionInterface {
           <section class="card"><div class="section-heading"><div><p class="step-number">Current trial</p><h2>${current ? `Trial ${current.id} · cycle ${current.cycle} · target ${current.target_start} → ${current.target_end}` : experiment.can_end ? "All trials resolved" : "Prepare the next trial"}</h2></div><span class="supporting-copy">${current ? this.escape(current.folder) : this.escape(block.folder)}</span></div>
             <div class="training-metrics"><article><span>Start linear error</span><strong>${errorValue(live.start_error, "linear_mm")}</strong></article><article><span>Start angular error</span><strong>${errorValue(live.start_error, "angular_deg")}</strong></article><article><span>Target linear error</span><strong>${errorValue(live.target_error, "linear_mm")}</strong></article><article><span>Target angular error</span><strong>${errorValue(live.target_error, "angular_deg")}</strong></article></div>
             <p class="supporting-copy">${live.error ? this.escape(live.error) : current ? `Place the robot at target_out_${current.target_start}. Arrival success is measured at target_${current.target_end}.` : "The mapper remains active between trials."}</p>
-            <div class="training-actions"><button class="secondary-button" data-trial-action="prepare" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canPrepare ? "disabled" : ""}>Prepare next trial and move to start</button><button class="primary-button" data-trial-action="start" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canStart ? "disabled" : ""}>Start recording</button><button class="reject-button" data-trial-action="stop" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !recording ? "disabled" : ""}>Stop recording</button></div>
+            <div class="training-actions"><button class="secondary-button" data-block-control="${this.escape(block.id)}" data-active="true" type="button" ${experiment.control_active ? "hidden" : ""} ${this.busy || recording || experiment.go_to?.motion?.active ? "disabled" : ""}>Activate control</button><button class="secondary-button" data-trial-action="prepare" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canPrepare ? "disabled" : ""}>Prepare next trial and move to start</button><button class="primary-button" data-trial-action="start" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canStart ? "disabled" : ""}>Start recording</button><button class="reject-button" data-trial-action="stop" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !recording ? "disabled" : ""}>Stop recording</button></div>
             <div class="decision-card" ${workflow === "decision_required" ? "" : "hidden"}><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-trial-resolve="retry" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-trial-resolve="advance_with_deviation" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Continue with deviation</button></div></div>
             <p class="inline-error" ${block.error ? "" : "hidden"}>${this.escape(block.error || "")}</p></section>
           <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Incident occurrences</h2></div><span class="pill ${reviewRequired ? "pill--warning" : incidents.length ? "pill--error" : "pill--neutral"}">${incidents.length} occurrence${incidents.length === 1 ? "" : "s"}</span></div>${incidentView}</section>

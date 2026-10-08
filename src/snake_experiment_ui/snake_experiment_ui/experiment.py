@@ -262,7 +262,12 @@ class ExperimentController:
         state_images: Optional[dict] = None,
         snake_button_provider: Optional[Callable[[], Optional[bool]]] = None,
         robot: str = "explorer",
+        command_allowed: Callable[[], bool] = lambda: True,
+        wait_for_control: Callable[[], None] = lambda: None,
     ) -> None:
+        self._command_allowed = command_allowed
+        self._wait_for_control = wait_for_control
+        self._protection_context_cache = {"folder": None, "block": None, "calibration": None}
         self._robot = robot
         self._source_profile = profile
         self._profile = profile
@@ -423,7 +428,55 @@ class ExperimentController:
             self._progress = progress
             self._current_view = "D"
             self._error = None
+            self._cache_protection_context()
             return self.snapshot()
+
+    def _cache_protection_context(self):
+        self._protection_context_cache = {
+            "folder": self._participant.get("folder") if self._participant else None,
+            "block": self._progress.get("current_block") if self._progress else None,
+            "calibration": self._calibration,
+        }
+
+    def protection_context(self) -> dict:
+        # A configuration worker must remain able to configure a newly spawned
+        # controller while restart_stack holds the workflow lock.
+        return dict(self._protection_context_cache)
+
+    def interrupt_overload(self, episode: dict) -> None:
+        """Called by the protection worker; recorder finalisation cannot delay cutoff."""
+        with self._lock:
+            if self._go_to is not None:
+                self._go_to.cancel_if_active("effort_overload")
+            if self._participant is None or self._progress is None:
+                return
+            folder = Path(self._participant["folder"])
+            current = self._progress.get("current_block")
+            if not current:
+                return
+            block = self._block(current)
+            block["control_active"] = False
+            block["error"] = "Effort overload: user control remains locked until explicit rearm."
+            self._error = block["error"]
+            if block["phase"] in TRIAL_PHASES and block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload"):
+                trial = self._current_training_trial(block)
+                attempt = self._current_training_attempt(trial)
+                attempt["status"] = "interrupted"
+                attempt["valid"] = False
+                attempt["incidents"].append({
+                    "id": max((v.get("id", 0) for v in attempt["incidents"]), default=0) + 1,
+                    "at_utc": self._utc_clock(), "text": None, "described_at_utc": None,
+                    "source": "effort_overload", "protection_event": episode.get("event"),
+                })
+                block["training_workflow"] = "stopping_overload"
+                # Persist the interruption before any potentially slow recorder call.
+                self._persist_training(folder, block, trial, attempt)
+                self._finish_training_attempt(block, folder, "effort_overload", successful=False)
+            elif block["phase"] == "discovery" and block.get("current_segment"):
+                self._deactivate_discovery(block, folder, "effort_overload")
+            else:
+                self._persist(folder)
+                self._write_block(folder, block)
 
     def show_presentation(self) -> dict:
         with self._lock:
@@ -776,6 +829,7 @@ class ExperimentController:
                 "block_end",
                 "restart_stack",
                 "stack_stop",
+                "effort_overload",
             }
             if (
                 record.get("stop_reason") not in no_restore_reasons
@@ -922,8 +976,24 @@ class ExperimentController:
         with self._lock:
             _, folder = self._require_prepared()
             block = self._running_block(block_id)
+            if block["phase"] in TRIAL_PHASES:
+                if not active:
+                    raise ExperimentError("Stop the acquisition or use the protection stop before disabling trial control.")
+                if not self._command_allowed():
+                    raise ExperimentError("Rearm overload protection before activating control.")
+                if block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload") or (self._go_to and self._go_to.active()):
+                    raise ExperimentError("Wait for the current acquisition or motion to stop.")
+                if self._stack.snapshot().get("status") != "active":
+                    raise ExperimentError("Start the stack before activating control.")
+                self._modes.activate(block["mode"])
+                block["control_active"] = True
+                block["error"] = None
+                self._error = None
+                self._persist(folder)
+                self._write_block(folder, block)
+                return self.snapshot()
             if block["phase"] != "discovery":
-                raise ExperimentError("Control toggling is available only during discovery.")
+                raise ExperimentError("Control toggling is unavailable in this phase.")
             if active and block["mode_explanation"]["status"] != "completed":
                 raise ExperimentError("Validate the mode explanation before activating control.")
             if bool(block["control_active"]) == bool(active):
@@ -1235,11 +1305,27 @@ class ExperimentController:
             self._persist_training(folder, block, trial, attempt)
             return self.snapshot()
 
+    def try_update_ee_pose(self, message) -> None:
+        # Recorder finalisation can hold the workflow lock. ROS status callbacks
+        # must keep running so every protection phase reaches the journal/UI.
+        if self._lock.acquire(blocking=False):
+            try:
+                self.update_ee_pose(message)
+            finally:
+                self._lock.release()
+
+    def try_record_mapper_local_mode(self, state) -> None:
+        if self._lock.acquire(blocking=False):
+            try:
+                self.record_mapper_local_mode(state)
+            finally:
+                self._lock.release()
+
     def update_ee_pose(self, message) -> None:
         """Update live training errors and schedule success finalisation."""
         worker = None
         with self._lock:
-            if self._go_to is not None:
+            if self._go_to is not None and self._command_allowed():
                 self._go_to.update_pose(message)
             try:
                 self._latest_pose = self._pose_document(message)
@@ -1256,7 +1342,7 @@ class ExperimentController:
             if block["phase"] not in TRIAL_PHASES:
                 return
             self._refresh_training_live(block)
-            if block["training_workflow"] != "recording":
+            if block["training_workflow"] != "recording" or not self._command_allowed():
                 return
             trial = self._current_training_trial(block)
             attempt = self._current_training_attempt(trial)
@@ -1339,6 +1425,7 @@ class ExperimentController:
                     block["control_active"] = False
                 self._stack.stop()
                 self._stack.start()
+                self._wait_for_control()
                 if restore_control:
                     if block["phase"] == "discovery":
                         self._activate_discovery(block, folder)
@@ -1385,6 +1472,7 @@ class ExperimentController:
             attempt = self._current_training_attempt(trial)
             if (
                 attempt["number"] != attempt_number
+                or not self._command_allowed()
                 or block.get("training_workflow") != "stopping_success"
             ):
                 return
@@ -1752,7 +1840,7 @@ class ExperimentController:
             segment,
             result,
             reason,
-            "complete" if result.get("valid") else "incomplete",
+            "complete" if result.get("valid") and reason != "effort_overload" else "incomplete",
         )
         block["control_active"] = False
         block["current_segment"] = None
@@ -1799,7 +1887,7 @@ class ExperimentController:
         segment["message_counts"] = dict(result.get("message_counts", {}))
         segment["missing_topics"] = list(result.get("missing_topics", segment["topics"]))
         segment["metadata_error"] = result.get("metadata_error")
-        segment["valid"] = bool(result.get("valid"))
+        segment["valid"] = bool(result.get("valid")) and reason != "effort_overload"
 
     @staticmethod
     def _can_end(block: dict) -> bool:
@@ -1833,6 +1921,7 @@ class ExperimentController:
             if (
                 self._progress.get("workflow") == "block_running"
                 and self._progress.get("current_block")
+                and self._command_allowed()
             ):
                 block = self._block(self._progress["current_block"])
                 if block["phase"] == "discovery":
@@ -1868,7 +1957,7 @@ class ExperimentController:
                     stack_or_mapper_failed = (
                         stack_state.get("status") != "active"
                         or (
-                            not go_to_active
+                            block["control_active"] and not go_to_active
                             and (
                                 mapper_state.get("status") != "active"
                                 or mapper_state.get("active_mode") != block["mode"]
@@ -2355,6 +2444,7 @@ class ExperimentController:
         return block
 
     def _persist(self, folder: Path) -> None:
+        self._cache_protection_context()
         self._progress["updated_at_utc"] = self._utc_clock()
         _atomic_json(folder / "experiment_progress.json", self._progress)
 

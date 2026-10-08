@@ -28,6 +28,8 @@ class StackManager:
         sleep: Callable[[float], None] = time.sleep,
         robot: str = "explorer",
         robot_ip: str = "192.168.1.10",
+        overload_protection: bool = False,
+        before_start: Callable[[], None] = lambda: None,
     ) -> None:
         if robot not in ("explorer", "kinova"):
             raise StackError(f"Unknown experiment robot: {robot}")
@@ -36,6 +38,8 @@ class StackManager:
                 IPv4Address(robot_ip)
             except AddressValueError as error:
                 raise StackError(f"Invalid Kinova IPv4 address: {robot_ip}") from error
+        self._before_start = before_start
+        self._overload_protection = overload_protection
         self._robot = robot
         self._robot_ip = robot_ip
         self._node_names = node_names
@@ -91,6 +95,7 @@ class StackManager:
                     "A cartesian_manager node is already running outside this interface."
                 )
 
+            self._before_start()
             self._status = "starting"
             self._error = None
             command = [
@@ -102,6 +107,8 @@ class StackManager:
             ]
             if self._robot == "kinova":
                 command.append(f"robot_ip:={self._robot_ip}")
+            if self._overload_protection:
+                command.append("overload_protection:=true")
             try:
                 self._process = self._popen_factory(command, start_new_session=True)
             except OSError as error:

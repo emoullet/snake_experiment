@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import queue
 from pathlib import Path
 import threading
 import time
@@ -12,7 +14,10 @@ from controller_manager_msgs.srv import ListControllers
 from geometry_msgs.msg import PoseStamped, TwistStamped
 import rclpy
 from rcl_interfaces.msg import ParameterType
-from rcl_interfaces.srv import GetParameters, ListParameters
+from rcl_interfaces.srv import GetParameters, ListParameters, SetParametersAtomically
+from diagnostic_msgs.msg import DiagnosticArray
+from std_srvs.srv import Trigger
+from rclpy.parameter import Parameter
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState, Joy
@@ -30,6 +35,8 @@ from .rosbag_manager import RosbagManager
 from .robot_preview import PreviewConfiguration, RobotPreview, SnakeButtonMonitor
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
+from .calibration import CalibrationError
+from .overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal
 
 
 CONTROLLER_REQUEST_TIMEOUT_SEC = 5.0
@@ -40,6 +47,7 @@ class SessionInterfaceNode(Node):
 
     def __init__(self) -> None:
         super().__init__("snake_experiment_session_interface")
+        self._closing = False
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("port", 8081)
         self.declare_parameter("stack_robot", "explorer")
@@ -102,6 +110,13 @@ class SessionInterfaceNode(Node):
         self._mapper_client_generation = 0
         self._mapper_client_reset_requested = threading.Event()
 
+        self._protection = ProtectionState(str(self.get_parameter("stack_robot").value))
+        self._protection_events = queue.SimpleQueue()
+        self._protection_last_enqueued = None
+        self._protection_shutdown = threading.Event()
+        self._protection_cleanup_pending = False
+        self._protection_configuration = "pending"
+        self._protection_restarting = False
         self._mode_publisher = self.create_publisher(String, "/mode_request", 10)
         self._pose_target_publisher = self.create_publisher(
             PoseStamped, "/pose_target", 10
@@ -111,6 +126,7 @@ class SessionInterfaceNode(Node):
             node_names=self._node_names,
             publish_mode_request=self._publish_mode_request,
             mapper_transition=self._request_mapper_client_reset,
+            command_guard=self._require_protection_clear,
             startup_timeout_sec=float(
                 self.get_parameter("mode_startup_timeout_sec").value
             ),
@@ -124,6 +140,8 @@ class SessionInterfaceNode(Node):
             robot_ip=str(self.get_parameter("stack_robot_ip").value),
             node_names=self._node_names,
             use_simulation=use_simulation,
+            overload_protection=True,
+            before_start=self._before_stack_start,
             startup_timeout_sec=float(
                 self.get_parameter("stack_startup_timeout_sec").value
             ),
@@ -156,6 +174,8 @@ class SessionInterfaceNode(Node):
         self._experiment_go_to = GoToController(**go_to_options)
 
         self._subscriptions = [
+            self.create_subscription(DiagnosticArray, "/qontrol_explorer/overload_status",
+                self._record_protection, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)),
             self.create_subscription(
                 JointState,
                 "/joint_states",
@@ -205,6 +225,9 @@ class SessionInterfaceNode(Node):
                 ),
             ),
         ]
+        self._protection_parameters = self.create_client(SetParametersAtomically, "/qontrol_explorer/set_parameters_atomically")
+        self._protection_rearm = self.create_client(Trigger, "/qontrol_explorer/rearm_overload")
+        self._protection_stop = self.create_client(Trigger, "/qontrol_explorer/stop_recovery")
         self._controller_client = self.create_client(
             ListControllers, "/controller_manager/list_controllers"
         )
@@ -223,6 +246,7 @@ class SessionInterfaceNode(Node):
             if configured_calibration
             else Path.cwd() / "calibrations/latest_calib.json"
         )
+        self._protection_calibration_file = calibration_file
         self._checkup = CheckupController(
             robot=preview_robot,
             stack_manager=self._stack_manager,
@@ -269,6 +293,8 @@ class SessionInterfaceNode(Node):
         }
         self._experiment = ExperimentController(
             robot=preview_robot,
+            command_allowed=lambda: not self._protection.snapshot()["blocked"],
+            wait_for_control=self._wait_control_configuration,
             profile=self._experiment_profile,
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
@@ -288,7 +314,7 @@ class SessionInterfaceNode(Node):
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
             experiment_profile=experiment_profile_path,
-            experiment_prepare=self._experiment.prepare,
+            experiment_prepare=self._prepare_protected_experiment,
             robot_configuration={
                 "id": preview_robot,
                 "model": preview_configuration.public["robot"],
@@ -301,6 +327,8 @@ class SessionInterfaceNode(Node):
                 },
             },
         )
+        self._protection_thread = threading.Thread(target=self._protection_worker, name="session-protection", daemon=True)
+        self._protection_thread.start()
         app = create_session_app(
             self._checkup,
             static_directory=share / "static",
@@ -311,7 +339,11 @@ class SessionInterfaceNode(Node):
             mode_explanation_videos=mode_explanation_videos,
             state_images=state_images,
             robot_preview=self._robot_preview,
+            protection_snapshot=self._protection_snapshot,
+            protection_guard=self._require_protection_clear,
+            protection_action=self._protection_action,
         )
+        self._app = app
         config = uvicorn.Config(
             app,
             host=str(self.get_parameter("host").value),
@@ -329,14 +361,155 @@ class SessionInterfaceNode(Node):
         port = self.get_parameter("port").value
         self.get_logger().info(f"Views B-G available at http://{host}:{port}")
 
+    def _before_stack_start(self):
+        self._protection_restarting = True
+        self._protection_configuration = "pending"
+        self._protection.invalidate()
+
+    def _wait_control_configuration(self):
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if self._protection_configuration != "pending" and self._protection.snapshot()["fresh"]:
+                self._require_protection_clear()
+                return
+            if self._protection_shutdown.wait(0.05):
+                break
+        raise ProtectionError("La stack n’a pas fourni un état de protection prêt après son redémarrage.")
+
+    def _prepare_protected_experiment(self, participant):
+        previous = self._protection_configuration
+        self._protection_configuration = "pending"
+        try:
+            return self._experiment.prepare(participant)
+        except Exception:
+            self._protection_configuration = previous
+            raise
+
+    def _record_protection(self, message):
+        # This callback only updates a small status object and enqueues events.
+        # No process wait, file I/O or recorder shutdown runs in the ROS executor.
+        state = self._protection.record(message, self.get_clock().now().nanoseconds * 1e-9)
+        identity = (state.get("instance"), state.get("event"), state["state"], state["reason"])
+        if identity != self._protection_last_enqueued:
+            self._protection_events.put(state)
+            self._protection_last_enqueued = identity
+
+    def _protection_snapshot(self):
+        state = self._protection.snapshot()
+        state.update(robot=self._protection.robot, configuration=self._protection_configuration,
+                     cleanup_pending=self._protection_cleanup_pending)
+        return state
+
+    def _require_protection_clear(self):
+        if self._closing:
+            raise ProtectionError("L’interface est en cours d’arrêt.")
+        self._protection.require_clear()
+        if self._protection_cleanup_pending or self._protection_configuration == "pending":
+            raise ProtectionError("La protection termine la configuration ou l’arrêt de l’acquisition.")
+
+    def _wait_ros_result(self, future):
+        complete = threading.Event()
+        future.add_done_callback(lambda ignored: complete.set())
+        if not complete.wait(5.0):
+            raise ProtectionError("Le contrôleur ne répond pas à la demande de protection.")
+        return future.result()
+
+    def _protection_action(self, command):
+        if self._closing:
+            raise ProtectionError("L’interface est en cours d’arrêt.")
+        if self._stack_manager.snapshot()["status"] not in ("active", "error"):
+            raise ProtectionError("Aucune stack appartenant à cette interface n’est active.")
+        if command not in ("stop", "rearm"):
+            raise ProtectionError("Action de protection inconnue.")
+        if command == "rearm":
+            state = self._protection_snapshot()
+            if not state["fresh"] or not state.get("rearm_ready") or state["cleanup_pending"]:
+                raise ProtectionError("Réarmement indisponible : force claire 1 s, joystick neutre 0,5 s et recul terminé ou arrêté requis.")
+            self._publish_passthrough()
+        client = self._protection_rearm if command == "rearm" else self._protection_stop
+        if not client.service_is_ready():
+            raise ProtectionError("Service de protection indisponible.")
+        result = self._wait_ros_result(client.call_async(Trigger.Request()))
+        if not result.success:
+            raise ProtectionError(result.message)
+        return self._protection_snapshot()
+
+    def _protection_worker(self):
+        seen = None
+        configuration_key = None
+        journal = EventJournal()
+        while not self._protection_shutdown.wait(0.05):
+            try:
+                state = self._protection_events.get_nowait()
+            except queue.Empty:
+                state = self._protection.snapshot()
+            try:
+                if self._stack_manager.snapshot()["status"] not in ("active", "error"):
+                    continue
+                context = self._experiment.protection_context()
+                folder = Path(context["folder"]) if context.get("folder") else self._repository_root
+                # A new event, or loss of fresh status during control, interrupts once.
+                identity = (state.get("instance"), state.get("event"), state.get("state") == "unavailable")
+                if state["blocked"] and not self._protection_restarting and (identity != seen or self._protection_cleanup_pending):
+                    seen = identity
+                    self._protection_cleanup_pending = True
+                    self._publish_passthrough()
+                    self._checkup_go_to.cancel_if_active("effort_overload")
+                    self._experiment_go_to.cancel_if_active("effort_overload")
+                    # Persist the interrupted trial before waiting on mapper or recorder processes.
+                    self._experiment.interrupt_overload(state)
+                    self._checkup.interrupt_overload()
+                    active = self._mode_manager.active_mode()
+                    if active:
+                        self._mode_manager.deactivate(active)
+                    self._protection_cleanup_pending = False
+                state["robot"] = self._protection.robot
+                journal.append(folder / "safety/overload_events.jsonl", state, {"block": context.get("block")})
+                # Install a complete configuration atomically. Never replace an
+                # ongoing retreat's targets, and never leave an old participant's
+                # targets installed if the next calibration is invalid.
+                if not state.get("fresh") or state.get("state") in ("translating", "waiting_clear", "rotating"):
+                    continue
+                document = context.get("calibration")
+                if document is None:
+                    document = self._checkup.protection_calibration()
+                if document is None:
+                    try:
+                        document = json.loads(self._protection_calibration_file.read_text())
+                    except (OSError, ValueError):
+                        document = None
+                key = json.dumps(document, sort_keys=True)
+                # Reload after every controller restart even if the file is unchanged.
+                key = (key, state.get("instance"))
+                if (key != configuration_key or self._protection_configuration == "pending") and self._protection_parameters.service_is_ready():
+                    try:
+                        parameters = recovery_parameters(document, self._protection.robot)
+                        configuration = "ready"
+                    except (CalibrationError, TypeError) as error:
+                        parameters = {"overload_protection.out_positions": [], "overload_protection.out_orientations": []}
+                        configuration = "cutoff_only: " + str(error)
+                    request = SetParametersAtomically.Request()
+                    request.parameters = [Parameter(name, Parameter.Type.DOUBLE_ARRAY if isinstance(value, list) else Parameter.Type.STRING, value).to_parameter_msg()
+                                          for name, value in parameters.items()]
+                    response = self._wait_ros_result(self._protection_parameters.call_async(request))
+                    if not response.result.successful:
+                        raise ProtectionError(response.result.reason)
+                    configuration_key = key
+                    self._protection_configuration = configuration
+                    self._protection_restarting = False
+            except Exception as error:
+                self.get_logger().error(f"Protection session: {error}")
+                # A failed cleanup must continue blocking rearm and mode activation.
+                self._protection_shutdown.wait(1.0)
+
     def _record_ee_pose(self, message: PoseStamped) -> None:
         self._diagnostics.record("/ee_pose", message)
         checkup = getattr(self, "_checkup", None)
-        if checkup is not None:
+        if checkup is not None and not self._protection.snapshot()["blocked"]:
             checkup.update_ee_pose(message)
         experiment = getattr(self, "_experiment", None)
         if experiment is not None:
-            experiment.update_ee_pose(message)
+            experiment.try_update_ee_pose(message)
 
     def _record_joint_states(self, message: JointState) -> None:
         self._diagnostics.record("/joint_states", message)
@@ -347,6 +520,8 @@ class SessionInterfaceNode(Node):
         self._snake_button_monitor.record(message)
 
     def _node_names(self):
+        if self._closing:
+            return []
         return [
             f"{namespace.rstrip('/')}/{name}" if namespace != "/" else name
             for name, namespace in self.get_node_names_and_namespaces()
@@ -465,7 +640,7 @@ class SessionInterfaceNode(Node):
 
     def _record_mapper_local_mode(self, message: String) -> None:
         if hasattr(self, "_experiment"):
-            self._experiment.record_mapper_local_mode(message.data)
+            self._experiment.try_record_mapper_local_mode(message.data)
 
     def _reset_mapper_parameter_clients(self) -> None:
         self._mapper_client_generation += 1
@@ -550,12 +725,15 @@ class SessionInterfaceNode(Node):
         return list(observed) if value.type >= ParameterType.PARAMETER_BYTE_ARRAY else observed
 
     def _publish_mode_request(self, request: str) -> None:
+        if request != "behaviour/passthrough":
+            self._require_protection_clear()
         message = String()
         message.data = request
         self._mode_publisher.publish(message)
         self.get_logger().info(f"Published control mode request: {request}")
 
     def _publish_pose_target(self, pose: dict) -> None:
+        self._require_protection_clear()
         message = PoseStamped()
         message.header.stamp = self.get_clock().now().to_msg()
         message.header.frame_id = pose["frame_id"]
@@ -567,6 +745,8 @@ class SessionInterfaceNode(Node):
         self.get_logger().info("Published Cartesian pose target")
 
     def _publish_passthrough(self) -> None:
+        if self._closing or not rclpy.ok():
+            return
         message = String()
         message.data = "behaviour/passthrough"
         self._mode_publisher.publish(message)
@@ -583,16 +763,19 @@ class SessionInterfaceNode(Node):
         return None
 
     def destroy_node(self):
-        self._experiment.shutdown()
-        self._checkup.shutdown()
+        # End web polling and background ROS users before destroying handles.
+        self._closing = True
+        self._app.state.shutting_down = True
         self._server.should_exit = True
+        self._protection_shutdown.set()
+        self._protection_thread.join(timeout=6.0)
         if self._server_thread.is_alive():
             try:
                 self._server_thread.join(timeout=3.0)
             except KeyboardInterrupt:
-                # ros2 launch can relay SIGINT while shutdown is already in
-                # progress. Owned ROS processes have already been stopped.
                 pass
+        self._experiment.shutdown()
+        self._checkup.shutdown()
         return super().destroy_node()
 
 

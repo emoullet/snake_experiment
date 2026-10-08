@@ -7,10 +7,11 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .overload import ProtectionError
 from .checkup import CheckupError
 from .diagnostics import DiagnosticProfileError
 from .enrollment import EnrollmentError
@@ -101,10 +102,38 @@ def create_session_app(
     mode_explanation_videos=None,
     state_images=None,
     robot_preview=None,
+    protection_snapshot=None,
+    protection_guard=None,
+    protection_action=None,
 ):
     """Create the View B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
     websocket_clients = 0
+    app.state.shutting_down = False
+
+    @app.middleware("http")
+    async def protect_commands(request, call_next):
+        if app.state.shutting_down and request.method == "POST":
+            return JSONResponse(status_code=503, content={"detail": "Session interface is shutting down."})
+        path = request.url.path
+        commands = (
+            path.startswith("/api/checkup/modes/") and path.endswith(("/start", "/retry"))
+            or path == "/api/checkup/go-to"
+            or path.startswith("/api/experiment/blocks/") and path.endswith(("/start", "/control", "/restart-stack", "/go-to", "/ready", "/prepare"))
+        )
+        if request.method == "POST" and commands and protection_guard is not None:
+            try:
+                protection_guard()
+            except ProtectionError as error:
+                return JSONResponse(status_code=409, content={"detail": str(error)})
+        return await call_next(request)
+
+    @app.post("/api/protection/{command}")
+    async def protection_command(command: str):
+        if protection_action is None or command not in ("stop", "rearm"):
+            raise HTTPException(status_code=404, detail="Unknown protection action.")
+        await asyncio.to_thread(action, lambda: protection_action(command))
+        return combined_snapshot()
 
     app.mount(
         "/session-static",
@@ -116,6 +145,7 @@ def create_session_app(
         try:
             return callback()
         except (
+            ProtectionError,
             CheckupError,
             DiagnosticProfileError,
             EnrollmentError,
@@ -193,7 +223,7 @@ def create_session_app(
         await websocket.accept()
         previous = None
         try:
-            while True:
+            while not app.state.shutting_down:
                 current = robot_preview.snapshot()
                 serialised = json.dumps(current, sort_keys=True)
                 if serialised != previous:
@@ -247,7 +277,7 @@ def create_session_app(
         await websocket.accept()
         previous = None
         try:
-            while True:
+            while not app.state.shutting_down:
                 current = experiment.participant_snapshot() if experiment is not None else {
                     "view": "waiting", "presentation_status": "pending", "video_available": False,
                 }
@@ -269,6 +299,8 @@ def create_session_app(
                 view_d = experiment.snapshot()
                 state["current_view"] = view_d["current_view"]
                 state["experiment"] = view_d
+        if protection_snapshot is not None:
+            state["protection"] = protection_snapshot()
         return state
 
     def enrollment_action(callback):
@@ -288,7 +320,7 @@ def create_session_app(
             raise HTTPException(status_code=409, detail="View B is already complete.")
 
     @app.post("/api/stack/{command}")
-    async def stack(command: str):
+    def stack(command: str):
         require_view_b()
         if command == "start":
             return action(checkup.start_stack)
@@ -297,37 +329,37 @@ def create_session_app(
         raise HTTPException(status_code=404, detail="Unknown stack action.")
 
     @app.post("/api/checkup/modes/{mode}/start")
-    async def start_mode(mode: str):
+    def start_mode(mode: str):
         require_view_b()
         return action(lambda: checkup.start_mode(mode))
 
     @app.post("/api/checkup/modes/{mode}/retry")
-    async def retry_mode(mode: str):
+    def retry_mode(mode: str):
         require_view_b()
         return action(lambda: checkup.retry_mode(mode))
 
     @app.post("/api/checkup/modes/{mode}/confirm")
-    async def confirm_mode(mode: str, confirmation: Confirmation):
+    def confirm_mode(mode: str, confirmation: Confirmation):
         require_view_b()
         return action(lambda: checkup.confirm_mode(mode, confirmation.accepted))
 
     @app.post("/api/checkup/validate")
-    async def validate():
+    def validate():
         require_view_b()
         return action(checkup.validate)
 
     @app.post("/api/checkup/reset")
-    async def reset():
+    def reset():
         require_view_b()
         return action(checkup.reset)
 
     @app.post("/api/checkup/go-to")
-    async def start_checkup_go_to(request: GoToRequest):
+    def start_checkup_go_to(request: GoToRequest):
         require_view_b()
         return action(lambda: checkup.start_go_to(request.pose_id))
 
     @app.post("/api/checkup/go-to/stop")
-    async def stop_checkup_go_to():
+    def stop_checkup_go_to():
         require_view_b()
         return action(checkup.stop_go_to)
 
@@ -339,13 +371,13 @@ def create_session_app(
         return action(lambda: enrollment.browse(path))
 
     @app.post("/api/session/root")
-    async def select_root(selection: FolderSelection):
+    def select_root(selection: FolderSelection):
         if enrollment is None:
             raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(lambda: enrollment.select_parent(selection.path))
 
     @app.post("/api/session/folders")
-    async def create_folder(request: FolderCreation):
+    def create_folder(request: FolderCreation):
         if enrollment is None:
             raise HTTPException(status_code=404, detail="View C is not configured.")
         require_view_c()
@@ -354,20 +386,20 @@ def create_session_app(
         )
 
     @app.post("/api/session/pseudonym/regenerate")
-    async def regenerate_pseudonym():
+    def regenerate_pseudonym():
         if enrollment is None:
             raise HTTPException(status_code=404, detail="View C is not configured.")
         require_view_c()
         return action(enrollment.generate_pseudonym)
 
     @app.post("/api/session/new")
-    async def create_participant(form: ParticipantForm):
+    def create_participant(form: ParticipantForm):
         if enrollment is None:
             raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(lambda: enrollment.create_participant(form.dict()))
 
     @app.post("/api/session/resume")
-    async def resume_participant(request: ResumeRequest):
+    def resume_participant(request: ResumeRequest):
         if enrollment is None:
             raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(
@@ -377,19 +409,19 @@ def create_session_app(
         )
 
     @app.post("/api/session/cancel")
-    async def cancel_participant():
+    def cancel_participant():
         if enrollment is None:
             raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(enrollment.cancel)
 
     @app.post("/api/session/reset")
-    async def reset_session():
+    def reset_session():
         if enrollment is None:
             raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(enrollment.reset)
 
     @app.post("/api/session/launch")
-    async def launch_session():
+    def launch_session():
         if enrollment is None:
             raise HTTPException(status_code=404, detail="View C is not configured.")
         return enrollment_action(enrollment.launch)
@@ -408,77 +440,77 @@ def create_session_app(
         return combined_snapshot()
 
     @app.post("/api/experiment/presentation/show")
-    async def show_presentation():
+    def show_presentation():
         return experiment_action(lambda: experiment.show_presentation())
 
     @app.post("/api/experiment/presentation/complete")
-    async def complete_presentation():
+    def complete_presentation():
         return experiment_action(lambda: experiment.complete_presentation())
 
     @app.post("/api/experiment/blocks/{block_id}/start")
-    async def start_experiment_block(block_id: str):
+    def start_experiment_block(block_id: str):
         return experiment_action(lambda: experiment.start(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/explanation/show")
-    async def show_mode_explanation(block_id: str):
+    def show_mode_explanation(block_id: str):
         return experiment_action(lambda: experiment.show_mode_explanation(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/explanation/complete")
-    async def complete_mode_explanation(block_id: str):
+    def complete_mode_explanation(block_id: str):
         return experiment_action(lambda: experiment.complete_mode_explanation(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/end")
-    async def end_experiment_block(block_id: str, request: EndBlockRequest):
+    def end_experiment_block(block_id: str, request: EndBlockRequest):
         return experiment_action(lambda: experiment.end(block_id, request.confirmed))
 
     @app.post("/api/experiment/blocks/{block_id}/abort")
-    async def abort_experiment_block(block_id: str):
+    def abort_experiment_block(block_id: str):
         return experiment_action(lambda: experiment.abort(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/control")
-    async def set_experiment_control(block_id: str, request: ControlRequest):
+    def set_experiment_control(block_id: str, request: ControlRequest):
         return experiment_action(
             lambda: experiment.set_control(block_id, request.active)
         )
 
     @app.post("/api/experiment/blocks/{block_id}/restart-stack")
-    async def restart_experiment_stack(block_id: str):
+    def restart_experiment_stack(block_id: str):
         return experiment_action(lambda: experiment.restart_stack(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/go-to")
-    async def start_experiment_go_to(block_id: str, request: GoToRequest):
+    def start_experiment_go_to(block_id: str, request: GoToRequest):
         return experiment_action(
             lambda: experiment.start_go_to(block_id, request.pose_id)
         )
 
     @app.post("/api/experiment/blocks/{block_id}/go-to/stop")
-    async def stop_experiment_go_to(block_id: str):
+    def stop_experiment_go_to(block_id: str):
         return experiment_action(lambda: experiment.stop_go_to(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/training/prepare")
-    async def prepare_training_trial(block_id: str):
+    def prepare_training_trial(block_id: str):
         return experiment_action(lambda: experiment.prepare_training_trial(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/training/ready")
-    async def confirm_training_ready(block_id: str):
+    def confirm_training_ready(block_id: str):
         return experiment_action(
             lambda: experiment.training_participant_ready(block_id)
         )
 
     @app.post("/api/experiment/blocks/{block_id}/training/start")
-    async def start_training_attempt(block_id: str):
+    def start_training_attempt(block_id: str):
         return experiment_action(lambda: experiment.start_training_attempt(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/training/stop")
-    async def stop_training_attempt(block_id: str):
+    def stop_training_attempt(block_id: str):
         return experiment_action(lambda: experiment.stop_training_attempt(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/training/incidents")
-    async def add_training_incident(block_id: str):
+    def add_training_incident(block_id: str):
         return experiment_action(lambda: experiment.add_training_incident(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/training/incidents/review")
-    async def review_training_incidents(
+    def review_training_incidents(
         block_id: str, request: IncidentReviewRequest
     ):
         return experiment_action(
@@ -490,7 +522,7 @@ def create_session_app(
         )
 
     @app.post("/api/experiment/blocks/{block_id}/training/resolve")
-    async def resolve_training_attempt(
+    def resolve_training_attempt(
         block_id: str, request: TrainingResolutionRequest
     ):
         return experiment_action(
@@ -500,29 +532,29 @@ def create_session_app(
         )
 
     @app.post("/api/experiment/blocks/{block_id}/recording/prepare")
-    async def prepare_recording_trial(block_id: str):
+    def prepare_recording_trial(block_id: str):
         return experiment_action(lambda: experiment.prepare_recording_trial(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/recording/ready")
-    async def confirm_recording_ready(block_id: str):
+    def confirm_recording_ready(block_id: str):
         return experiment_action(
             lambda: experiment.recording_participant_ready(block_id)
         )
 
     @app.post("/api/experiment/blocks/{block_id}/recording/start")
-    async def start_recording_attempt(block_id: str):
+    def start_recording_attempt(block_id: str):
         return experiment_action(lambda: experiment.start_recording_attempt(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/recording/stop")
-    async def stop_recording_attempt(block_id: str):
+    def stop_recording_attempt(block_id: str):
         return experiment_action(lambda: experiment.stop_recording_attempt(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/recording/incidents")
-    async def add_recording_incident(block_id: str):
+    def add_recording_incident(block_id: str):
         return experiment_action(lambda: experiment.add_recording_incident(block_id))
 
     @app.post("/api/experiment/blocks/{block_id}/recording/incidents/review")
-    async def review_recording_incidents(
+    def review_recording_incidents(
         block_id: str, request: IncidentReviewRequest
     ):
         return experiment_action(
@@ -534,7 +566,7 @@ def create_session_app(
         )
 
     @app.post("/api/experiment/blocks/{block_id}/recording/resolve")
-    async def resolve_recording_attempt(
+    def resolve_recording_attempt(
         block_id: str, request: TrainingResolutionRequest
     ):
         return experiment_action(
@@ -550,7 +582,7 @@ def create_session_app(
         websocket_clients += 1
         previous = None
         try:
-            while True:
+            while not app.state.shutting_down:
                 current = combined_snapshot()
                 serialised = json.dumps(current, sort_keys=True)
                 if serialised != previous:

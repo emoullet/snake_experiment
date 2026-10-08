@@ -81,6 +81,21 @@ class CheckupController:
             for mode in ("baseline", "snake")
         }
 
+    def interrupt_overload(self):
+        with self._lock:
+            if self._active_mode is not None:
+                result = self._mode_results[self._active_mode]
+                result["status"] = "failed"
+                result["error"] = "Effort overload interrupted this check. Rearm protection then retry."
+                self._active_mode = None
+                self._diagnostic_deadline = None
+                self._workflow = "error"
+                self._error = result["error"]
+
+    def protection_calibration(self):
+        with self._lock:
+            return self._go_to_calibration
+
     def start_stack(self) -> dict:
         with self._lock:
             if self._workflow == "validated":

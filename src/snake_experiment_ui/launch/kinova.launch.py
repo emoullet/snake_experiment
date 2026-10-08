@@ -1,18 +1,21 @@
 """Launch the seven-axis Gen3/Robotiq stack without a joystick mapper."""
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
+from snake_experiment_ui.protected_launch import protected_controllers
+
 
 def generate_launch_description():
     use_simulation = LaunchConfiguration("use_simulation")
     robot_ip = LaunchConfiguration("robot_ip")
     arguments = [
+        DeclareLaunchArgument("overload_protection", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument(
             "use_simulation", default_value="false", choices=["true", "false"],
             description="Use fake hardware instead of the physical robot (not Gazebo).",
@@ -50,8 +53,7 @@ def generate_launch_description():
         Node(package="controller_manager", executable="ros2_control_node",
              parameters=[description, config], output="screen"),
         spawner("joint_state_broadcaster"),
-        TimerAction(period=2.0, actions=[spawner("qontrol_explorer")]),
-        spawner("gripper_controller"),
+        OpaqueFunction(function=protected_controllers, kwargs={"robot": "kinova"}),
         Node(package="cartesian_manager", executable="cartesian_manager_node",
              name="cartesian_manager",
              parameters=[config, {"frames.ee_frame": "end_effector_link"}], output="screen"),

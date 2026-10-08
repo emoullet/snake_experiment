@@ -1239,6 +1239,56 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(attempt["stop_reason"], "interface_shutdown")
         self.assertFalse(self.rosbag.active)
 
+    def test_overload_invalidates_recording_and_requires_incident_review(self):
+        self.start_first_recording_block()
+        block_id = "mode_1_recording"
+        self.controller.prepare_recording_trial(block_id)
+        trial = self.controller.snapshot()["recording"]["trials"][0]
+        self.complete_go_to(f"target_out_{trial['target_start']}")
+        self.controller.start_recording_attempt(block_id)
+        self.controller._command_allowed = lambda: False
+        observed = []
+        original_stop = self.rosbag.stop
+        def stop():
+            persisted = json.loads((self.participant_folder / "experiment_progress.json").read_text())
+            block = next(v for v in persisted["blocks"] if v["id"] == block_id)
+            observed.append(block["training_workflow"])
+            return original_stop()
+        self.rosbag.stop = stop
+        self.modes.shutdown()  # Expected cutoff must not become a process-failure incident.
+        self.controller.snapshot()
+        self.controller.interrupt_overload({"event": 1})
+        state = self.controller.snapshot()
+        attempt = state["recording"]["trials"][0]["attempts"][0]
+        self.assertEqual(observed, ["stopping_overload"])
+        self.assertFalse(attempt["valid"])
+        self.assertFalse(attempt["technical_outcome"]["successful_motion"])
+        self.assertEqual(attempt["stop_reason"], "effort_overload")
+        self.assertEqual(attempt["incidents"][0]["source"], "effort_overload")
+        self.assertEqual(state["recording"]["workflow"], "incident_review_required")
+        self.assertFalse(self.rosbag.active)
+        self.assertFalse(state["control_active"])
+        self.controller._command_allowed = lambda: True  # Explicit successful controller rearm.
+        self.assertFalse(self.controller.snapshot()["control_active"])
+        restored = self.controller.set_control(block_id, True)
+        self.assertTrue(restored["control_active"])
+        self.assertFalse(self.rosbag.active)  # No automatic acquisition restart.
+
+    def test_overload_during_discovery_marks_segment_incomplete(self):
+        self.prepare_session()
+        self.controller.start("mode_1_discovery")
+        self.controller.show_mode_explanation("mode_1_discovery")
+        self.controller.complete_mode_explanation("mode_1_discovery")
+        self.controller.set_control("mode_1_discovery", True)
+        self.controller._command_allowed = lambda: False
+        self.modes.shutdown()
+        self.controller.interrupt_overload({"event": 2})
+        state = self.controller.snapshot()
+        self.assertFalse(state["control_active"])
+        self.assertEqual(state["segments"][0]["status"], "incomplete")
+        self.assertEqual(state["segments"][0]["stop_reason"], "effort_overload")
+
+
 
 if __name__ == "__main__":
     unittest.main()

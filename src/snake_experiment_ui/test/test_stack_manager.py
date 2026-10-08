@@ -82,6 +82,20 @@ class StackManagerTest(unittest.TestCase):
                 self.assertEqual(state["robot_ip"], "192.168.2.10")
                 self.assertEqual(state["use_simulation"], simulated)
 
+    def test_session_protection_is_explicit_and_start_hook_is_idempotent(self):
+        names, processes, starts = [], [], []
+        def create_process(*args, **kwargs):
+            process = FakeProcess(*args, **kwargs)
+            processes.append(process)
+            names.append("cartesian_manager")
+            return process
+        manager = StackManager(node_names=lambda: names, robot="kinova", overload_protection=True,
+            popen_factory=create_process, before_start=lambda: starts.append("start"))
+        manager.start()
+        manager.start()
+        self.assertEqual(processes[0].command[-1], "overload_protection:=true")
+        self.assertEqual(starts, ["start"])
+
     def test_invalid_configuration_cannot_start_a_process(self):
         configurations = [{"robot": "unknown"}] + [
             {"robot": "kinova", "robot_ip": address}

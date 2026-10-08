@@ -56,6 +56,14 @@ class BringupLayoutTest(unittest.TestCase):
             call.kwargs["arguments"][0] for call in node.call_args_list
             if call.kwargs["executable"] == "spawner"
         ]
+        # Other spawners are created at launch execution, after resolving protection.
+        from launch import LaunchContext
+        from snake_experiment_ui import protected_launch
+        context = LaunchContext()
+        context.launch_configurations.update(overload_protection="false", use_simulation="true")
+        with patch.object(protected_launch, "Node", wraps=protected_launch.Node) as protected_node:
+            protected_launch.protected_controllers(context, "kinova")
+        controllers += [call.kwargs["arguments"][0] for call in protected_node.call_args_list if call.kwargs["executable"] == "spawner"]
         self.assertCountEqual(controllers, ["joint_state_broadcaster", "qontrol_explorer", "gripper_controller"])
 
     def test_joystick_profiles_have_one_canonical_location(self):

@@ -48,6 +48,7 @@ setup(
     entry_points={
         "console_scripts": [
             "target_calibration_node = snake_experiment_ui.node:main",
+            "gripper_gate_node = snake_experiment_ui.gripper_gate:main",
             "session_interface_node = snake_experiment_ui.session_node:main",
         ],
     },
