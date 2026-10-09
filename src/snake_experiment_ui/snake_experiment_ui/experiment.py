@@ -459,7 +459,7 @@ class ExperimentController:
             block = self._block(current)
             block["control_active"] = False
             unavailable = episode.get("state") == "unavailable" or episode.get("reason") == "no_fresh_status"
-            feedback_fault = episode.get("reason") in ("invalid_pose", "invalid_force_estimate", "invalid_feedback")
+            feedback_fault = episode.get("reason") in ("invalid_pose", "invalid_overload_feedback", "invalid_feedback", "invalid_controller_transport")
             source = "protection_status_unavailable" if unavailable else ("protection_feedback_fault" if feedback_fault else "effort_overload")
             block["protection_interruption"] = {
                 "state": episode.get("state"), "reason": episode.get("reason"),

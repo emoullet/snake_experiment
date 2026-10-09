@@ -17,11 +17,11 @@ class ProtectionError(RuntimeError):
 
 
 def protection_action_state(queued, current):
-    """Retain latched controller episodes; decide telemetry loss from live state.
+    """Retain latched manager episodes; decide telemetry loss from live state.
 
     Startup and unavailable snapshots in the transition queue are historical.
     Their freshness must not override a subsequently received healthy status.
-    A real controller episode still needs cleanup even if processing was delayed.
+    A real manager episode still needs cleanup even if processing was delayed.
     """
     if queued.get("blocked") and queued.get("event", 0) > 0 and queued.get("state") != "unavailable":
         return queued
@@ -81,19 +81,14 @@ class ProtectionState:
                 or (ros_now is not None and not 0 <= ros_now - stamp <= 0.5)):
                 raise ValueError("Invalid protection status")
             value = {"instance": values.get("instance", ""), "state": status.message, "blocked": values["blocked"] == "true",
-                     "force_valid": values["force_valid"] == "true", "pose_valid": values["pose_valid"] == "true",
+                     "overload_valid": values["overload_valid"] == "true", "overloaded": values.get("overloaded") == "true", "pose_valid": values["pose_valid"] == "true",
                      "reason": values["reason"], "event": int(values["event"]),
                      "target": values["target"], "flipped": values["flipped"] == "true",
-                     "force_estimation_verified": values.get("force_estimation_verified", "true") == "true",
-                     "force_source": values["force_source"], "rearm_ready": values.get("rearm_ready") == "true", "controller_stamp": stamp}
+                     "signal_source": values["signal_source"], "retreat_strategy": values["retreat_strategy"], "rearm_ready": values.get("rearm_ready") == "true", "controller_stamp": stamp}
             for key in ("initial_pose", "original_target", "adapted_target"):
                 value[key] = json.loads(values[key])
             value["phase_history"] = json.loads(values.get("phase_history", "[]"))
-            force = float(values["force_norm_N"])
-            value["force_norm_N"] = force if math.isfinite(force) else None
-            if not math.isfinite(force) or force < 0:
-                value["force_valid"] = False
-            if not value["force_valid"] or not value["pose_valid"]:
+            if not value["overload_valid"] or not value["pose_valid"]:
                 value["blocked"] = True
             with self._lock:
                 self._value, self._at = value, self._clock()
@@ -116,7 +111,7 @@ class ProtectionState:
     def require_clear(self):
         state = self.snapshot()
         if state["state"] == "unavailable":
-            raise ProtectionError("État de protection absent ou périmé : commandes verrouillées. Vérifier la stack et la réception de /qontrol_explorer/overload_status.")
+            raise ProtectionError("État de protection absent ou périmé : commandes verrouillées. Vérifier la stack et la réception de /cartesian_manager/overload_status.")
         if state["blocked"]:
             raise ProtectionError("Commandes verrouillées par la protection de surcharge. Vérifier l’alarme puis réarmer explicitement.")
 

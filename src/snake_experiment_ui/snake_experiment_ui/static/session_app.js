@@ -394,8 +394,8 @@ class SessionInterface {
     this.setHidden(panel, !state || !stackActive || (!blocked && state?.configuration === "ready"));
     if (!state) return;
     const phases = { translating: "Retreat: translation", waiting_clear: "Waiting for clear force", rotating: "Retreat: rotation", locked: "Retreat complete · locked", error: "Protection locked", unavailable: "Protection status unavailable", normal: "Protection ready" };
-    this.setText(document.getElementById("protection-status"), phases[state.state] || state.state);
-    this.setText(document.getElementById("protection-message"), `${state.force_estimation_verified === false ? "Physical force estimation has not been verified. Validate effort signs and gravity compensation before enabling and rearming protection." : state.reason || ""} · ${state.target || "no retreat target"}${state.flipped ? " · orientation adapted by π around tool Z" : ""} · ${state.configuration || "pending"}`);
+    this.setText(document.getElementById("protection-status"), state.reason === "retreat_disabled" ? "Protection locked · retreat disabled" : phases[state.state] || state.state);
+    this.setText(document.getElementById("protection-message"), `${state.reason || ""} · ${state.target || "no retreat target"}${state.flipped ? " · orientation adapted by π around tool Z" : ""} · ${state.configuration || "pending"}`);
     this.setDisabled(document.getElementById("protection-rearm"), this.busy || !state.fresh || !state.rearm_ready || state.cleanup_pending);
     this.setDisabled(document.getElementById("protection-stop"), !state.fresh || !["translating", "waiting_clear", "rotating"].includes(state.state));
     if (blocked) {

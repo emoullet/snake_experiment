@@ -27,8 +27,8 @@ class GripperGate:
             self._joint_valid = False
 
     def tick(self):
-        # Detect a lost gripper stream slightly before the controller's 0.5 s
-        # joint-state timeout, so a recently measured hold position is available.
+        # Detect a lost gripper stream slightly before the protection status's 0.5 s
+        # freshness timeout, so a recently measured hold position is available.
         joint_fresh = self._joint_valid and self._position_at is not None and self._clock() - self._position_at <= 0.4
         blocked = self.status.snapshot()["blocked"] or not joint_fresh
         if blocked and not self._was_blocked:
@@ -64,7 +64,7 @@ def main(args=None):
     subscriptions = [
         node.create_subscription(Float64MultiArray, "/gripper_controller/commands", gate.command, 1),
         node.create_subscription(JointState, "/joint_states", gate.joints, 1),
-        node.create_subscription(DiagnosticArray, "/qontrol_explorer/overload_status",
+        node.create_subscription(DiagnosticArray, "/cartesian_manager/overload_status",
             lambda message: (gate.status.record(message, node.get_clock().now().nanoseconds * 1e-9), gate.tick()),
             QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)),
     ]

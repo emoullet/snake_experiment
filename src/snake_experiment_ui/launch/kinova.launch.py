@@ -8,7 +8,7 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
-from snake_experiment_ui.protected_launch import protected_controllers
+from snake_experiment_ui.protected_launch import protected_controllers, manager_protection_parameters
 
 
 def generate_launch_description():
@@ -57,7 +57,7 @@ def generate_launch_description():
         OpaqueFunction(function=protected_controllers, kwargs={"robot": "kinova"}),
         Node(package="cartesian_manager", executable="cartesian_manager_node",
              name="cartesian_manager",
-             parameters=[config], output="screen"),
+             parameters=[config, manager_protection_parameters("kinova")], output="screen"),
         Node(package="joy", executable="joy_node", name="joy_node", output="screen"),
         Node(
             package="rviz2", executable="rviz2", name="rviz2", output="screen",

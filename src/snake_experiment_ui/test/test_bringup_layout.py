@@ -23,7 +23,8 @@ class BringupLayoutTest(unittest.TestCase):
         context = LaunchContext()
         self.assertEqual(calls["ros2_control_node"]["parameters"][1].perform(context), expected)
         self.assertEqual(calls["cartesian_manager_node"]["parameters"][0].perform(context), expected)
-        self.assertEqual(len(calls["cartesian_manager_node"]["parameters"]), 1)
+        self.assertEqual(len(calls["cartesian_manager_node"]["parameters"]), 2)
+        self.assertEqual(calls["cartesian_manager_node"]["parameters"][1]["overload_retreat_strategy"], "closest_target_out")
         parameters = yaml.safe_load((PACKAGE_ROOT / "bringup/cartesian_manager/config/kinova_params.yaml").read_text())
         self.assertEqual(parameters["qontrol_explorer"]["ros__parameters"]["tip_frame"], "end_effector_link")
         self.assertEqual(parameters["cartesian_manager"]["ros__parameters"]["frames"]["ee_frame"], "end_effector_link")
@@ -82,6 +83,25 @@ class BringupLayoutTest(unittest.TestCase):
             protected_launch.protected_controllers(context, "kinova")
         controllers += [call.kwargs["arguments"][0] for call in protected_node.call_args_list if call.kwargs["executable"] == "spawner"]
         self.assertCountEqual(controllers, ["joint_state_broadcaster", "qontrol_explorer", "gripper_controller"])
+
+    def test_protection_is_owned_by_manager_and_fake_bool_is_isolated(self):
+        from launch import LaunchContext
+        from snake_experiment_ui import protected_launch
+        for robot in ("explorer", "kinova"):
+            params = protected_launch.manager_protection_parameters(robot)
+            profile = yaml.safe_load((PACKAGE_ROOT / "bringup/cartesian_manager/config" / f"{robot}_params.yaml").read_text())["qontrol_explorer"]["ros__parameters"]
+            self.assertEqual(params["overload_protection.controller_linear_gain"], profile["command_max_linear_velocity"])
+            self.assertEqual(params["overload_protection.controller_angular_gain"], profile["command_max_angular_velocity"])
+            for simulation in ("true", "false"):
+                context = LaunchContext()
+                context.launch_configurations.update(overload_protection="true", use_simulation=simulation)
+                with patch.object(protected_launch, "Node", wraps=protected_launch.Node) as node:
+                    protected_launch.protected_controllers(context, robot)
+                spawner = next(c.kwargs for c in node.call_args_list if c.kwargs.get("arguments", [None])[0] == "qontrol_explorer")
+                args = spawner["arguments"]
+                self.assertNotIn("--param-file", args)
+                self.assertEqual(any("calculated_effort_overload" in arg for arg in args), simulation == "true")
+                self.assertIn("gripper_gate_node", [c.kwargs["executable"] for c in node.call_args_list])
 
     def test_joystick_profiles_have_one_canonical_location(self):
         for profile in ("baseline", "snake"):

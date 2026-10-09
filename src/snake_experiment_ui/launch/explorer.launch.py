@@ -12,7 +12,7 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
-from snake_experiment_ui.protected_launch import protected_controllers
+from snake_experiment_ui.protected_launch import protected_controllers, manager_protection_parameters
 
 
 def generate_launch_description():
@@ -82,7 +82,7 @@ def generate_launch_description():
         executable="cartesian_manager_node",
         name="cartesian_manager",
         output="screen",
-        parameters=[controller_config],
+        parameters=[controller_config, manager_protection_parameters("explorer")],
     )
     joy_node = Node(package="joy", executable="joy_node", name="joy_node")
 

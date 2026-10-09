@@ -1296,7 +1296,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.complete_discovery("mode_1_discovery")
         self.complete_discovery("mode_2_discovery")
         self.controller.start("mode_1_training")
-        for reason in ("invalid_pose", "invalid_force_estimate", "invalid_feedback"):
+        for reason in ("invalid_pose", "invalid_overload_feedback", "invalid_feedback"):
             self.controller.interrupt_overload({"event": 1, "state": "error", "reason": reason})
             state = self.controller.snapshot()
             block = next(v for v in state["progress"]["blocks"] if v["id"] == "mode_1_training")

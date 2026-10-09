@@ -1,127 +1,83 @@
-# Protection de surcharge en session
+# Gestion de surcharge dans cartesian_manager
 
-La protection s’applique à Explorer et Kinova dans l’interface de session, y compris pendant le check-up. La calibration conserve son lancement actuel. Les stacks lancées par la session passent `overload_protection:=true` ; les launches robot seuls gardent ce paramètre à `false` par défaut.
+La session active la protection pour Explorer et Kinova avec `overload_protection:=true` au lancement de la stack. Les launches robot seuls restent désactivés par défaut. La calibration conserve son lancement habituel. `qontrol_controller` reste à `e365057`, sans ajout de protection dans son code.
 
-## Déclenchement et recul
+## Déclenchement et arbitrage
 
-`/qontrol_explorer/effort_overload` est un `std_msgs/msg/Bool`. Le contrôleur détecte sa propre surcharge dans sa boucle de contrôle ; il accepte aussi une indication externe `true` sur ce topic. Une indication externe `false` ne masque jamais une surcharge mesurée.
+Le manager écoute `/qontrol_explorer/effort_overload` (`std_msgs/msg/Bool`). Sur matériel réel, un Bool absent ou périmé après réception initiale produit un défaut verrouillé. Ce signal ne fournit ni force en newtons ni validation de son estimation : les diagnostics ne prétendent pas disposer de ces informations.
 
-Le premier déclenchement verrouille les commandes cartésiennes, articulaires, de repère et de vitesse. Le mapper appartenant à la session est arrêté, les Go-to ordinaires sont annulés et le relais de pince bloque les commandes utilisateur. La pince reçoit une consigne de maintien issue d’une position récemment mesurée. Une perte de son état ou de l’état de protection ferme également ce relais.
+En simulation, la publication calculée par qontrol est remappée vers `/_session_control/calculated_effort_overload`, non écouté par le manager. Le matériel fictif ne reproduit pas les contacts. Le topic public sert aux injections ; une indication `true` expire après 0,5 s sans renouvellement, mais le verrou reste actif. Le manager attend le premier retour valide avant d'accepter les entrées, sans créer d'épisode de surcharge pendant le démarrage des contrôleurs.
 
-Le contrôleur choisit parmi `target_out_1`, `target_out_2`, `target_out_3` la position la plus proche en distance euclidienne. En cas d’égalité, il conserve le premier indice. La calibration doit appartenir au robot sélectionné, à son repère effecteur et à `base_link`. Les trois cibles sont transférées dans une seule transaction ROS. Sans trois cibles valides, la surcharge produit uniquement un maintien verrouillé.
+Pendant le verrouillage, le manager rejette les commandes joystick/tablette/asservissement visuel, les modes et les nouvelles cibles. Il annule la cible articulaire active, vide les entrées mémorisées et publie exclusivement une vitesse de recul ou une vitesse nulle. Les transformations Baseline/Snake et le limiteur de téléopération ne sont pas appliqués au recul.
 
-L’orientation choisie est le quaternion calibré ou ce quaternion multiplié à droite par une rotation de π autour de **Z local de l’outil**, selon le plus petit angle à l’orientation initiale. Les quaternions `q` et `-q` sont équivalents. L’adaptation reste propre à cet épisode : le fichier de calibration n’est pas modifié.
+Le relais `gripper_gate_node` reste dans la stack. Il bloque les commandes utilisateur selon l'état du manager et envoie, si elle est récente, la dernière position mesurée de pince comme consigne de maintien. Une perte de télémétrie de protection ou de pince ferme également le relais.
 
-Le recul comporte deux phases :
+## Stratégies et trajectoire
 
-1. Translation vers la cible, en conservant l’orientation initiale.
-2. Après une seconde de force valide et sans surcharge, rotation vers l’orientation choisie, en maintenant la position cible.
+Le paramètre du manager `overload_retreat_strategy` est fixe au lancement. Il accepte :
 
-Les limites maximales sont 0,02 m/s et 0,15 rad/s. Les tolérances sont 5 mm et 5°, avec un maintien de 0,5 s. Le délai global est de 30 s. Un arrêt opérateur, une estimation invalide, un retour matériel invalide, une erreur du solveur ou une nouvelle surcharge pendant la rotation interrompent le recul et maintiennent le verrou. Une surcharge persistante pendant la translation ne déclenche pas plusieurs reculs.
+- `closest_target_out` : les trois poses calibrées sont validées et transférées ensemble ; la cible la plus proche en distance euclidienne est choisie (première en cas d'égalité).
+- `none` : verrouillage sans recul ni besoin de cibles calibrées.
 
-Le contrôleur protège le bras indépendamment du navigateur et du nœud d’interface. Le relais de pince appartient à la stack, et non au serveur web. Il faut laisser cette stack et ses contrôleurs actifs pour effectuer le recul. Cette trajectoire cartésienne ne planifie pas d’évitement d’obstacles : la position « out » choisie doit être appropriée à l’environnement expérimental.
+La session utilise `closest_target_out`. Une interface de stratégie sépare la sélection de cible du déroulement commun. La calibration doit correspondre au robot, au repère de base et au repère effecteur sélectionnés. Sans calibration compatible, une surcharge verrouille sans recul. Les cibles ne peuvent pas changer pendant une récupération.
 
-## État, arrêt et réarmement
+Pour `closest_target_out`, l'orientation retenue est le quaternion calibré ou celui-ci multiplié à droite par une rotation de π autour du Z local de l'outil, selon l'angle le plus court depuis la pose initiale. Le fichier de calibration reste inchangé.
 
-`/qontrol_explorer/overload_status` publie un `diagnostic_msgs/msg/DiagnosticArray` horodaté. Il distingue la validité de l’estimation, la validité de la pose, le verrou, la phase, l’instance du contrôleur et le numéro d’épisode. Les états sont `normal`, `translating`, `waiting_clear`, `rotating`, `locked`, `error`.
+1. Translation vers la cible en conservant l'orientation initiale.
+2. Attente de 1 s de signal de surcharge valide et clair.
+3. Rotation vers l'orientation adaptée, puis maintien verrouillé.
 
-Les services `std_srvs/srv/Trigger` sont :
+Limites : 0,02 m/s, 0,15 rad/s et 30 s au total ; tolérances 5 mm et 5°, maintien 0,5 s. Retour invalide/périmé, arrêt opérateur ou nouvelle surcharge pendant la rotation interrompent le recul. La cause initiale d'une erreur est conservée ; le retour des données valides ne relance pas le recul.
 
-- `/qontrol_explorer/stop_recovery` : arrêt du recul, maintien du verrou.
-- `/qontrol_explorer/rearm_overload` : demande de réarmement explicitement vérifiée dans le contrôleur.
+Le contrôleur historique multiplie ses entrées par ses gains de vitesse. Le manager compense ces gains et ses repères uniquement pour le recul. Les gains initiaux proviennent du même profil robot que qontrol ; les changements de gains et de sélection de repères sont suivis sur leurs topics existants. Un gain non positif/non fini ou un repère d'outil non pris en charge interdit le recul. Baseline/Snake conservent leurs commandes habituelles.
 
-Le réarmement exige une force valide et claire pendant 1 s, les axes joystick 0 et 1 dans la zone neutre et tous les boutons relâchés pendant 0,5 s, ou une absence de messages `/joy` pendant 1 s, un état matériel valide lu directement dans le cycle `ros2_control`, et un recul terminé ou arrêté. Le silence joystick devient acceptable après 0,5 s sans message, puis cette condition doit rester vraie pendant 0,5 s. Un joystick n’ayant jamais publié est également accepté après la temporisation de 0,5 s. Tout nouveau message non neutre ou avec un bouton pressé empêche le réarmement. Les retards de publication de `/joint_states` ne déclenchent pas la protection : ce topic ne fournit pas le retour matériel du contrôleur. Un retour matériel ou une estimation de force invalide verrouille les commandes sans recul ; la cause initiale reste affichée jusqu’au réarmement. Aucun mapper, Go-to ou enregistrement précédent n’est restauré par le réarmement.
+## Diagnostics, arrêt et réarmement
 
-L’interface affiche l’alarme, la cible, l’adaptation éventuelle de l’orientation, l’arrêt et le réarmement. Les routes de commande refusent également les actions incompatibles. Après réarmement, réactiver explicitement le mode dans le check-up, ou **Activate control** dans Training/Recording. En Discovery, utiliser le bouton habituel d’activation du contrôle et de l’enregistrement.
+Le manager publie `/cartesian_manager/overload_status` (`DiagnosticArray`) à 20 Hz, avec instance, événement, cause, stratégie, état, validité du Bool et de la pose, cible, adaptation d'orientation, poses et historique des phases. Les watchdogs de réception utilisent une horloge monotone (délai 0,5 s), indépendamment de l’horloge Gazebo. Les états sont `normal`, `translating`, `waiting_clear`, `rotating`, `locked`, `error`.
 
-L’essai en cours est marqué interrompu avant la finalisation du rosbag, avec un incident `effort_overload` (surcharge) ou `protection_feedback_fault` (retour invalide) à décrire. Sa réussite n’est pas créditée pendant le recul. Les segments Discovery interrompus sont incomplets et invalides. La revue d’incidents reste disponible lorsque les commandes sont verrouillées.
+Les services `Trigger` sont `/cartesian_manager/stop_recovery` et `/cartesian_manager/rearm_overload`. Les paramètres `overload_protection.reference_frame`, `ee_frame`, `out_positions` (9 nombres) et `out_orientations` (12 nombres, xyzw) sont adressés au manager par `set_parameters_atomically`.
 
-Une perte de télémétrie de protection affiche « Protection status unavailable or stale » et conserve la raison dans `protection_interruption` du bloc. Pendant une acquisition, son incident porte la source `protection_status_unavailable`. Après rétablissement de la télémétrie, le contrôle nécessite une activation explicite ; le réarmement du contrôleur est nécessaire s’il reste verrouillé. Le terminal journalise chaque coupure avec son état, sa raison, son numéro d’événement et sa force. Les anciens états de démarrage conservés dans la file de transitions ne remplacent pas l’état courant pour décider d’une perte de télémétrie.
+Le réarmement exige un Bool valide et clair pendant 1 s (en simulation : aucune injection active), une pose valide et fraîche, un recul terminé ou arrêté, et un joystick neutre pendant 0,5 s ou silencieux environ 1 s. L'absence totale de joystick est acceptée après la temporisation neutre. Un message récent non neutre ou un bouton pressé bloque le réarmement.
 
-La finalisation d’un Go-to arrivé à sa cible utilise un worker séparé : la restauration du mapper ne bloque pas les callbacks ROS de télémétrie. Une intervention de la protection révoque toute restauration différée de ce mouvement, même si le contrôleur est réarmé avant son traitement.
+Aucun mapper, Go-to ou enregistrement n'est restauré automatiquement. Après réarmement, activer explicitement le contrôle. Le journal `safety/overload_events.jsonl` et les interruptions d'essai conservent les mêmes emplacements ; les données d'essai ne deviennent pas valides grâce au recul. Les défauts de télémétrie sont distingués des surcharges.
 
-Le journal `safety/overload_events.jsonl` se trouve dans le dossier participant, ou dans `repository_root` pendant le check-up. L’historique des phases est conservé dans le contrôleur, y compris les transitions plus courtes que la période de publication ROS. Le journal enregistre les transitions, la pose initiale, les cibles originale et adaptée, le résultat et le réarmement, séparément des données des essais.
+## Compilation et relance
 
-## Estimation de force et matériel réel
-
-L’estimation utilise la Jacobienne linéaire et les couples articulaires compensés en gravité. La convention implémentée est `effort + gravité` pour Kinova et `effort - gravité` pour Explorer. La validité exige des valeurs finies et une Jacobienne de rang trois. Le seuil existant `force_threshold` reste à 10 N par défaut.
-
-**Les signes, la compensation de gravité et le seuil doivent encore être validés sur les deux robots réels.** À chaque démarrage réel, `overload_protection.force_estimation_verified` est `false` : le contrôleur maintient le verrou et n’effectue pas de recul fondé sur une estimation non validée. L’état public expose la norme calculée, même si l’estimation n’a pas encore été confirmée.
-
-Après avoir validé les couples, les forces et l’absence de faux déclenchements dans les poses utilisées, confirmer explicitement cette vérification :
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641/install/setup.bash
-ros2 param set /qontrol_explorer overload_protection.force_estimation_verified true
-```
-
-Puis remettre le joystick au neutre, attendre les délais de validité et utiliser **Rearm protection**. Cette confirmation est perdue lorsque le contrôleur est recréé.
-
-En simulation, l’estimation de contact est neutralisée (`force_source=fake_hardware_no_contact`) ; les essais de surcharge se font par injection de `Bool`. Le Kinova simulé utilise du matériel fictif. Ces essais ne valident pas les efforts physiques ni la sécurité de la trajectoire réelle.
-
-Les paramètres de recul peuvent être abaissés, mais pas dépasser les plafonds ci-dessus : `overload_protection.linear_speed`, `overload_protection.angular_speed`, `overload_protection.timeout_sec`. La configuration de cibles ne peut pas changer pendant un recul. L’identité du robot et l’activation de la protection restent fixes au lancement.
-
-## Reconstruction et relance
-
-Compiler **les deux packages**, car la coupure du bras est dans le sous-module `dependencies/qontrol_controller` :
+Arrêter l'ancienne interface et sa stack avec Ctrl+C, puis :
 
 ```bash
 cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-colcon build \
-  --base-paths /home/emoullet/dev/robot_experiments/snake_experiment/dependencies /home/emoullet/dev/robot_experiments/snake_experiment/src \
-  --packages-select qontrol_controller snake_experiment_ui \
-  --symlink-install --parallel-workers 1 --allow-overriding qontrol_controller
+colcon build --base-paths /home/emoullet/dev/robot_experiments/snake_experiment/dependencies /home/emoullet/dev/robot_experiments/snake_experiment/src --packages-select cartesian_manager qontrol_controller snake_experiment_ui --symlink-install --parallel-workers 1 --allow-overriding cartesian_manager qontrol_controller
 source install/setup.bash
+ROS_DOMAIN_ID=91 ros2 launch snake_experiment_ui session_interface.launch.py stack_robot:=kinova stack_use_simulation:=true
 ```
 
-Arrêter les anciennes interfaces/stacks, puis lancer la session avec une calibration du robot choisi :
+Rafraîchir les pages avec Ctrl+F5. Pour le réel, utiliser `stack_use_simulation:=false` et `stack_robot_ip:=192.168.1.10` (adapter l'adresse).
+
+Dans un second terminal sourcé sur le même workspace, uniquement pour la simulation :
+
+```bash
+ROS_DOMAIN_ID=91 ros2 topic pub --once /qontrol_explorer/effort_overload std_msgs/msg/Bool "{data: true}"
+```
+
+Vérifier coupure bras/pince, cible et orientation, recul, maintien verrouillé, disponibilité du réarmement avec joystick silencieux, puis absence de reprise automatique.
+
+## Tests isolés et limites
 
 ```bash
 cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 launch snake_experiment_ui session_interface.launch.py \
-  stack_robot:=kinova stack_use_simulation:=true \
-  calibration_file:=/chemin/absolu/vers/latest_calib.json
+ctest --test-dir build/cartesian_manager -R '^overload_protection$' --output-on-failure
 ```
 
-Rafraîchir `http://127.0.0.1:8081` avec Ctrl+F5 et démarrer la stack depuis la page. Pour Explorer, remplacer `stack_robot:=kinova` par `stack_robot:=explorer`. Pour le Kinova réel, utiliser `stack_use_simulation:=false stack_robot_ip:=192.168.1.10`, avec l’IP effective du bras, puis suivre la validation d’estimation décrite ci-dessus.
-
-## Tests reproductibles
-
-Tests Python :
+Le script `scripts/check_overload_simulation.py` exige une stack Kinova protégée fictive. Il configure temporairement des cibles proches et injecte des commandes ; le lancer uniquement dans un domaine ROS libre, distinct de la session de l'utilisateur. Dans le terminal de stack sourcé :
 
 ```bash
-cd /home/emoullet/dev/robot_experiments/snake_experiment
-source /opt/ros/jazzy/setup.bash
-source /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641/install/setup.bash
-ROS_LOG_DIR=/tmp/snake-overload-tests PYTHONPATH="$PWD/src/snake_experiment_ui:$PYTHONPATH" \
-  python3 -m pytest src/snake_experiment_ui/test -q
+ROS_DOMAIN_ID=173 ros2 launch snake_experiment_ui kinova.launch.py use_simulation:=true overload_protection:=true
 ```
 
-Test C++ du recul :
-
-```bash
-cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
-ctest --test-dir build/qontrol_controller -R '^overload_protection$' --output-on-failure
-```
-
-Test ROS automatique, **uniquement avec un Kinova fictif**, sans autre stack dans le domaine 91. Il remplace les cibles de recul par des cibles de test proches et refuse de publier des commandes si l’état ne confirme pas le matériel fictif protégé.
-
-Terminal 1 :
-
-```bash
-cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ROS_DOMAIN_ID=173 ros2 launch snake_experiment_ui kinova.launch.py \
-  use_simulation:=true overload_protection:=true
-```
-
-Terminal 2 :
+Dans un autre terminal :
 
 ```bash
 cd /home/emoullet/dev/robot_experiments/snake_experiment
@@ -130,10 +86,21 @@ source /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641/
 ROS_DOMAIN_ID=173 python3 scripts/check_overload_simulation.py
 ```
 
-Ce test vérifie aussi qu’une pause du diffuseur `/joint_states` ne crée pas de faux défaut du bras, puis le recul, la stabilité de la pince malgré les commandes adverses, le refus de réarmement avec un joystick actif, son autorisation après silence joystick, le verrouillage et l’absence de reprise des anciennes commandes après réarmement. Arrêter ensuite cette stack avec Ctrl+C ; la relancer recharge la calibration de session.
+Arrêter cette stack après le test pour effacer sa configuration temporaire. Les tests C++ couvrent aussi `none`, les limites, la conversion des vitesses et les défauts.
 
-## Vérifications effectuées et restantes
+Le lot 2 examinera l'expiration des commandes dans qontrol si le manager tombe, le retour matériel et la validité de l'estimation d'effort. La version restaurée conserve potentiellement sa dernière consigne et publie une pose calculée depuis sa position de commande. Le Bool ne permet pas de distinguer une surcharge d'une estimation invalide. Cette migration ne constitue pas une protection indépendante du manager et ne planifie pas d'évitement d'obstacles. Les essais fictifs ne valident pas le comportement sur robot réel.
 
-Exécutées : compilation des deux packages, test C++, tests Python de protection et de sessions, scénario ROS Kinova fictif, suspension/reprise du broadcaster articulaire sans faux défaut du bras, et vérification du navigateur (alarme, commandes désactivées, arrêt, réarmement, absence d’erreurs JavaScript). Un échec Python préexistant compare la copie d’un ancien launch Explorer au launch actuellement présent dans le sous-module `cartesian_manager`.
+## Vérifications de cette migration
 
-À vérifier sur le matériel réel : estimation et seuil de force pour chaque robot, maintien de la pince en mouvement, trajectoire de translation puis rotation dans l’environnement de l’expérience, limites articulaires et cible irréalisable, comportement sous charge et arrêt opérateur. Le lancement et le recul Explorer en simulation complète restent également à tester.
+Exécutées : compilation des trois packages ; test C++ du manager ; scénarios ROS synthétiques pour les deux stratégies, la conversion des vitesses et les watchdogs de pose/Bool ; stack Kinova fictive avec arbitrage, pince, réarmement et arrêt opérateur ; recul Explorer sous Gazebo isolé ; interface web temporaire (alarme, commandes bloquées, réarmement sans joystick, aucun mapper restauré, aucune erreur JavaScript). La suite Python a 192 tests réussis et un échec préexistant sur la comparaison de la copie du launch Explorer avec son sous-module.
+
+Les tests synthétiques sans robot se relancent dans un domaine libre :
+
+```bash
+cd /home/emoullet/dev/robot_experiments/snake_experiment
+source /opt/ros/jazzy/setup.bash
+source /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641/install/setup.bash
+ROS_DOMAIN_ID=176 python3 scripts/check_manager_overload.py
+```
+
+À vérifier manuellement : reprise de votre session et ses transitions Baseline/Snake, essai interrompu pendant une acquisition, puis validation sur matériel réel dans un environnement adapté. La session utilisateur n'a pas été arrêtée ni modifiée pendant les essais isolés.

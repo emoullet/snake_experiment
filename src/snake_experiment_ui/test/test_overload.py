@@ -22,9 +22,9 @@ def calibration(robot):
 
 def status(robot="kinova", state="normal", event=0, **changes):
     values = {"instance": "test-controller", "enabled": "true", "blocked": "false" if state == "normal" else "true",
-              "force_valid": "true", "pose_valid": "true", "reason": "overload" if event else "none",
+              "overload_valid": "true", "pose_valid": "true", "reason": "overload" if event else "none",
               "event": str(event), "target": "target_out_1" if event else "", "flipped": "false",
-              "force_source": "fake_hardware_no_contact", "force_norm_N": "0",
+              "signal_source": "simulation_injection", "retreat_strategy": "closest_target_out",
               "initial_pose": "null", "original_target": "null", "adapted_target": "null"}
     values.update(changes)
     return NS(header=NS(stamp=NS(sec=10, nanosec=0)), status=[NS(name="overload_protection", hardware_id=robot,
@@ -74,7 +74,7 @@ def test_status_fail_closed_and_freshness():
     tick[0] = .51
     assert monitor.snapshot()["blocked"]
     with pytest.raises(ProtectionError, match="absent ou périmé"): monitor.require_clear()
-    for invalid in (status(robot="explorer"), status(enabled="false"), status(force_valid="false"), status(force_norm_N="nan"),
+    for invalid in (status(robot="explorer"), status(enabled="false"), status(overload_valid="false"), status(overload_valid="invalid"),
                     status(state="locked", blocked="false"), NS(status=[])):
         assert monitor.record(invalid)["blocked"]
     assert monitor.record(status(), ros_now=11)["blocked"]

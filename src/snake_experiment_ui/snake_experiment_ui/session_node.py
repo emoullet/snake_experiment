@@ -178,7 +178,7 @@ class SessionInterfaceNode(Node):
         self._experiment_go_to = GoToController(**go_to_options)
 
         self._subscriptions = [
-            self.create_subscription(DiagnosticArray, "/qontrol_explorer/overload_status",
+            self.create_subscription(DiagnosticArray, "/cartesian_manager/overload_status",
                 self._record_protection, QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL, reliability=ReliabilityPolicy.RELIABLE)),
             self.create_subscription(
                 JointState,
@@ -229,9 +229,9 @@ class SessionInterfaceNode(Node):
                 ),
             ),
         ]
-        self._protection_parameters = self.create_client(SetParametersAtomically, "/qontrol_explorer/set_parameters_atomically")
-        self._protection_rearm = self.create_client(Trigger, "/qontrol_explorer/rearm_overload")
-        self._protection_stop = self.create_client(Trigger, "/qontrol_explorer/stop_recovery")
+        self._protection_parameters = self.create_client(SetParametersAtomically, "/cartesian_manager/set_parameters_atomically")
+        self._protection_rearm = self.create_client(Trigger, "/cartesian_manager/rearm_overload")
+        self._protection_stop = self.create_client(Trigger, "/cartesian_manager/stop_recovery")
         self._controller_client = self.create_client(
             ListControllers, "/controller_manager/list_controllers"
         )
@@ -363,7 +363,7 @@ class SessionInterfaceNode(Node):
         self._server_thread.start()
         host = self.get_parameter("host").value
         port = self.get_parameter("port").value
-        self.get_logger().info(f"Views B-G available at http://{host}:{port}")
+        self.get_logger().info(f"Experiment interface available at http://{host}:{port}")
 
     def _before_stack_start(self):
         self._protection_restarting = True
@@ -428,7 +428,7 @@ class SessionInterfaceNode(Node):
         if command == "rearm":
             state = self._protection_snapshot()
             if not state["fresh"] or not state.get("rearm_ready") or state["cleanup_pending"]:
-                raise ProtectionError("Réarmement indisponible : force claire 1 s, joystick neutre 0,5 s et recul terminé ou arrêté requis.")
+                raise ProtectionError("Réarmement indisponible : signal de surcharge clair 1 s, joystick neutre 0,5 s ou silencieux 1 s et recul terminé ou arrêté requis.")
             self._publish_passthrough()
         client = self._protection_rearm if command == "rearm" else self._protection_stop
         if not client.service_is_ready():
@@ -462,7 +462,7 @@ class SessionInterfaceNode(Node):
                     self._protection_cleanup_pending = True
                     self.get_logger().warning(
                         f"Session protection cutoff: state={state['state']}, reason={state['reason']}, "
-                        f"event={state.get('event', 0)}, force_N={state.get('force_norm_N')}."
+                        f"event={state.get('event', 0)}, signal_valid={state.get('overload_valid')}."
                     )
                     self._publish_passthrough()
                     self._checkup_go_to.cancel_if_active("effort_overload")
