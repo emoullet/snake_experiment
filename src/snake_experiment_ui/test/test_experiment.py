@@ -702,6 +702,26 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.abort("mode_1_recording")
         self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
 
+    def test_participant_local_mode_follows_mapper_messages_and_reset(self):
+        self.participant["experimental_plan"] = "baseline->snake"
+        self.prepare_session()
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+
+        self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
+        for state in ("b1", "b2", "b3"):
+            self.controller.try_record_mapper_local_mode(state)
+            self.assertEqual(self.controller.participant_snapshot()["local_mode"], state)
+
+        self.modes.active = None
+        self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
+        self.controller.clear_mapper_local_mode()
+        self.modes.active = "baseline"
+        self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
+        self.controller.try_record_mapper_local_mode("b1")
+        self.assertEqual(self.controller.participant_snapshot()["local_mode"], "b1")
+
     def test_training_go_to_suspends_and_restores_mapper(self):
         self.prepare_session()
         self.complete_discovery("mode_1_discovery")

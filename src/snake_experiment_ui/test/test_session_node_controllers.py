@@ -41,8 +41,9 @@ class ProtectionCallbackConcurrencyTest(unittest.TestCase):
         checkup._go_to = Mock()
         experiment = object.__new__(ExperimentController)
         experiment._lock = threading.RLock()
+        experiment._mapper_local_mode_lock = threading.Lock()
+        experiment._mapper_local_mode = None
         experiment.update_ee_pose = Mock()
-        experiment.record_mapper_local_mode = Mock()
         node = SimpleNamespace(
             _mapper_client_reset_requested=threading.Event(),
             _refresh_controllers=Mock(), _mode_manager=modes,
@@ -73,7 +74,7 @@ class ProtectionCallbackConcurrencyTest(unittest.TestCase):
                     self.assertTrue(callbacks_done.wait(.2), "ROS executor blocked behind lifecycle locks")
                     checkup._go_to.update_pose.assert_not_called()
                     experiment.update_ee_pose.assert_not_called()
-                    experiment.record_mapper_local_mode.assert_not_called()
+                    self.assertEqual(experiment._mapper_local_mode, "b1")
                     node._parameter_list_client.service_is_ready.assert_not_called()
                 finally:
                     release.set()

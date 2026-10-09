@@ -294,6 +294,7 @@ class ExperimentController:
             for mode in MODES
         }
         self._mapper_local_mode: Optional[str] = None
+        self._mapper_local_mode_lock = threading.Lock()
         self._snake_button_provider = snake_button_provider or (lambda: None)
         self._lock = threading.RLock()
         self._participant: Optional[dict] = None
@@ -543,11 +544,11 @@ class ExperimentController:
 
     def record_mapper_local_mode(self, state: str) -> None:
         """Record the mapper's reported local mode, never infer it from joystick input."""
-        with self._lock:
+        with self._mapper_local_mode_lock:
             self._mapper_local_mode = state if state in {"b1", "b2", "b3"} else None
 
     def clear_mapper_local_mode(self) -> None:
-        with self._lock:
+        with self._mapper_local_mode_lock:
             self._mapper_local_mode = None
 
     def show_mode_explanation(self, block_id: str) -> dict:
@@ -620,11 +621,13 @@ class ExperimentController:
                     None,
                 )
                 mapper = self._modes.snapshot()
+                with self._mapper_local_mode_lock:
+                    mapper_local_mode = self._mapper_local_mode
                 state = (
-                    self._mapper_local_mode
+                    mapper_local_mode
                     if mapper.get("status") == "active"
                     and mapper.get("active_mode") == active["mode"]
-                    and self._mapper_local_mode in STATE_NAMES[active["mode"]]
+                    and mapper_local_mode in STATE_NAMES[active["mode"]]
                     else None
                 )
                 recording = workflow == "recording"
@@ -1335,11 +1338,9 @@ class ExperimentController:
                 self._lock.release()
 
     def try_record_mapper_local_mode(self, state) -> None:
-        if self._lock.acquire(blocking=False):
-            try:
-                self.record_mapper_local_mode(state)
-            finally:
-                self._lock.release()
+        # The mapper publishes its initial state only once. Never discard it just
+        # because the workflow lock is held while the mapper starts.
+        self.record_mapper_local_mode(state)
 
     def update_ee_pose(self, message) -> None:
         """Update live training errors and schedule success finalisation."""
