@@ -15,11 +15,21 @@ function setText(element, value) {
 }
 
 function frameRobot(view) {
-  const bounds = new THREE.Box3().setFromObject(view.robot);
+  const bounds = new THREE.Box3();
+  if (view.endpoints && view.config) {
+    // Fit the whole cycle, including intermediate joint interpolation poses.
+    for (let sample = 0; sample <= 8; sample += 1) {
+      setArmPose(view.robot, cyclePose(view.endpoints, sample / 8), view.config);
+      bounds.union(new THREE.Box3().setFromObject(view.robot));
+    }
+    setArmPose(view.robot, view.endpoints.start, view.config);
+  } else {
+    bounds.setFromObject(view.robot);
+  }
   if (bounds.isEmpty()) return;
   const center = bounds.getCenter(new THREE.Vector3());
   const radius = Math.max(bounds.getSize(new THREE.Vector3()).length() * 0.7, 0.45);
-  view.camera.position.copy(center).addScaledVector(view.direction.clone().normalize(), radius * 2.4);
+  view.camera.position.copy(center).addScaledVector(view.direction.clone().normalize(), radius * 2.4 / Math.min(1, view.camera.aspect));
   view.camera.lookAt(center);
   view.camera.near = Math.max(radius / 100, 0.01);
   view.camera.far = Math.max(radius * 20, 20);
@@ -68,6 +78,7 @@ function createView(root, axisIndex, direction) {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    if (view.robot) frameRobot(view);
   };
   new ResizeObserver(resize).observe(container);
   resize();
@@ -135,6 +146,15 @@ export class MappingAnimator {
     const response = await fetch(`${PREFIX}/api/config`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Mapping configuration: HTTP ${response.status}`);
     this.config = await response.json();
+    for (const view of this.views) {
+      view.config = this.config;
+      view.container.setAttribute('aria-label', `${this.config.robot_label} animated robot, axis ${view.axisIndex}`);
+    }
+    const title = document.getElementById('preview-robot-title');
+    if (title) {
+      title.textContent = `${this.config.robot_label} · robot model`;
+      document.title = `${this.config.robot_label} · 3D model preview`;
+    }
     await Promise.all(this.views.map(loadModel));
     if (this.active && this.selection) void this.refreshCycle();
     return this.config;
@@ -174,7 +194,7 @@ export class MappingAnimator {
     this.cycleStart = null;
     this.pending = false;
     for (const view of this.views) {
-      if (view.robot && view.endpoints) setArmPose(view.robot, view.endpoints.start);
+      if (view.robot && view.endpoints) setArmPose(view.robot, view.endpoints.start, this.config);
       view.stick.setAttribute('transform', 'translate(0 0)');
       setText(view.inputLabel, 'Neutral');
     }
@@ -191,7 +211,7 @@ export class MappingAnimator {
           if (!this.pending) void this.refreshCycle();
         } else {
           for (const view of this.views) {
-            if (view.endpoints) setArmPose(view.robot, cyclePose(view.endpoints, phase));
+            if (view.endpoints) setArmPose(view.robot, cyclePose(view.endpoints, phase), this.config);
             const stick = joystickDisplacement(this.config, view.axisIndex, phase);
             view.stick.setAttribute('transform', `translate(${stick.x} ${stick.y})`);
             setText(view.inputLabel, stick.input > 0.02 ? '+ input' : stick.input < -0.02 ? '− input' : 'Neutral');
@@ -218,7 +238,7 @@ export class MappingAnimator {
     this.pending = true;
     this.cycleStart = null;
     for (const view of this.views) {
-      if (view.endpoints) setArmPose(view.robot, view.endpoints.start);
+      if (view.endpoints) setArmPose(view.robot, view.endpoints.start, this.config);
       view.stick.setAttribute('transform', 'translate(0 0)');
     }
     let state = null;
@@ -233,6 +253,7 @@ export class MappingAnimator {
       for (const view of this.views) {
         view.endpoints = solveAxisEndpoints(view.robot, pose, this.config,
           this.selection.mode, this.selection.submode, view.axisIndex, this.selection.snakeHeld);
+        frameRobot(view);
         setText(view.source, source);
         if (view.source.classList.contains('pill')) {
           view.source.className = source === 'Live pose' ? 'pill pill--active' : 'pill pill--warning';

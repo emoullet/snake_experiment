@@ -20,7 +20,7 @@ setup(
             glob("launch/*.launch.py")
             + glob("bringup/joystick_mapper/launch/*.launch.py"),
         ),
-        ("share/" + package_name + "/config", glob("config/*.yaml")),
+        ("share/" + package_name + "/config", glob("config/*.yaml") + glob("config/*.rviz")),
         (
             "share/" + package_name + "/bringup/cartesian_manager/config",
             glob("bringup/cartesian_manager/config/*.yaml"),

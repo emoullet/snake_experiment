@@ -13,3 +13,10 @@
 [submodule "dependencies/explorer_stack"]
 	path = dependencies/explorer_stack
 	url = https://github.com/ISIR-EXTENDER/explorer_stack
+[submodule "dependencies/ros2_kortex"]
+	path = dependencies/ros2_kortex
+	url = https://github.com/Kinovarobotics/ros2_kortex.git
+	branch = jazzy
+[submodule "dependencies/ros2_robotiq_gripper"]
+	path = dependencies/ros2_robotiq_gripper
+	url = https://github.com/PickNikRobotics/ros2_robotiq_gripper.git

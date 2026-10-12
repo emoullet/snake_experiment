@@ -5,6 +5,7 @@ from snake_experiment_ui.calibration import (
     CalibrationError,
     CalibrationState,
     POSE_IDS,
+    validate_calibration_robot,
 )
 
 
@@ -89,6 +90,26 @@ class CalibrationStateTest(unittest.TestCase):
         self.assertEqual(document["schema_version"], 1)
         self.assertEqual(document["reference_frame"], "base_link")
         self.assertEqual(tuple(document["poses"]), POSE_IDS)
+
+    def test_calibration_records_and_requires_same_robot_and_tool(self):
+        for robot, frame in [("explorer", "ft_frame"), ("kinova", "end_effector_link")]:
+            state = CalibrationState(1.0, lambda: "baseline", robot=robot)
+            state.update_live_pose(pose_message())
+            for pose_id in POSE_IDS:
+                state.capture(pose_id)
+            document = state.calibration_document()
+            self.assertEqual(document["robot"]["id"], robot)
+            self.assertEqual(document["robot"]["ee_frame"], frame)
+            validate_calibration_robot(document, robot)
+            other = "kinova" if robot == "explorer" else "explorer"
+            with self.assertRaisesRegex(CalibrationError, "differs from selected robot"):
+                validate_calibration_robot(document, other)
+            document["robot"]["ee_frame"] = "different_tool"
+            with self.assertRaisesRegex(CalibrationError, "end-effector frame"):
+                validate_calibration_robot(document, robot)
+        for document in [{}, {"robot": "explorer"}, {"robot": {"id": "unknown"}}]:
+            with self.assertRaisesRegex(CalibrationError, "robot is unknown"):
+                validate_calibration_robot(document, "explorer")
 
     def test_mixed_frames_block_save(self):
         for index, pose_id in enumerate(POSE_IDS):

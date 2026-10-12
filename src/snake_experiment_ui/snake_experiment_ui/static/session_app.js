@@ -417,7 +417,11 @@ class SessionInterface {
     this.setText(stackButton, active ? "Stop experiment stack" : "Start experiment stack");
     stackButton.classList.toggle("is-danger", active);
     this.setDisabled(stackButton, this.busy || ["starting", "stopping"].includes(stack.status));
-    this.setText(document.getElementById("stack-help"), `${stack.use_simulation ? "Simulation" : "Hardware"} profile · launch ownership remains with this interface.`);
+    const robotLabel = stack.robot === "kinova" ? `Kinova Gen3 · ${stack.robot_ip}` : "Explorer";
+    const environmentLabel = stack.use_simulation
+      ? (stack.robot === "kinova" ? "Simulation (fake hardware)" : "Simulation")
+      : "Hardware";
+    this.setText(document.getElementById("stack-help"), `${robotLabel} · ${environmentLabel} · launch ownership remains with this interface.`);
 
     for (const mode of ["baseline", "snake"]) this.renderMode(mode);
     const goTo = this.state.go_to || {};

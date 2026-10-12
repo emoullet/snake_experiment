@@ -42,6 +42,8 @@ class SessionInterfaceNode(Node):
         super().__init__("snake_experiment_session_interface")
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("port", 8081)
+        self.declare_parameter("stack_robot", "explorer")
+        self.declare_parameter("stack_robot_ip", "192.168.1.10")
         self.declare_parameter("stack_use_simulation", False)
         self.declare_parameter("diagnostic_profile", "")
         self.declare_parameter("experiment_profile", "")
@@ -65,7 +67,11 @@ class SessionInterfaceNode(Node):
         profile_path = (
             Path(configured_profile)
             if configured_profile
-            else share / "config/system_checkup.yaml"
+            else share / "config" / (
+                "system_checkup_kinova.yaml"
+                if self.get_parameter("stack_robot").value == "kinova"
+                else "system_checkup.yaml"
+            )
         )
         self._profile = DiagnosticProfile(profile_path)
         measurement_window = float(
@@ -101,6 +107,7 @@ class SessionInterfaceNode(Node):
             PoseStamped, "/pose_target", 10
         )
         self._mode_manager = ModeManager(
+            robot=str(self.get_parameter("stack_robot").value),
             node_names=self._node_names,
             publish_mode_request=self._publish_mode_request,
             mapper_transition=self._request_mapper_client_reset,
@@ -113,6 +120,8 @@ class SessionInterfaceNode(Node):
         )
         use_simulation = bool(self.get_parameter("stack_use_simulation").value)
         self._stack_manager = StackManager(
+            robot=str(self.get_parameter("stack_robot").value),
+            robot_ip=str(self.get_parameter("stack_robot_ip").value),
             node_names=self._node_names,
             use_simulation=use_simulation,
             startup_timeout_sec=float(
@@ -132,8 +141,9 @@ class SessionInterfaceNode(Node):
             ),
         )
         self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
-        preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share)
-        self._robot_preview = RobotPreview(configuration=preview_configuration)
+        preview_robot = str(self.get_parameter("stack_robot").value)
+        preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share, robot=preview_robot)
+        self._robot_preview = RobotPreview(configuration=preview_configuration, robot=preview_robot)
         self._snake_button_monitor = SnakeButtonMonitor(preview_configuration.snake_button_index)
         go_to_options = {
             "publish_target": self._publish_pose_target,
@@ -214,6 +224,7 @@ class SessionInterfaceNode(Node):
             else Path.cwd() / "calibrations/latest_calib.json"
         )
         self._checkup = CheckupController(
+            robot=preview_robot,
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
             diagnostics=self._diagnostics,
@@ -257,6 +268,7 @@ class SessionInterfaceNode(Node):
             for mode, states in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2")))
         }
         self._experiment = ExperimentController(
+            robot=preview_robot,
             profile=self._experiment_profile,
             stack_manager=self._stack_manager,
             mode_manager=self._mode_manager,
@@ -277,6 +289,17 @@ class SessionInterfaceNode(Node):
             mode_manager=self._mode_manager,
             experiment_profile=experiment_profile_path,
             experiment_prepare=self._experiment.prepare,
+            robot_configuration={
+                "id": preview_robot,
+                "model": preview_configuration.public["robot"],
+                "label": preview_configuration.public["robot_label"],
+                "use_simulation": bool(self.get_parameter("stack_use_simulation").value),
+                "robot_ip": self._stack_manager.snapshot()["robot_ip"],
+                "joystick_profiles": {
+                    mode: f"experimental_environment/bringup/joystick_mapper/config/joystick_2d_{mode}_{preview_robot}.yaml"
+                    for mode in ("baseline", "snake")
+                },
+            },
         )
         app = create_session_app(
             self._checkup,

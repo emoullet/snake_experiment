@@ -41,11 +41,11 @@ modes:
   baseline:
     mode_request: geometric/both
     mapper_modes: [b1, b2, b3]
-    mapper_config: ../bringup/joystick_mapper/config/joystick_2d_baseline.yaml
+    mapper_config: ../bringup/joystick_mapper/config/joystick_2d_baseline_explorer.yaml
   snake:
     mode_request: geometric/both
     mapper_modes: [b1, b2]
-    mapper_config: ../bringup/joystick_mapper/config/joystick_2d_snake.yaml
+    mapper_config: ../bringup/joystick_mapper/config/joystick_2d_snake_explorer.yaml
 
 # Optional commit constraints. Populate a value to make a mismatch blocking.
 # Keys are paths relative to repository_root; "." designates the main repository.

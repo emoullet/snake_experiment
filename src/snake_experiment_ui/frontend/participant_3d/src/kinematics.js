@@ -2,32 +2,34 @@ import { Matrix4, Quaternion, Vector3 } from 'three';
 import { commandForAxis } from './mapping.js';
 
 export const ARM_JOINTS = Array.from({ length: 6 }, (_, index) => `joint_${index + 1}`);
+const armJoints = config => config.arm_joints || ARM_JOINTS;
+function boundedValue(joint, value) {
+  return joint.jointType === 'revolute'
+    ? Math.min(joint.limit.upper, Math.max(joint.limit.lower, value)) : value;
+}
 const POSITION_TOLERANCE = 0.003;
 const ANGLE_TOLERANCE = 0.012;
 
-export function setArmPose(robot, pose) {
-  for (const name of ARM_JOINTS) robot.setJointValue(name, pose[name]);
-  if (Number.isFinite(pose.right_finger_joint)) {
-    robot.setJointValue('right_finger_joint', pose.right_finger_joint);
-  }
+export function setArmPose(robot, pose, config = {}) {
+  for (const name of armJoints(config)) robot.setJointValue(name, pose[name]);
+  const gripper = config.gripper_joint || 'right_finger_joint';
+  if (Number.isFinite(pose[gripper])) robot.setJointValue(gripper, pose[gripper]);
   robot.updateMatrixWorld(true);
 }
 
-export function clampToLimits(robot, pose) {
+export function clampToLimits(robot, pose, config = {}) {
   const result = { ...pose };
-  for (const name of ARM_JOINTS) {
+  for (const name of armJoints(config)) {
     const joint = robot.joints[name];
     if (!joint) throw new Error(`Robot model is missing ${name}.`);
-    if (joint.jointType === 'revolute') {
-      result[name] = Math.min(joint.limit.upper, Math.max(joint.limit.lower, result[name]));
-    }
+    result[name] = boundedValue(joint, result[name]);
   }
   return result;
 }
 
-export function effectorPose(robot) {
-  const base = robot.links.base_link;
-  const tool = robot.links.ft_frame;
+export function effectorPose(robot, config = {}) {
+  const base = robot.links[config.frames?.base || 'base_link'];
+  const tool = robot.links[config.frames?.ee || 'ft_frame'];
   if (!base || !tool) throw new Error('The robot model is missing its base or end-effector frame.');
   robot.updateMatrixWorld(true);
   const relative = new Matrix4().copy(base.matrixWorld).invert().multiply(tool.matrixWorld);
@@ -74,33 +76,36 @@ function solveLinear(matrix, vector) {
 
 function dampedStep(jacobian, error) {
   const dampingSquared = 0.04 ** 2;
+  const count = jacobian[0].length;
   const normal = Array.from({ length: 6 }, (_, row) =>
     Array.from({ length: 6 }, (_, column) =>
-      jacobian.reduce((sum, values) => sum + values[row] * values[column], row === column ? dampingSquared : 0)));
-  const rhs = Array.from({ length: 6 }, (_, column) =>
-    jacobian.reduce((sum, values, row) => sum + values[column] * error[row], 0));
-  return solveLinear(normal, rhs);
+      jacobian[row].reduce((sum, value, joint) => sum + value * jacobian[column][joint],
+        row === column ? dampingSquared : 0)));
+  const taskStep = solveLinear(normal, error);
+  return taskStep && Array.from({ length: count }, (_, joint) =>
+    taskStep.reduce((sum, value, row) => sum + jacobian[row][joint] * value, 0));
 }
 
-function solveGoal(robot, start, goal) {
-  const joints = clampToLimits(robot, start);
+function solveGoal(robot, start, goal, config) {
+  const names = armJoints(config);
+  const joints = clampToLimits(robot, start, config);
   for (let iteration = 0; iteration < 48; iteration += 1) {
-    setArmPose(robot, joints);
-    const current = effectorPose(robot);
+    setArmPose(robot, joints, config);
+    const current = effectorPose(robot, config);
     const error = poseError(current, goal);
     if (Math.hypot(...error.slice(0, 3)) < POSITION_TOLERANCE
         && Math.hypot(...error.slice(3)) < ANGLE_TOLERANCE) {
       return { joints: { ...joints }, error };
     }
-    const jacobian = Array.from({ length: 6 }, () => Array(6).fill(0));
-    for (let jointIndex = 0; jointIndex < 6; jointIndex += 1) {
-      const name = ARM_JOINTS[jointIndex];
+    const jacobian = Array.from({ length: 6 }, () => Array(names.length).fill(0));
+    for (let jointIndex = 0; jointIndex < names.length; jointIndex += 1) {
+      const name = names[jointIndex];
       const old = joints[name];
       const joint = robot.joints[name];
-      const displacement = old + 1e-4 <= joint.limit.upper ? 1e-4 : -1e-4;
+      const displacement = joint.jointType !== 'revolute' || old + 1e-4 <= joint.limit.upper ? 1e-4 : -1e-4;
       joints[name] = old + displacement;
-      setArmPose(robot, joints);
-      const shifted = effectorPose(robot);
+      setArmPose(robot, joints, config);
+      const shifted = effectorPose(robot, config);
       joints[name] = old;
       const delta = poseError(current, shifted);
       for (let row = 0; row < 6; row += 1) jacobian[row][jointIndex] = delta[row] / displacement;
@@ -108,11 +113,11 @@ function solveGoal(robot, start, goal) {
     const step = dampedStep(jacobian, error);
     if (!step || step.some(value => !Number.isFinite(value))) break;
     let moved = false;
-    for (let index = 0; index < 6; index += 1) {
-      const name = ARM_JOINTS[index];
+    for (let index = 0; index < names.length; index += 1) {
+      const name = names[index];
       const joint = robot.joints[name];
-      const next = Math.min(joint.limit.upper, Math.max(joint.limit.lower,
-        joints[name] + Math.max(-0.12, Math.min(0.12, step[index]))));
+      const next = boundedValue(joint,
+        joints[name] + Math.max(-0.12, Math.min(0.12, step[index])));
       moved ||= Math.abs(next - joints[name]) > 1e-8;
       joints[name] = next;
     }
@@ -137,16 +142,16 @@ function goalForCommand(start, command, config, fraction) {
 }
 
 export function solveAxisEndpoints(robot, startPose, config, mode, submode, axisIndex, snakeHeld) {
-  const base = clampToLimits(robot, startPose);
-  setArmPose(robot, base);
-  const initial = effectorPose(robot);
-  const result = { start: base, positive: base, negative: base, fraction: 0 };
+  const base = clampToLimits(robot, startPose, config);
+  setArmPose(robot, base, config);
+  const initial = effectorPose(robot, config);
+  const result = { arm_joints: armJoints(config), start: base, positive: base, negative: base, fraction: 0 };
   for (const fraction of [1, 0.75, 0.5, 0.25, 0.125, 0.0625]) {
     const endpoints = [];
     for (const sign of [1, -1]) {
       const command = commandForAxis(config, mode, submode, axisIndex, sign, snakeHeld, initial.rotation);
       const goal = goalForCommand(initial, command, config, fraction);
-      const solved = solveGoal(robot, base, goal);
+      const solved = solveGoal(robot, base, goal, config);
       if (!solved) break;
       endpoints.push(solved.joints);
     }
@@ -157,7 +162,7 @@ export function solveAxisEndpoints(robot, startPose, config, mode, submode, axis
       break;
     }
   }
-  setArmPose(robot, base);
+  setArmPose(robot, base, config);
   return result;
 }
 
@@ -169,7 +174,7 @@ export function cyclePose(endpoints, phase) {
   if (amount === 0) return { ...endpoints.start };
   if (Math.abs(amount - 1) < 1e-12) return { ...target };
   const pose = { ...endpoints.start };
-  for (const name of ARM_JOINTS) {
+  for (const name of endpoints.arm_joints || ARM_JOINTS) {
     pose[name] = endpoints.start[name] + (target[name] - endpoints.start[name]) * amount;
   }
   return pose;

@@ -12,6 +12,8 @@ def generate_launch_description():
         DeclareLaunchArgument("port", default_value="8080"),
         DeclareLaunchArgument("pose_topic", default_value="/ee_pose"),
         DeclareLaunchArgument("pose_max_age_sec", default_value="1.0"),
+        DeclareLaunchArgument("stack_robot", default_value="explorer", choices=["explorer", "kinova"]),
+        DeclareLaunchArgument("stack_robot_ip", default_value="192.168.1.10"),
         DeclareLaunchArgument("stack_use_simulation", default_value="true"),
         DeclareLaunchArgument("stack_startup_timeout_sec", default_value="15.0"),
         DeclareLaunchArgument("stack_shutdown_timeout_sec", default_value="10.0"),
@@ -27,6 +29,8 @@ def generate_launch_description():
                 "port": LaunchConfiguration("port"),
                 "pose_topic": LaunchConfiguration("pose_topic"),
                 "pose_max_age_sec": LaunchConfiguration("pose_max_age_sec"),
+                "stack_robot": LaunchConfiguration("stack_robot"),
+                "stack_robot_ip": LaunchConfiguration("stack_robot_ip"),
                 "stack_use_simulation": LaunchConfiguration(
                     "stack_use_simulation"
                 ),

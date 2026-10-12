@@ -44,7 +44,7 @@ function connect() {
   socket.onmessage = event => {
     try {
       const state = JSON.parse(event.data);
-      if (state.robot === 'explorer_poc2') setConnection(state.status === 'live' ? 'Live pose' : 'Demo pose');
+      if (state.robot === animator.config?.robot) setConnection(state.status === 'live' ? 'Live pose' : 'Demo pose');
     } catch { /* Ignore malformed state. */ }
   };
   socket.onclose = () => {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import csv
 from datetime import datetime, timezone
 import hashlib
@@ -14,6 +15,9 @@ import string
 import tempfile
 import threading
 from typing import Callable, Optional
+
+
+from .calibration import CalibrationError, validate_calibration_robot
 
 
 CSV_FIELDS = [
@@ -62,12 +66,14 @@ class EnrollmentController:
         experiment_prepare: Optional[Callable[[dict], dict]] = None,
         utc_clock: Callable[[], str] = _utc_now,
         token_choice: Callable = secrets.choice,
+        robot_configuration: Optional[dict] = None,
     ) -> None:
         self._sessions_root = Path(sessions_root).resolve()
         self._calibration_file = Path(calibration_file).resolve()
         self._bringup_root = Path(bringup_root).resolve()
         self._checkup_report_provider = checkup_report_provider
         self._provenance_provider = provenance_provider
+        self._robot_configuration = copy.deepcopy(robot_configuration)
         self._stack = stack_manager
         self._modes = mode_manager
         self._experiment_profile = (
@@ -265,6 +271,7 @@ class EnrollmentController:
                 raise EnrollmentError(
                     f"Participant manifest is unreadable: {pseudonym}"
                 ) from error
+            self._validate_calibration_robot(folder / "calibration/latest_calib.json")
             mismatches = self._compare_environment(manifest)
             self._mismatches = mismatches
             if mismatches and not acknowledge_mismatch:
@@ -494,6 +501,14 @@ class EnrollmentController:
             if path.is_file() and "config" in path.relative_to(self._bringup_root).parts:
                 yield path
 
+    def _validate_calibration_robot(self, path: Path) -> None:
+        robot = self._robot_configuration["id"] if self._robot_configuration else "explorer"
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+            validate_calibration_robot(document, robot)
+        except (OSError, UnicodeError, json.JSONDecodeError, CalibrationError) as error:
+            raise EnrollmentError(f"Invalid session calibration: {error}") from error
+
     def _populate_environment(self, folder: Path, row: dict, report: dict, now: str) -> dict:
         if not self._calibration_file.is_file():
             raise EnrollmentError(f"Calibration file not found: {self._calibration_file}")
@@ -525,6 +540,7 @@ class EnrollmentController:
             )
         calibration_destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self._calibration_file, calibration_destination)
+        self._validate_calibration_robot(calibration_destination)
         checkup_destination.parent.mkdir(parents=True, exist_ok=True)
         checkup_destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         manifest = {
@@ -545,10 +561,20 @@ class EnrollmentController:
                 {"path": str(Path("checkups") / checkup_destination.name), "sha256": _sha256(checkup_destination)},
             ],
         }
+        if self._robot_configuration is not None:
+            manifest["robot"] = copy.deepcopy(self._robot_configuration)
+            manifest["robot_history"] = [self._robot_history_entry(checkup_id, now)]
         (folder / "manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         return manifest
+
+    def _robot_history_entry(self, checkup_id: str, timestamp: str) -> dict:
+        return {
+            "checkup_id": checkup_id,
+            "recorded_at_utc": timestamp,
+            "configuration": copy.deepcopy(self._robot_configuration),
+        }
 
     def _append_checkup_report(self, folder: Path, manifest: dict, report: dict) -> dict:
         checkup_id = report.get("checkup_id")
@@ -570,6 +596,10 @@ class EnrollmentController:
         history.append(relative)
         updated["checkup_reports"] = history
         updated["active_checkup_report"] = relative
+        if self._robot_configuration is not None:
+            robot_history = list(updated.get("robot_history", []))
+            robot_history.append(self._robot_history_entry(checkup_id, self._utc_clock()))
+            updated["robot_history"] = robot_history
         files = list(updated.get("files", []))
         files.append({"path": relative, "sha256": _sha256(destination)})
         updated["files"] = files
@@ -613,6 +643,15 @@ class EnrollmentController:
         if "experimental_environment/experiment.yaml" not in saved:
             current.pop("experimental_environment/experiment.yaml", None)
         mismatches = []
+        if self._robot_configuration is not None:
+            robot_history = manifest.get("robot_history", [])
+            saved_robot = robot_history[-1]["configuration"] if robot_history else manifest.get("robot")
+            if saved_robot != self._robot_configuration:
+                mismatches.append({
+                    "path": "robot configuration (unknown in older sessions)" if saved_robot is None else "robot configuration",
+                    "saved": saved_robot,
+                    "current": copy.deepcopy(self._robot_configuration),
+                })
         for path in sorted(set(saved) | set(current)):
             if saved.get(path) != current.get(path):
                 mismatches.append({"path": path, "saved": saved.get(path), "current": current.get(path)})

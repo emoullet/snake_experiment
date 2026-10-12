@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ipaddress import AddressValueError, IPv4Address
 import os
 import signal
 import subprocess
@@ -25,7 +26,18 @@ class StackManager:
         shutdown_timeout_sec: float = 10.0,
         popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
         sleep: Callable[[float], None] = time.sleep,
+        robot: str = "explorer",
+        robot_ip: str = "192.168.1.10",
     ) -> None:
+        if robot not in ("explorer", "kinova"):
+            raise StackError(f"Unknown experiment robot: {robot}")
+        if robot == "kinova":
+            try:
+                IPv4Address(robot_ip)
+            except AddressValueError as error:
+                raise StackError(f"Invalid Kinova IPv4 address: {robot_ip}") from error
+        self._robot = robot
+        self._robot_ip = robot_ip
         self._node_names = node_names
         self._use_simulation = use_simulation
         self._startup_timeout_sec = startup_timeout_sec
@@ -64,6 +76,8 @@ class StackManager:
                 "status": self._status,
                 "error": self._error,
                 "use_simulation": self._use_simulation,
+                "robot": self._robot,
+                "robot_ip": self._robot_ip if self._robot == "kinova" else None,
             }
 
     def start(self) -> dict:
@@ -83,9 +97,11 @@ class StackManager:
                 "ros2",
                 "launch",
                 "snake_experiment_ui",
-                "explorer.launch.py",
+                f"{self._robot}.launch.py",
                 f"use_simulation:={str(self._use_simulation).lower()}",
             ]
+            if self._robot == "kinova":
+                command.append(f"robot_ip:={self._robot_ip}")
             try:
                 self._process = self._popen_factory(command, start_new_session=True)
             except OSError as error:

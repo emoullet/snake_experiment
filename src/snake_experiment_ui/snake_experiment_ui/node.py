@@ -30,6 +30,8 @@ class TargetCalibrationNode(Node):
         self.declare_parameter("pose_max_age_sec", 1.0)
         self.declare_parameter("mode_startup_timeout_sec", 5.0)
         self.declare_parameter("mode_shutdown_timeout_sec", 5.0)
+        self.declare_parameter("stack_robot", "explorer")
+        self.declare_parameter("stack_robot_ip", "192.168.1.10")
         self.declare_parameter("stack_use_simulation", True)
         self.declare_parameter("stack_startup_timeout_sec", 15.0)
         self.declare_parameter("stack_shutdown_timeout_sec", 10.0)
@@ -39,6 +41,7 @@ class TargetCalibrationNode(Node):
         self._active_mode_request = None
         self._mode_refresh_timer = self.create_timer(1.0, self._refresh_mode_request)
         self._mode_manager = ModeManager(
+            robot=str(self.get_parameter("stack_robot").value),
             node_names=self._node_names,
             publish_mode_request=self._publish_mode_request,
             startup_timeout_sec=float(
@@ -49,6 +52,8 @@ class TargetCalibrationNode(Node):
             ),
         )
         self._stack_manager = StackManager(
+            robot=str(self.get_parameter("stack_robot").value),
+            robot_ip=str(self.get_parameter("stack_robot_ip").value),
             node_names=self._node_names,
             use_simulation=bool(self.get_parameter("stack_use_simulation").value),
             startup_timeout_sec=float(
@@ -61,6 +66,7 @@ class TargetCalibrationNode(Node):
         self._calibration_state = CalibrationState(
             max_pose_age_sec=float(self.get_parameter("pose_max_age_sec").value),
             mode_provider=self._mode_manager.active_mode,
+            robot=str(self.get_parameter("stack_robot").value),
         )
         self._pose_subscription = self.create_subscription(
             PoseStamped,
