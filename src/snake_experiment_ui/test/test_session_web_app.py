@@ -675,6 +675,15 @@ class SessionTemplateTest(unittest.TestCase):
         for index in range(1, 7):
             self.assertIn(f"View {index}</button>", participant)
 
+    def test_discovery_uses_video_explanation_without_instructions_placeholder(self):
+        package_root = Path(__file__).parents[1] / "snake_experiment_ui"
+        script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
+        self.assertNotIn("Standardised instructions", script)
+        self.assertNotIn("Replace this placeholder before running participant sessions.", script)
+        self.assertIn("Show mode explanation", script)
+        self.assertIn("Explanation done", script)
+        self.assertIn("!explanationDone", script)
+
     def test_participant_form_is_reset_for_another_selection(self):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
@@ -757,7 +766,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
         self.assertIn("session_style.css?v=session-style-3", html)
-        self.assertIn("session_app.js?v=session-app-5", html)
+        self.assertIn("session_app.js?v=session-app-6", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(
