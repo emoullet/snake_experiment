@@ -273,6 +273,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request("GET", "/participant/api/state")
         self.assertEqual(response.json(), {
             "view": "A", "presentation_status": "showing", "video_available": False,
+            "overload_warning": None,
         })
         self.assertNotIn("participant", response.text)
         self.assertEqual((await self.request("GET", "/participant/video")).status_code, 404)
@@ -603,7 +604,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('workspace.classList.toggle("participant-workspace--trial", showC)', script)
         self.assertIn('.participant-workspace--trial { width: min(1540px, calc(100% - 32px)); }', style)
         self.assertIn('grid-template-columns: minmax(0, 1.1fr) minmax(250px, 1fr)', style)
-        self.assertIn('participant_style.css?v=participant-camera-views-1', html)
+        self.assertIn('participant_style.css?v=participant-overload-1', html)
         self.assertIn('participant_mapping.bundle.js?v=participant-mapping-7', html)
         self.assertIn('data-mapping-source class="pill pill--neutral"', html)
         self.assertNotIn('id="participant-state-image"', html)
@@ -614,7 +615,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('successEventInitialized = true', script)
         self.assertIn('await successSound.play()', script)
         self.assertIn('soundRetry.hidden = false', script)
-        self.assertIn('participant_app.js?v=participant-video-play-1', html)
+        self.assertIn('participant_app.js?v=participant-overload-1', html)
         self.assertTrue((package_root / "static/mario_coin_sound.mp3").is_file())
         self.assertNotIn('innerHTML', script)
         self.assertNotIn('/api/experiment/', script)

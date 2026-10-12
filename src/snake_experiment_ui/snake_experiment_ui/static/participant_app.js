@@ -30,6 +30,15 @@
   const successSound = new Audio("/session-static/mario_coin_sound.mp3");
   successSound.preload = "auto";
   const connection = document.getElementById("participant-connection");
+  const overloadBanner = document.getElementById("participant-overload-warning");
+  const overloadMessage = document.getElementById("participant-overload-message");
+  const overloadMessages = {
+    retreating: "Force overload detected. Commands paused. Automatic retreat in progress.",
+    waiting_clear: "Commands paused. Retreat paused while contact force clears.",
+    retreat_complete: "Retreat complete. Commands remain paused. Please wait for the experimenter.",
+    paused: "Force overload detected. Commands paused. Please wait for the experimenter.",
+    unavailable: "Commands paused. Please wait for the experimenter.",
+  };
   let reconnectDelay = 500;
   let cameraStream = null;
   let cameraRequest = 0;
@@ -150,6 +159,9 @@
   soundRetry.addEventListener("click", () => { void playSuccessSound(); });
 
   function render(state) {
+    const warning = overloadMessages[state.overload_warning?.phase] || "";
+    setText(overloadMessage, warning);
+    overloadBanner.hidden = !warning;
     const showA = state.view === "A";
     const showB = state.view === "B" && ["baseline", "snake"].includes(state.mode);
     const showC = state.view === "C" && ["baseline", "snake"].includes(state.mode);
@@ -240,6 +252,7 @@
     socket.onclose = () => {
       connection.textContent = "Reconnecting";
       connection.className = "pill pill--warning";
+      if (!overloadBanner.hidden) setText(overloadMessage, overloadMessages.unavailable);
       window.setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 5000);
     };

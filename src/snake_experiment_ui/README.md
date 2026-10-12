@@ -112,6 +112,13 @@ Robotiq description required by Kortex.
    in order. Acquisitions are saved as MCAP files; interrupted attempts can be
    retried or recorded as deviations.
 
+The participant page shows an orange warning throughout a confirmed overload
+episode while the stack is active. It distinguishes retreat motion, waiting for
+contact force to clear, and completed or stopped retreat. Commands remain paused
+until the experimenter rearms protection. Missing telemetry alone does not create
+an overload warning; during a known episode it replaces motion claims with a
+generic paused message.
+
 Calibrations record their source robot (`explorer` or `kinova`), model, and
 end-effector frame under `robot` in their current calibration file. The check-up, enrolment,
 session resume, and experiment preparation require the same robot and tool frame.

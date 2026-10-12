@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .overload import ProtectionError
+from .overload import ParticipantOverloadWarning, ProtectionError
 from .checkup import CheckupError
 from .diagnostics import DiagnosticProfileError
 from .enrollment import EnrollmentError
@@ -106,11 +106,13 @@ def create_session_app(
     protection_guard=None,
     protection_action=None,
     preview_default_view="view_1",
+    stack_snapshot=None,
 ):
     """Create the View B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
     websocket_clients = 0
     app.state.shutting_down = False
+    participant_warning = ParticipantOverloadWarning()
 
     @app.middleware("http")
     async def protect_commands(request, call_next):
@@ -247,11 +249,20 @@ def create_session_app(
         except (WebSocketDisconnect, RuntimeError):
             return
 
-    @app.get("/participant/api/state")
-    async def participant_state():
-        return experiment.participant_snapshot() if experiment is not None else {
+    def participant_projection():
+        state = dict(experiment.participant_snapshot()) if experiment is not None else {
             "view": "waiting", "presentation_status": "pending", "video_available": False,
         }
+        state["overload_warning"] = None
+        if protection_snapshot is not None:
+            protection = protection_snapshot()
+            stack = stack_snapshot() if stack_snapshot is not None else checkup.snapshot().get("stack", {})
+            state["overload_warning"] = participant_warning.snapshot(protection, stack.get("status") == "active")
+        return state
+
+    @app.get("/participant/api/state")
+    async def participant_state():
+        return participant_projection()
 
     @app.get("/participant/video", include_in_schema=False)
     async def participant_video():
@@ -292,9 +303,7 @@ def create_session_app(
         previous = None
         try:
             while not app.state.shutting_down:
-                current = experiment.participant_snapshot() if experiment is not None else {
-                    "view": "waiting", "presentation_status": "pending", "video_available": False,
-                }
+                current = participant_projection()
                 serialised = json.dumps(current, sort_keys=True)
                 if serialised != previous:
                     await websocket.send_json(current)

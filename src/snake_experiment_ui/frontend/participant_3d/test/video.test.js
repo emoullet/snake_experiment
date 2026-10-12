@@ -37,7 +37,7 @@ class Element extends EventTarget {
   loaded() { this.readyState = 1; this.dispatchEvent(new Event('loadedmetadata')); }
 }
 
-async function client(initial = { view: 'waiting' }, delayedInitial = null) {
+async function client(initial = { view: 'waiting' }, delayedInitial = null, cameraProvider = null) {
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, new Element());
@@ -49,14 +49,18 @@ async function client(initial = { view: 'waiting' }, delayedInitial = null) {
   window.location = { protocol: 'http:', host: 'test' };
   window.setTimeout = () => {};
   vm.runInNewContext(script, {
-    document: { getElementById: element, querySelector: element }, window, navigator: {},
+    document: { getElementById: element, querySelector: element }, window,
+    navigator: { mediaDevices: cameraProvider ? { getUserMedia: cameraProvider } : undefined },
     Audio: Element,
     WebSocket: class { constructor() { socket = this; } },
     CustomEvent: class extends Event { constructor(name, options) { super(name); this.detail = options.detail; } },
     fetch: async () => ({ json: async () => delayedInitial || initial }),
   });
   await flush();
-  return { element, send: state => socket.onmessage({ data: JSON.stringify(state) }) };
+  return {
+    element, send: state => socket.onmessage({ data: JSON.stringify(state) }),
+    disconnect: () => socket.onclose(),
+  };
 }
 
 const videoState = (id, view = 'A', mode = null, available = true) => ({
@@ -160,4 +164,58 @@ test('late play promise rejections from a cancelled request do not affect the ne
   const reloaded = await client(videoState('request-1'));
   reloaded.element('participant-video').loaded();
   assert.equal(reloaded.element('participant-video').playCalls.length, 1);
+});
+
+test('overload banner updates on all screens without replacing nodes or restarting videos', async () => {
+  for (const [view, mode] of [['A', null], ['B', 'snake'], ['C', 'baseline'], ['waiting', null]]) {
+    const state = videoState('video-1', view, mode);
+    const c = await client(state);
+    const banner = c.element('participant-overload-warning');
+    const message = c.element('participant-overload-message');
+    const player = c.element(view === 'A' ? 'participant-video' : 'participant-mode-video');
+    if (view === 'A' || view === 'B') player.loaded();
+    player.currentTime = 7;
+    const plays = player.playCalls.length;
+    for (const [phase, expected] of [
+      ['retreating', 'Automatic retreat in progress.'],
+      ['waiting_clear', 'Retreat paused while contact force clears.'],
+      ['retreat_complete', 'Retreat complete.'],
+      ['paused', 'Force overload detected.'],
+      ['unavailable', 'Commands paused. Please wait for the experimenter.'],
+    ]) {
+      c.send({ ...state, overload_warning: { phase } });
+      assert.equal(banner.hidden, false);
+      assert.ok(message.textContent.includes(expected));
+      assert.equal(c.element('participant-overload-warning'), banner);
+      assert.equal(c.element('participant-overload-message'), message);
+      assert.equal(player.playCalls.length, plays);
+      assert.equal(player.currentTime, 7);
+    }
+    c.send({ ...state, overload_warning: null });
+    assert.equal(banner.hidden, true);
+  }
+});
+
+test('overload warning leaves the active webcam stream running', async () => {
+  let starts = 0;
+  let stops = 0;
+  const stream = { getTracks: () => [{ stop: () => { stops++; } }] };
+  const state = { view: 'C', mode: 'baseline', phase: 'training' };
+  const c = await client(state, null, async () => { starts++; return stream; });
+  assert.equal(c.element('participant-camera-video').srcObject, stream);
+  c.send({ ...state, overload_warning: { phase: 'retreating' } });
+  c.send({ ...state, overload_warning: { phase: 'retreat_complete' } });
+  assert.equal(c.element('participant-camera-video').srcObject, stream);
+  assert.equal(starts, 1);
+  assert.equal(stops, 0);
+});
+
+test('disconnection stops announcing movement only when an overload warning already exists', async () => {
+  const c = await client({ view: 'waiting', overload_warning: { phase: 'retreating' } });
+  c.disconnect();
+  assert.equal(c.element('participant-overload-warning').hidden, false);
+  assert.equal(c.element('participant-overload-message').textContent, 'Commands paused. Please wait for the experimenter.');
+  const normal = await client({ view: 'waiting', overload_warning: null });
+  normal.disconnect();
+  assert.equal(normal.element('participant-overload-warning').hidden, true);
 });

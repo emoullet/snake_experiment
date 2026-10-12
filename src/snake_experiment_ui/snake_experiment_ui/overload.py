@@ -16,6 +16,60 @@ class ProtectionError(RuntimeError):
     pass
 
 
+class ParticipantOverloadWarning:
+    """Remember confirmed episodes for display only, never influence protection."""
+
+    _RETREAT_STATES = {"translating", "waiting_clear", "rotating", "locked"}
+    _OVERLOAD_REASONS = {
+        "overload", "overload_during_rotation", "retreat_disabled", "completed",
+        "waiting_for_clear_force", "no_compatible_calibration",
+        "invalid_calibration_pose", "invalid_calibration_distance",
+    }
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._episode = None
+        self._confirmed = False
+
+    def snapshot(self, state, stack_active):
+        with self._lock:
+            fresh = state.get("fresh") is True
+            if not stack_active or (fresh and state.get("state") == "normal" and not state.get("blocked")):
+                self._episode, self._confirmed = None, False
+                return None
+            event = state.get("event", 0)
+            episode = (state.get("instance"), event)
+            if fresh and episode != self._episode:
+                self._episode, self._confirmed = episode, False
+            if fresh and type(event) is int and event > 0 and state.get("blocked"):
+                history = state.get("phase_history", [])
+                previous_retreat = isinstance(history, list) and any(
+                    isinstance(phase, dict) and phase.get("state") in self._RETREAT_STATES
+                    for phase in history
+                )
+                self._confirmed = self._confirmed or (
+                    state.get("overloaded") is True and state.get("overload_valid") is True
+                    or state.get("state") in self._RETREAT_STATES
+                    or state.get("reason") in self._OVERLOAD_REASONS
+                    or previous_retreat
+                )
+            if not self._confirmed:
+                return None
+            if not fresh:
+                return {"phase": "unavailable"}
+            if not state.get("blocked"):
+                return None
+            phase = state.get("state")
+            valid_feedback = state.get("overload_valid") is True and state.get("pose_valid") is True
+            if valid_feedback and phase in ("translating", "rotating"):
+                return {"phase": "retreating"}
+            if valid_feedback and phase == "waiting_clear":
+                return {"phase": "waiting_clear"}
+            if valid_feedback and phase == "locked" and state.get("reason") == "completed":
+                return {"phase": "retreat_complete"}
+            return {"phase": "paused"}
+
+
 def protection_action_state(queued, current):
     """Retain latched manager episodes; decide telemetry loss from live state.
 
