@@ -28,9 +28,12 @@ This revision supports Linux x86_64.
 Use Bash on Ubuntu 24.04 with ROS 2 Jazzy, starting in a fresh terminal.
 These commands install only the Kinova portion; the root README covers the
 full experiment build and the optional Python web virtual environment.
+Replace `/path/to/snake_experiment` with the location of your clone. The build
+workspace follows the layout in the root README; adapt `snake_ws` if you use
+a different workspace.
 
 ```bash
-cd /home/emoullet/dev/robot_experiments/snake_experiment
+cd /path/to/snake_experiment
 source /opt/ros/jazzy/setup.bash
 snake_src="$(git rev-parse --show-toplevel)"
 git submodule update --init --recursive dependencies/ros2_kortex dependencies/ros2_robotiq_gripper
@@ -79,7 +82,10 @@ hardware, not the experiment or Gazebo. Avoid running another robot stack at
 the same time. In a second Bash terminal:
 
 ```bash
-cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment
+cd /path/to/snake_experiment
+snake_src="$(git rev-parse --show-toplevel)"
+snake_ws="$(dirname "$snake_src")/workspaces/snake_experiment"
+cd "$snake_ws"
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 control list_controllers

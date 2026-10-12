@@ -221,15 +221,20 @@ pnpm run build
 Commit the generated bundles alongside the changed source files.
 
 After rebuilding the bundles, rebuild the ROS package and relaunch the session
-interface (stop the previous instance first). For the configured workspace:
+interface (stop the previous instance first). Replace `/path/to/snake_experiment`
+with the location of your clone. The workspace below follows the root README;
+adapt `snake_ws` if you use a different workspace:
 
 ```bash
-cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
+cd /path/to/snake_experiment
+snake_src="$(git rev-parse --show-toplevel)"
+snake_ws="$(dirname "$snake_src")/workspaces/snake_experiment"
+cd "$snake_ws"
 source /opt/ros/jazzy/setup.bash
-colcon build --base-paths /home/emoullet/dev/robot_experiments/snake_experiment/src --packages-select snake_experiment_ui --symlink-install
+colcon build --base-paths "$snake_src/src" --packages-select snake_experiment_ui --symlink-install
 source install/setup.bash
 ros2 launch snake_experiment_ui session_interface.launch.py \
-  repository_root:=/home/emoullet/dev/robot_experiments/snake_experiment \
+  repository_root:="$snake_src" \
   stack_robot:=kinova stack_use_simulation:=true
 ```
 

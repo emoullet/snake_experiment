@@ -45,11 +45,19 @@ Aucun mapper, Go-to ou enregistrement n'est restauré automatiquement. Après r�
 
 Arrêter l'ancienne interface et sa stack avec Ctrl+C, puis :
 
+Dans les commandes ci-dessous, remplacer `/path/to/snake_experiment` par le
+chemin de votre clone. `snake_ws` reprend l'emplacement du workspace décrit
+dans le README principal ; adapter cette variable si vous utilisez un autre
+workspace, en conservant le même emplacement dans chaque terminal.
+
 ```bash
-cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
+cd /path/to/snake_experiment
+snake_src="$(git rev-parse --show-toplevel)"
+snake_ws="$(dirname "$snake_src")/workspaces/snake_experiment"
+cd "$snake_ws"
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-colcon build --base-paths /home/emoullet/dev/robot_experiments/snake_experiment/dependencies /home/emoullet/dev/robot_experiments/snake_experiment/src --packages-select cartesian_manager qontrol_controller snake_experiment_ui --symlink-install --parallel-workers 1 --allow-overriding cartesian_manager qontrol_controller
+colcon build --base-paths "$snake_src/dependencies" "$snake_src/src" --packages-select cartesian_manager qontrol_controller snake_experiment_ui --symlink-install --parallel-workers 1 --allow-overriding cartesian_manager qontrol_controller
 source install/setup.bash
 ROS_DOMAIN_ID=91 ros2 launch snake_experiment_ui session_interface.launch.py stack_robot:=kinova stack_use_simulation:=true
 ```
@@ -67,7 +75,10 @@ Vérifier coupure bras/pince, cible et orientation, recul, maintien verrouillé,
 ## Tests isolés et limites
 
 ```bash
-cd /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641
+cd /path/to/snake_experiment
+snake_src="$(git rev-parse --show-toplevel)"
+snake_ws="$(dirname "$snake_src")/workspaces/snake_experiment"
+cd "$snake_ws"
 ctest --test-dir build/cartesian_manager -R '^overload_protection$' --output-on-failure
 ```
 
@@ -80,9 +91,11 @@ ROS_DOMAIN_ID=173 ros2 launch snake_experiment_ui kinova.launch.py use_simulatio
 Dans un autre terminal :
 
 ```bash
-cd /home/emoullet/dev/robot_experiments/snake_experiment
+cd /path/to/snake_experiment
+snake_src="$(git rev-parse --show-toplevel)"
+snake_ws="$(dirname "$snake_src")/workspaces/snake_experiment"
 source /opt/ros/jazzy/setup.bash
-source /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641/install/setup.bash
+source "$snake_ws/install/setup.bash"
 ROS_DOMAIN_ID=173 python3 scripts/check_overload_simulation.py
 ```
 
@@ -97,9 +110,11 @@ Exécutées : compilation des trois packages ; test C++ du manager ; scénarios 
 Les tests synthétiques sans robot se relancent dans un domaine libre :
 
 ```bash
-cd /home/emoullet/dev/robot_experiments/snake_experiment
+cd /path/to/snake_experiment
+snake_src="$(git rev-parse --show-toplevel)"
+snake_ws="$(dirname "$snake_src")/workspaces/snake_experiment"
 source /opt/ros/jazzy/setup.bash
-source /home/emoullet/dev/robot_experiments/workspaces/snake_experiment_a286641/install/setup.bash
+source "$snake_ws/install/setup.bash"
 ROS_DOMAIN_ID=176 python3 scripts/check_manager_overload.py
 ```
 
