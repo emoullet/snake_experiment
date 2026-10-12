@@ -104,6 +104,10 @@ Robotiq description required by Kortex.
    partial session can be resumed without overwriting its saved environment.
 4. **Presentation:** open <http://127.0.0.1:8081/participant> on the participant
    screen, show the presentation video, then confirm it in the operator interface.
+   Each click on Display starts the video from the beginning. Show mode explanation
+   does the same for Baseline and Snake, including after Explanation done.
+   If the browser blocks automatic playback with sound, press Play on the participant
+   screen. Routine state updates do not restart videos.
 5. **Experiment:** complete the six discovery, training, and recording blocks
    in order. Acquisitions are saved as MCAP files; interrupted attempts can be
    retried or recorded as deviations.

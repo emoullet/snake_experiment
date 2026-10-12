@@ -37,11 +37,58 @@
   let currentView = "waiting";
   let successEventInitialized = false;
   let lastSuccessEventId = null;
+  let receivedWebSocketState = false;
   const setText = (element, value) => { if (element.textContent !== value) element.textContent = value; };
   video.addEventListener("error", () => { videoError.hidden = false; });
   video.addEventListener("loadedmetadata", () => { videoError.hidden = true; });
   modeVideo.addEventListener("error", () => { modeVideoError.hidden = false; });
   modeVideo.addEventListener("loadedmetadata", () => { modeVideoError.hidden = true; });
+
+  function videoPlayback(player, warning, mediaError) {
+    const handled = new Set();
+    let current = null;
+    let metadataListener = null;
+    function cancel() {
+      if (metadataListener) player.removeEventListener("loadedmetadata", metadataListener);
+      metadataListener = null;
+      if (current) player.pause();
+      current = null;
+      warning.hidden = true;
+    }
+    function start(request) {
+      if (current !== request || player.getAttribute("src") !== request.source) return;
+      metadataListener = null;
+      try {
+        player.currentTime = 0;
+        Promise.resolve(player.play()).catch((error) => {
+          if (current !== request || error.name === "AbortError") return;
+          if (error.name === "NotAllowedError") warning.hidden = false;
+          else mediaError.hidden = false;
+        });
+      } catch {
+        if (current === request) mediaError.hidden = false;
+      }
+    }
+    player.addEventListener("play", () => { warning.hidden = true; });
+    player.addEventListener("error", cancel);
+    window.addEventListener("pagehide", cancel);
+    return (requestId, visible) => {
+      const source = player.getAttribute("src");
+      if (visible && requestId && current?.id === requestId && current.source === source) return;
+      cancel();
+      if (!visible || !requestId || !source || handled.has(requestId)) return;
+      handled.add(requestId);
+      current = { id: requestId, source };
+      const request = current;
+      if (player.readyState >= 1) start(request);
+      else {
+        metadataListener = () => start(request);
+        player.addEventListener("loadedmetadata", metadataListener, { once: true });
+      }
+    };
+  }
+  const presentationPlayback = videoPlayback(video, document.getElementById("participant-video-autoplay-warning"), videoError);
+  const explanationPlayback = videoPlayback(modeVideo, document.getElementById("participant-mode-video-autoplay-warning"), modeVideoError);
 
   function stopCamera() {
     cameraRequest += 1;
@@ -164,6 +211,8 @@
         modeVideoError.hidden = true;
       }
     }
+    presentationPlayback(state.video_play_request_id, showA && state.video_available);
+    explanationPlayback(state.video_play_request_id, showB && state.video_available);
     if (showC) {
       const modeName = state.mode === "baseline" ? "Baseline" : "Snake";
       const phaseName = state.phase === "recording" ? "recording" : "training";
@@ -184,7 +233,10 @@
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${scheme}//${window.location.host}/participant/ws`);
     socket.onopen = () => { reconnectDelay = 500; connection.textContent = "Connected"; connection.className = "pill pill--active"; };
-    socket.onmessage = (event) => render(JSON.parse(event.data));
+    socket.onmessage = (event) => {
+      receivedWebSocketState = true;
+      render(JSON.parse(event.data));
+    };
     socket.onclose = () => {
       connection.textContent = "Reconnecting";
       connection.className = "pill pill--warning";
@@ -192,6 +244,8 @@
       reconnectDelay = Math.min(reconnectDelay * 2, 5000);
     };
   }
-  fetch("/participant/api/state").then((response) => response.json()).then(render).catch(() => {});
+  fetch("/participant/api/state").then((response) => response.json()).then((state) => {
+    if (!receivedWebSocketState) render(state);
+  }).catch(() => {});
   connect();
 })();

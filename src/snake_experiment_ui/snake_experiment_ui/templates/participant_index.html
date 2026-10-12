@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-3" />
     <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-camera-views-1" />
     <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
-    <script src="/session-static/participant_app.js?v=participant-discovery-preview-1" defer></script>
+    <script src="/session-static/participant_app.js?v=participant-video-play-1" defer></script>
     <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-7" defer></script>
   </head>
   <body>
@@ -25,6 +25,7 @@
           <video id="participant-mode-video" controls preload="metadata" playsinline aria-label="Mode explanation video"></video>
         </div>
         <p id="participant-mode-video-error" class="inline-error" role="alert" hidden>The configured mode video could not be prepared for playback. Please notify the experimenter.</p>
+        <p id="participant-mode-video-autoplay-warning" class="inline-warning" role="status" hidden>Automatic playback was blocked. Press Play to start the video with sound.</p>
         <div id="participant-mode-video-placeholder" class="participant-video-placeholder" hidden>
           <strong>Mode explanation video unavailable</strong>
           <p>The experimenter may continue for development only.</p>
@@ -38,6 +39,7 @@
           <video id="participant-video" controls preload="metadata" playsinline aria-label="Experiment presentation video"></video>
         </div>
         <p id="participant-video-error" class="inline-error" role="alert" hidden>The configured video could not be prepared for playback. Please notify the experimenter.</p>
+        <p id="participant-video-autoplay-warning" class="inline-warning" role="status" hidden>Automatic playback was blocked. Press Play to start the video with sound.</p>
         <div id="participant-video-placeholder" class="participant-video-placeholder" hidden>
           <strong>Experiment_video.mp4</strong>
           <p>Presentation video is not available yet. The experimenter may continue for development only.</p>

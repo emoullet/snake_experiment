@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from typing import Callable, Optional
+import uuid
 
 import yaml
 
@@ -304,6 +305,7 @@ class ExperimentController:
         self._calibration: Optional[dict] = None
         self._latest_pose: Optional[dict] = None
         self._latest_pose_monotonic: Optional[float] = None
+        self._video_play_request: Optional[dict] = None
 
     def prepare(self, participant: dict) -> dict:
         """Load or create durable progress without starting a ROS process."""
@@ -428,6 +430,7 @@ class ExperimentController:
                 _atomic_json(progress_path, progress)
             self._participant = dict(participant)
             self._progress = progress
+            self._video_play_request = None
             self._current_view = "D"
             self._error = None
             self._cache_protection_context()
@@ -507,6 +510,7 @@ class ExperimentController:
                 presentation["status"] = "showing"
                 presentation["shown_at_utc"] = self._utc_clock()
                 self._persist(folder)
+            self._video_play_request = {"id": uuid.uuid4().hex, "kind": "presentation"}
             return self.snapshot()
 
     def complete_presentation(self) -> dict:
@@ -582,6 +586,9 @@ class ExperimentController:
                 block["updated_at_utc"] = self._utc_clock()
                 self._persist(folder)
                 self._write_block(folder, block)
+            self._video_play_request = {
+                "id": uuid.uuid4().hex, "kind": "mode_explanation", "block_id": block_id,
+            }
             return self.snapshot()
 
     def complete_mode_explanation(self, block_id: str) -> dict:
@@ -610,6 +617,7 @@ class ExperimentController:
         with self._lock:
             presentation = self._progress.get("presentation", {}) if self._progress else {}
             status = presentation.get("status", "pending")
+            video_request = self._video_play_request or {}
             active = (
                 self._block(self._progress["current_block"])
                 if self._progress and self._progress.get("current_block")
@@ -628,6 +636,11 @@ class ExperimentController:
                     "mode": active["mode"] if visible else None,
                     "explanation_status": explanation["status"],
                     "phase": "discovery",
+                    "video_play_request_id": (
+                        video_request.get("id")
+                        if visible and video_request.get("kind") == "mode_explanation"
+                        and video_request.get("block_id") == active["id"] else None
+                    ),
                     **(self._participant_mapper_state(active["mode"]) if visible else {}),
                 }
             if active and active["phase"] in TRIAL_PHASES and active["status"] == "running":
@@ -689,12 +702,20 @@ class ExperimentController:
                     for block in self._progress["blocks"]
                 )
             )
+            show_presentation = not active and (
+                video_request.get("kind") == "presentation"
+                or status in ("showing", "completed") and not any_explanation
+            )
             return {
-                "view": "A" if status in ("showing", "completed") and not any_explanation else "waiting",
+                "view": "A" if show_presentation else "waiting",
                 "presentation_status": status,
                 "video_available": self.presentation_video_available(),
                 "mode": None,
                 "explanation_status": "pending",
+                "video_play_request_id": (
+                    video_request.get("id")
+                    if show_presentation and video_request.get("kind") == "presentation" else None
+                ),
             }
 
     def start(self, block_id: str) -> dict:
@@ -720,6 +741,7 @@ class ExperimentController:
             if block["status"] == "not_started" and block_folder.exists():
                 raise ExperimentError(f"Block folder already exists unexpectedly: {block['folder']}")
             block_folder.mkdir(parents=False, exist_ok=True)
+            self._video_play_request = None
             block["attempts"] += 1
             now = self._utc_clock()
             block["started_at_utc"] = block["started_at_utc"] or now
@@ -924,6 +946,7 @@ class ExperimentController:
             block["updated_at_utc"] = now
             block["error"] = None
             progress["current_block"] = None
+            self._video_play_request = None
             self._current_view = "D"
             if self._next_block() is None:
                 try:
@@ -990,6 +1013,7 @@ class ExperimentController:
                 block["error"] += " Cleanup warning: " + "; ".join(cleanup_errors)
             progress["workflow"] = "interrupted"
             progress["current_block"] = None
+            self._video_play_request = None
             self._current_view = "D"
             self._error = block["error"] if cleanup_errors else None
             self._persist(folder)

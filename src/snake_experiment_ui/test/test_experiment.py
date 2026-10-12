@@ -339,7 +339,60 @@ class ExperimentControllerTest(unittest.TestCase):
         )
         resumed.prepare(self.participant)
         self.assertEqual(resumed.participant_snapshot()["view"], "A")
+        self.assertIsNone(resumed.participant_snapshot()["video_play_request_id"])
         self.assertEqual(resumed.snapshot()["progress"]["presentation"]["status"], "completed")
+
+    def test_display_requests_replay_all_videos_without_changing_validation_or_processes(self):
+        self.mark_as_new_session()
+        self.controller.prepare(self.participant)
+        progress_path = self.participant_folder / "experiment_progress.json"
+        self.controller.show_presentation()
+        first = self.controller.participant_snapshot()["video_play_request_id"]
+        self.assertTrue(first)
+        persisted = progress_path.read_bytes()
+        self.controller.show_presentation()
+        self.assertNotEqual(self.controller.participant_snapshot()["video_play_request_id"], first)
+        self.assertEqual(progress_path.read_bytes(), persisted)
+        self.controller.complete_presentation()
+        persisted = progress_path.read_bytes()
+        self.controller.show_presentation()
+        self.assertEqual(progress_path.read_bytes(), persisted)
+        self.assertEqual(self.controller.snapshot()["progress"]["presentation"]["status"], "completed")
+
+        for block_id, mode in (("mode_1_discovery", "snake"), ("mode_2_discovery", "baseline")):
+            self.controller.start(block_id)
+            self.assertIsNone(self.controller.participant_snapshot()["video_play_request_id"])
+            self.controller.show_mode_explanation(block_id)
+            first = self.controller.participant_snapshot()["video_play_request_id"]
+            self.assertEqual(self.controller.participant_snapshot()["mode"], mode)
+            self.assertEqual(self.controller.participant_snapshot()["video_play_request_id"], first)
+            self.controller.show_mode_explanation(block_id)
+            self.assertNotEqual(self.controller.participant_snapshot()["video_play_request_id"], first)
+            self.controller.complete_mode_explanation(block_id)
+            self.controller.set_control(block_id, True)
+            persisted = progress_path.read_bytes()
+            starts, activations = len(self.rosbag.starts), list(self.modes.activations)
+            self.controller.show_mode_explanation(block_id)
+            self.assertEqual(progress_path.read_bytes(), persisted)
+            self.assertEqual((len(self.rosbag.starts), self.modes.activations), (starts, activations))
+            self.assertTrue(self.controller.snapshot()["control_active"])
+            self.controller.set_control(block_id, False)
+            self.controller.end(block_id, True)
+            self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
+            self.assertIsNone(self.controller.participant_snapshot()["video_play_request_id"])
+            self.controller.show_presentation()
+            self.assertEqual(self.controller.participant_snapshot()["view"], "A")
+        self.assertNotIn("video_play_request", progress_path.read_text())
+
+    def test_aborted_explanation_does_not_replay_automatically_on_resume(self):
+        self.prepare_session()
+        self.controller.start("mode_1_discovery")
+        self.controller.show_mode_explanation("mode_1_discovery")
+        self.assertTrue(self.controller.participant_snapshot()["video_play_request_id"])
+        self.controller.abort("mode_1_discovery")
+        self.controller.start("mode_1_discovery")
+        self.assertEqual(self.controller.participant_snapshot()["view"], "B")
+        self.assertIsNone(self.controller.participant_snapshot()["video_play_request_id"])
 
     def test_mode_explanation_gates_discovery_and_persists_across_resume(self):
         self.prepare_session()
