@@ -551,6 +551,24 @@ class ExperimentController:
         with self._mapper_local_mode_lock:
             self._mapper_local_mode = None
 
+    def _participant_mapper_state(self, mode: str) -> dict:
+        mapper = self._modes.snapshot()
+        with self._mapper_local_mode_lock:
+            reported = self._mapper_local_mode
+        state = (
+            reported if mapper.get("status") == "active"
+            and mapper.get("active_mode") == mode
+            and reported in STATE_NAMES[mode] else None
+        )
+        return {
+            "local_mode": state,
+            "snake_button_held": (
+                self._snake_button_provider()
+                if mode == "snake" and state is not None else None
+            ),
+            "state_image_available": bool(state and self.state_image_available(mode, state)),
+        }
+
     def show_mode_explanation(self, block_id: str) -> dict:
         with self._lock:
             _, folder = self._require_prepared()
@@ -609,6 +627,8 @@ class ExperimentController:
                     ),
                     "mode": active["mode"] if visible else None,
                     "explanation_status": explanation["status"],
+                    "phase": "discovery",
+                    **(self._participant_mapper_state(active["mode"]) if visible else {}),
                 }
             if active and active["phase"] in TRIAL_PHASES and active["status"] == "running":
                 self._refresh_training_live(active)
@@ -619,16 +639,6 @@ class ExperimentController:
                         if item.get("id") == active.get("current_trial_id")
                     ),
                     None,
-                )
-                mapper = self._modes.snapshot()
-                with self._mapper_local_mode_lock:
-                    mapper_local_mode = self._mapper_local_mode
-                state = (
-                    mapper_local_mode
-                    if mapper.get("status") == "active"
-                    and mapper.get("active_mode") == active["mode"]
-                    and mapper_local_mode in STATE_NAMES[active["mode"]]
-                    else None
                 )
                 recording = workflow == "recording"
                 live = active.get("training_live", {})
@@ -670,15 +680,7 @@ class ExperimentController:
                     ),
                     "linear_mm": target_error.get("linear_mm") if target_error else None,
                     "angular_deg": target_error.get("angular_deg") if target_error else None,
-                    "local_mode": state,
-                    "snake_button_held": (
-                        self._snake_button_provider()
-                        if active["mode"] == "snake" and state is not None
-                        else None
-                    ),
-                    "state_image_available": bool(
-                        state and self.state_image_available(active["mode"], state)
-                    ),
+                    **self._participant_mapper_state(active["mode"]),
                 }
             any_explanation = bool(
                 self._progress and any(

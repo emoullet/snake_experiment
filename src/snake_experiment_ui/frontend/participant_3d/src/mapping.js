@@ -3,6 +3,25 @@ import { Vector3 } from 'three';
 const LINEAR = ['linear_x', 'linear_y', 'linear_z'];
 const ANGULAR = ['angular_x', 'angular_y', 'angular_z'];
 
+/** Keep the participant demonstration moving when live mapper state is unavailable. */
+export function participantMappingSelection(config, state, lastKnownSubmode = null) {
+  const mappings = config.mapper[state?.mode];
+  if (!mappings) return null;
+  const hasSubmode = name => Object.prototype.hasOwnProperty.call(mappings, name);
+  const submodeReported = hasSubmode(state.local_mode);
+  const submode = submodeReported ? state.local_mode
+    : hasSubmode(lastKnownSubmode) ? lastKnownSubmode : Object.keys(mappings)[0];
+  if (!submode) return null;
+  const snakeHeldKnown = state.mode !== 'snake' || typeof state.snake_button_held === 'boolean';
+  return {
+    mode: state.mode,
+    submode,
+    snakeHeld: state.mode === 'snake' && snakeHeldKnown ? state.snake_button_held : false,
+    submodeReported,
+    snakeHeldKnown,
+  };
+}
+
 /** Reproduce the mapper axis assignment and cartesian_manager's frame/shaper order. */
 export function commandForAxis(config, mode, submode, axisIndex, sign, snakeHeld, eeQuaternion) {
   if (![0, 1].includes(axisIndex) || ![-1, 1].includes(sign)) {

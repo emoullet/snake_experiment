@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Euler, Group, Quaternion, Vector3 } from 'three';
-import { axisLabels, commandForAxis, cycleBasePose, joystickDisplacement } from '../src/mapping.js';
+import { axisLabels, commandForAxis, cycleBasePose, joystickDisplacement, participantMappingSelection } from '../src/mapping.js';
 import { ARM_JOINTS, cyclePose, effectorPose, rotationVector, setArmPose, solveAxisEndpoints } from '../src/kinematics.js';
 
 const component = (index, scale = 1) => ({ index, scale });
@@ -104,6 +104,31 @@ const samplePose = {
   joint_1: 0.3, joint_2: -0.5, joint_3: 0.6,
   joint_4: 0.1, joint_5: 0.2, joint_6: -0.1, right_finger_joint: 0.4,
 };
+
+test('participant animation keeps an illustrative mapping without live joystick state', () => {
+  assert.deepEqual(participantMappingSelection(config, {
+    mode: 'baseline', local_mode: 'b2',
+  }, null), {
+    mode: 'baseline', submode: 'b2', snakeHeld: false,
+    submodeReported: true, snakeHeldKnown: true,
+  });
+  assert.equal(participantMappingSelection(config, {
+    mode: 'baseline', local_mode: null,
+  }, 'b2').submode, 'b2');
+  assert.equal(participantMappingSelection(config, {
+    mode: 'baseline', local_mode: null,
+  }).submode, 'b1');
+  assert.deepEqual(participantMappingSelection(config, {
+    mode: 'snake', local_mode: 'b1', snake_button_held: null,
+  }), {
+    mode: 'snake', submode: 'b1', snakeHeld: false,
+    submodeReported: true, snakeHeldKnown: false,
+  });
+  assert.equal(participantMappingSelection(config, {
+    mode: 'snake', local_mode: null, snake_button_held: true,
+  }).snakeHeld, true);
+  assert.equal(participantMappingSelection(config, { mode: 'unknown' }), null);
+});
 
 test('all five mode/sub-mode combinations use both axes with symmetric signs', () => {
   const identity = new Quaternion();

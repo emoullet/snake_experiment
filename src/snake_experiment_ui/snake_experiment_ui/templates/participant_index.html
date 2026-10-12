@@ -7,8 +7,8 @@
     <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-3" />
     <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-mapping-1" />
     <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
-    <script src="/session-static/participant_app.js?v=participant-success-sound-1" defer></script>
-    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-3" defer></script>
+    <script src="/session-static/participant_app.js?v=participant-discovery-preview-1" defer></script>
+    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-5" defer></script>
   </head>
   <body>
     <main class="participant-workspace">
@@ -29,6 +29,7 @@
           <strong>Mode explanation video unavailable</strong>
           <p>The experimenter may continue for development only.</p>
         </div>
+        <div id="participant-discovery-preview"></div>
       </section>
       <section id="participant-presentation" class="participant-card" hidden>
         <p class="step-number">Experiment introduction</p>
@@ -62,7 +63,7 @@
             <p id="participant-camera-error" class="inline-warning" role="alert" hidden></p>
           </div>
         </div>
-        <section class="participant-mapping" aria-label="Current joystick mapping explanation">
+        <section id="participant-mapping" class="participant-mapping" aria-label="Current joystick mapping explanation">
           <div class="participant-mapping-heading"><h2>Joystick mapping · example inputs</h2><span id="participant-snake-indicator" class="pill pill--neutral" hidden></span></div>
           <p id="participant-mapping-message" class="preview-note" role="status">Waiting for the current mapper state.</p>
           <div class="preview-grid">

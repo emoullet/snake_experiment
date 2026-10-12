@@ -1,4 +1,5 @@
 import { MappingAnimator } from './animation.js';
+import { participantMappingSelection } from './mapping.js';
 
 const message = document.getElementById('participant-mapping-message');
 const snakeIndicator = document.getElementById('participant-snake-indicator');
@@ -6,46 +7,64 @@ const animator = new MappingAnimator([
   document.getElementById('participant-horizontal-view'),
   document.getElementById('participant-vertical-view'),
 ], (_state, source) => {
-  if (animator.selection) message.textContent = source === 'Demo pose'
-    ? 'Demo pose · joint states are unavailable or stale.'
-    : 'Live pose · schematic joystick inputs, not live joystick movements.';
+  poseSource = source;
+  updateMessage();
 }, error => { message.textContent = `Mapping animation is unavailable: ${error.message || error}`; });
 let latestState = null;
 let lastBlock = null;
+let lastKnownSubmode = null;
+let illustrationNote = '';
+let poseSource = null;
+
+function updateMessage() {
+  if (!animator.selection) return;
+  const poseText = poseSource === 'Demo pose'
+    ? 'Demo pose · joint states are unavailable or stale.'
+    : poseSource === 'Live pose'
+      ? 'Live pose · schematic joystick inputs, not live joystick movements.'
+      : 'Preparing mapping animation.';
+  message.textContent = illustrationNote ? `${poseText} ${illustrationNote}` : poseText;
+}
 
 function update(state) {
   latestState = state;
   if (!animator.config) return;
-  if (state?.view !== 'C') {
+  if (!['B', 'C'].includes(state?.view)) {
     animator.stop();
     animator.setSelection(null, null);
     lastBlock = null;
+    lastKnownSubmode = null;
+    illustrationNote = '';
+    poseSource = null;
     return;
   }
   const mode = state.mode;
-  const submode = state.local_mode;
-  const held = mode === 'snake'
-    ? typeof state.snake_button_held === 'boolean' ? state.snake_button_held : null
-    : false;
   const block = `${state.mode}:${state.phase}`;
   if (block !== lastBlock) {
     animator.setSelection(null, null);
     lastBlock = block;
+    lastKnownSubmode = null;
+    poseSource = null;
   }
+  const selection = participantMappingSelection(animator.config, state, lastKnownSubmode);
+  if (selection?.submodeReported) lastKnownSubmode = selection.submode;
   snakeIndicator.hidden = mode !== 'snake';
   if (mode === 'snake') {
-    snakeIndicator.textContent = held === null ? 'Snake button unknown'
-      : held ? 'Snake button held' : 'Snake button released';
-    snakeIndicator.className = `pill ${held === null ? 'pill--warning' : held ? 'pill--active' : 'pill--neutral'}`;
+    snakeIndicator.textContent = !selection?.snakeHeldKnown ? 'Snake button unknown · illustrating released state'
+      : selection.snakeHeld ? 'Snake button held' : 'Snake button released';
+    snakeIndicator.className = `pill ${!selection?.snakeHeldKnown ? 'pill--warning' : selection.snakeHeld ? 'pill--active' : 'pill--neutral'}`;
   }
-  if (!submode || !animator.config.mapper[mode]?.[submode]) {
+  if (!selection) {
     animator.setSelection(null, null);
-    message.textContent = 'Mapper sub-mode unknown · animations paused at neutral.';
-  } else if (held === null) {
-    animator.setSelection(null, null);
-    message.textContent = 'Snake button state unknown · animations paused at neutral.';
+    illustrationNote = '';
+    message.textContent = 'Mapping configuration unavailable · animations cannot start.';
   } else {
-    animator.setSelection(mode, submode, held);
+    const notes = [];
+    if (!selection.submodeReported) notes.push(`Illustrative ${selection.submode} mapping; mapper sub-mode unavailable.`);
+    if (!selection.snakeHeldKnown) notes.push('Snake button state unavailable; illustrating released state.');
+    illustrationNote = notes.join(' ');
+    animator.setSelection(selection.mode, selection.submode, selection.snakeHeld);
+    updateMessage();
   }
   animator.start();
 }

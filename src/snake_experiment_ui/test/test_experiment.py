@@ -363,6 +363,16 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertTrue(explanation["completed_at_utc"])
         self.assertTrue(explanation["video_missing"])
         self.assertEqual(self.controller.participant_snapshot()["view"], "B")
+        self.assertEqual(self.controller.participant_snapshot()["phase"], "discovery")
+        self.controller.record_mapper_local_mode("b2")
+        self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
+        self.controller.set_control("mode_1_discovery", True)
+        self.snake_held = True
+        public = self.controller.participant_snapshot()
+        self.assertEqual(public["local_mode"], "b2")
+        self.assertTrue(public["snake_button_held"])
+        self.controller.set_control("mode_1_discovery", False)
+        self.assertIsNone(self.controller.participant_snapshot()["local_mode"])
         self.controller.abort("mode_1_discovery")
         self.assertEqual(self.controller.participant_snapshot()["view"], "waiting")
         resumed = ExperimentController(
@@ -382,6 +392,10 @@ class ExperimentControllerTest(unittest.TestCase):
             resumed.set_control("mode_2_discovery", True)
         resumed.show_mode_explanation("mode_2_discovery")
         self.assertEqual(resumed.participant_snapshot()["mode"], "baseline")
+        resumed.complete_mode_explanation("mode_2_discovery")
+        resumed.set_control("mode_2_discovery", True)
+        resumed.record_mapper_local_mode("b3")
+        self.assertEqual(resumed.participant_snapshot()["local_mode"], "b3")
 
     def test_mode_explanation_uses_configured_video_per_mode(self):
         videos = {}
