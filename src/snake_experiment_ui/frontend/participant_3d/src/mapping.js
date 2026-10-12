@@ -12,13 +12,12 @@ export function participantMappingSelection(config, state, lastKnownSubmode = nu
   const submode = submodeReported ? state.local_mode
     : hasSubmode(lastKnownSubmode) ? lastKnownSubmode : Object.keys(mappings)[0];
   if (!submode) return null;
-  const snakeHeldKnown = state.mode !== 'snake' || typeof state.snake_button_held === 'boolean';
   return {
     mode: state.mode,
     submode,
-    snakeHeld: state.mode === 'snake' && snakeHeldKnown ? state.snake_button_held : false,
+    // Snake coupling is active only with an explicit held-button signal.
+    snakeHeld: state.mode === 'snake' && state.snake_button_held === true,
     submodeReported,
-    snakeHeldKnown,
   };
 }
 

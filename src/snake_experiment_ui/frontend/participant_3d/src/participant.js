@@ -65,9 +65,8 @@ function update(state) {
   if (selection?.submodeReported) lastKnownSubmode = selection.submode;
   snakeIndicator.hidden = mode !== 'snake';
   if (mode === 'snake') {
-    snakeIndicator.textContent = !selection?.snakeHeldKnown ? 'Snake button unknown · illustrating released state'
-      : selection.snakeHeld ? 'Snake button held' : 'Snake button released';
-    snakeIndicator.className = `pill ${!selection?.snakeHeldKnown ? 'pill--warning' : selection.snakeHeld ? 'pill--active' : 'pill--neutral'}`;
+    snakeIndicator.textContent = selection?.snakeHeld ? 'Snake active · button held' : 'Snake inactive';
+    snakeIndicator.className = `pill ${selection?.snakeHeld ? 'pill--active' : 'pill--neutral'}`;
   }
   if (!selection) {
     animator.setSelection(null, null);
@@ -76,7 +75,6 @@ function update(state) {
   } else {
     const notes = [];
     if (!selection.submodeReported) notes.push(`Illustrative ${selection.submode} mapping; mapper sub-mode unavailable.`);
-    if (!selection.snakeHeldKnown) notes.push('Snake button state unavailable; illustrating released state.');
     illustrationNote = notes.join(' ');
     animator.setSelection(selection.mode, selection.submode, selection.snakeHeld);
     updateMessage();

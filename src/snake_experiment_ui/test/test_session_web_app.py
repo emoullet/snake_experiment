@@ -604,7 +604,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('.participant-workspace--trial { width: min(1540px, calc(100% - 32px)); }', style)
         self.assertIn('grid-template-columns: minmax(0, 1.1fr) minmax(250px, 1fr)', style)
         self.assertIn('participant_style.css?v=participant-camera-views-1', html)
-        self.assertIn('participant_mapping.bundle.js?v=participant-mapping-6', html)
+        self.assertIn('participant_mapping.bundle.js?v=participant-mapping-7', html)
         self.assertIn('data-mapping-source class="pill pill--neutral"', html)
         self.assertNotIn('id="participant-state-image"', html)
         self.assertIn('new CustomEvent("participant:state", { detail: state })', script)

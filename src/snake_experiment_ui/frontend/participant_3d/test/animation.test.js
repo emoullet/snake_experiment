@@ -110,7 +110,7 @@ test('participant animation keeps an illustrative mapping without live joystick 
     mode: 'baseline', local_mode: 'b2',
   }, null), {
     mode: 'baseline', submode: 'b2', snakeHeld: false,
-    submodeReported: true, snakeHeldKnown: true,
+    submodeReported: true,
   });
   assert.equal(participantMappingSelection(config, {
     mode: 'baseline', local_mode: null,
@@ -122,8 +122,13 @@ test('participant animation keeps an illustrative mapping without live joystick 
     mode: 'snake', local_mode: 'b1', snake_button_held: null,
   }), {
     mode: 'snake', submode: 'b1', snakeHeld: false,
-    submodeReported: true, snakeHeldKnown: false,
+    submodeReported: true,
   });
+  for (const signal of [undefined, null, false]) {
+    assert.equal(participantMappingSelection(config, {
+      mode: 'snake', local_mode: 'b1', snake_button_held: signal,
+    }).snakeHeld, false);
+  }
   assert.equal(participantMappingSelection(config, {
     mode: 'snake', local_mode: null, snake_button_held: true,
   }).snakeHeld, true);
