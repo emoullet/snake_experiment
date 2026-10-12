@@ -662,6 +662,19 @@ class SessionTemplateTest(unittest.TestCase):
             self.assertEqual(html.count(f'name="{field}" type="radio"'), 2)
         self.assertNotIn(" checked", html)
 
+    def test_visible_labels_do_not_include_legacy_view_letters(self):
+        package_root = Path(__file__).parents[1] / "snake_experiment_ui"
+        script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
+        participant = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
+        for legacy in ("View E", "Participant view B", "View ${viewLetter}", "View ${block.view}", "continue to View C"):
+            self.assertNotIn(legacy, script)
+        self.assertIn('class="step-number">Discovery</p>', script)
+        self.assertIn('class="step-number">Participant explanation</p>', script)
+        self.assertIn('class="step-number">${title}</p>', script)
+        self.assertIn("continue to session setup.", script)
+        for index in range(1, 7):
+            self.assertIn(f"View {index}</button>", participant)
+
     def test_participant_form_is_reset_for_another_selection(self):
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
         script = (package_root / "static/session_app.js").read_text(encoding="utf-8")
@@ -744,7 +757,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
         self.assertIn("session_style.css?v=session-style-3", html)
-        self.assertIn("session_app.js?v=session-app-4", html)
+        self.assertIn("session_app.js?v=session-app-5", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(

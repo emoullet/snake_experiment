@@ -499,7 +499,7 @@ class SessionInterface {
     this.setDisabled(stopMotion, this.busy || !goToActive);
     this.setDisabled(document.getElementById("validate-button"), this.busy || !this.state.can_validate);
     this.setText(document.getElementById("validation-help"), this.state.can_validate
-      ? "Both modes passed. Validation will stop the stack and continue to View C."
+      ? "Both modes passed. Validation will stop the stack and continue to session setup."
       : "Both modes and all four Go-to checks must pass before validation.");
     this.setDisabled(document.getElementById("reset-button"), this.busy);
     const error = document.getElementById("global-error");
@@ -612,7 +612,7 @@ class SessionInterface {
     const phase = this.title(block.phase);
     const settings = Object.entries(block.settings)
       .map(([key, value]) => `<div><dt>${this.escape(key.replaceAll("_", " "))}</dt><dd>${this.escape(JSON.stringify(value))}</dd></div>`).join("");
-    this.patchMarkup(view, `<p class="step-number">View ${block.view} · ${phase}</p>
+    this.patchMarkup(view, `<p class="step-number">${phase}</p>
       <h2>${this.escape(this.title(block.mode))} ${this.escape(block.phase)}</h2>
       <p class="supporting-copy">The experiment stack and the ${this.escape(this.title(block.mode))} mapper are active. Detailed ${this.escape(block.phase)} logic is not yet implemented.</p>
       <dl class="participant-summary block-metadata"><div><dt>Block</dt><dd>${this.escape(block.id)}</dd></div><div><dt>Folder</dt><dd>${this.escape(block.folder)}</dd></div><div><dt>Attempt</dt><dd>${block.attempts}</dd></div>${settings}</dl>
@@ -640,8 +640,8 @@ class SessionInterface {
       ["Storage", recorder.storage || "mcap"],
     ].map(([term, value]) => `<div data-dom-key="summary:${term}"><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join("");
     this.setClass(view, "view-page");
-    this.patchMarkup(view, `<section class="hero-card"><div><p class="step-number">View E · Discovery</p><h2>${this.escape(this.title(block.mode))} discovery</h2><p class="supporting-copy">Free movement without specified or validated targets.</p></div><span class="pill ${controlActive ? "pill--active" : "pill--neutral"}">${controlActive ? "Control and recording active" : "Control inactive"}</span></section>
-      <section class="card"><div class="section-heading"><div><p class="step-number">Participant view B</p><h2>Mode explanation</h2></div><span class="pill ${explanationDone ? "pill--active" : explanation.status === "showing" ? "pill--warning" : "pill--neutral"}">${explanationDone ? "Done" : explanation.status === "showing" ? "On participant screen" : "Pending"}</span></div><p class="supporting-copy">Show the ${this.escape(this.title(block.mode))} video on the participant screen, then confirm the explanation.</p>${!experiment.mode_explanation_video_available ? '<p class="inline-warning">Mode explanation video is unavailable. Manual validation remains possible for development.</p>' : ""}<div class="discovery-controls"><button class="text-button" data-mode-explanation="show" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Show mode explanation</button><button class="primary-button" data-mode-explanation="complete" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || explanation.status !== "showing" ? "disabled" : ""}>Explanation done</button></div></section>
+    this.patchMarkup(view, `<section class="hero-card"><div><p class="step-number">Discovery</p><h2>${this.escape(this.title(block.mode))} discovery</h2><p class="supporting-copy">Free movement without specified or validated targets.</p></div><span class="pill ${controlActive ? "pill--active" : "pill--neutral"}">${controlActive ? "Control and recording active" : "Control inactive"}</span></section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Participant explanation</p><h2>Mode explanation</h2></div><span class="pill ${explanationDone ? "pill--active" : explanation.status === "showing" ? "pill--warning" : "pill--neutral"}">${explanationDone ? "Done" : explanation.status === "showing" ? "On participant screen" : "Pending"}</span></div><p class="supporting-copy">Show the ${this.escape(this.title(block.mode))} video on the participant screen, then confirm the explanation.</p>${!experiment.mode_explanation_video_available ? '<p class="inline-warning">Mode explanation video is unavailable. Manual validation remains possible for development.</p>' : ""}<div class="discovery-controls"><button class="text-button" data-mode-explanation="show" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Show mode explanation</button><button class="primary-button" data-mode-explanation="complete" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || explanation.status !== "showing" ? "disabled" : ""}>Explanation done</button></div></section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Instructions</p><h2>Standardised instructions</h2></div>${instructions.placeholder ? '<span class="pill pill--warning">Placeholder</span>' : ""}</div><p class="instruction-copy">${this.escape(instructions.text || "")}</p>${instructions.placeholder ? '<p class="inline-warning">Replace this placeholder before running participant sessions.</p>' : ""}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Control</p><h2>Mode and recording</h2></div><span class="supporting-copy">${this.escape(block.folder)}</span></div><dl class="participant-summary process-summary">${processItems}</dl><div class="discovery-controls"><button class="${controlActive ? "reject-button" : "primary-button"}" data-block-control="${this.escape(block.id)}" data-active="${controlActive ? "false" : "true"}" type="button" ${this.busy || (!controlActive && !explanationDone) ? "disabled" : ""}>${controlActive ? "Deactivate mode and recording" : "Activate mode and recording"}</button><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button></div>${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Recordings</p><h2>MCAP segments</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--warning"}">${experiment.can_end ? "Required data verified" : "Valid segment required"}</span></div><div class="segment-list">${segmentRows}</div></section>
@@ -649,14 +649,14 @@ class SessionInterface {
   }
 
   renderTraining(view, block, experiment) {
-    return this.renderTrialView(view, block, experiment, "training", "F", "Training");
+    return this.renderTrialView(view, block, experiment, "training", "Training");
   }
 
   renderRecording(view, block, experiment) {
-    return this.renderTrialView(view, block, experiment, "recording", "G", "Recording");
+    return this.renderTrialView(view, block, experiment, "recording", "Recording");
   }
 
-  renderTrialView(view, block, experiment, phase, viewLetter, title) {
+  renderTrialView(view, block, experiment, phase, title) {
     const training = experiment[phase] || {};
     const trials = training.trials || [];
     const workflow = training.workflow || "awaiting_prepare";
@@ -703,7 +703,7 @@ class SessionInterface {
       && mapperReady;
     this.setClass(view, "view-page");
     this.patchMarkup(view, `<section class="hero-card trial-hero-card">
-        <div class="trial-hero-heading"><p class="step-number">View ${viewLetter} · ${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div>
+        <div class="trial-hero-heading"><p class="step-number">${title}</p><h2>${this.escape(this.title(block.mode))} ${phase}</h2><p class="supporting-copy">${completed} of ${trials.length} trials resolved · ${training.deviations?.length || 0} deviations</p></div>
         <div class="trial-hero-status"><span class="pill ${recording ? "pill--warning" : experiment.can_end ? "pill--active" : "pill--neutral"}">${this.escape(this.title(workflow))}</span><dl class="participant-summary trial-process-summary" aria-label="Process status">${processItems}</dl></div>
       </section>
       <div class="trial-workspace">
