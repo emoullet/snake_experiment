@@ -343,6 +343,7 @@ class SessionInterfaceNode(Node):
             mode_explanation_videos=mode_explanation_videos,
             state_images=state_images,
             robot_preview=self._robot_preview,
+            preview_default_view=self._participant_profile.preview_default_view,
             protection_snapshot=self._protection_snapshot,
             protection_guard=self._require_protection_clear,
             protection_action=self._protection_action,

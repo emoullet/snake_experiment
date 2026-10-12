@@ -4,6 +4,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import URDFLoader from 'urdf-loader';
 import { axisLabels, cycleBasePose, joystickDisplacement } from './mapping.js';
 import { cyclePose, setArmPose, solveAxisEndpoints } from './kinematics.js';
+import { cameraDirection, combinedCycleBounds, frameCameras } from './camera.js';
 
 const PREFIX = '/participant/3d-preview';
 const ROBOT_MATERIAL = new THREE.MeshStandardMaterial({
@@ -12,28 +13,6 @@ const ROBOT_MATERIAL = new THREE.MeshStandardMaterial({
 
 function setText(element, value) {
   if (element && element.textContent !== value) element.textContent = value;
-}
-
-function frameRobot(view) {
-  const bounds = new THREE.Box3();
-  if (view.endpoints && view.config) {
-    // Fit the whole cycle, including intermediate joint interpolation poses.
-    for (let sample = 0; sample <= 8; sample += 1) {
-      setArmPose(view.robot, cyclePose(view.endpoints, sample / 8), view.config);
-      bounds.union(new THREE.Box3().setFromObject(view.robot));
-    }
-    setArmPose(view.robot, view.endpoints.start, view.config);
-  } else {
-    bounds.setFromObject(view.robot);
-  }
-  if (bounds.isEmpty()) return;
-  const center = bounds.getCenter(new THREE.Vector3());
-  const radius = Math.max(bounds.getSize(new THREE.Vector3()).length() * 0.7, 0.45);
-  view.camera.position.copy(center).addScaledVector(view.direction.clone().normalize(), radius * 2.4 / Math.min(1, view.camera.aspect));
-  view.camera.lookAt(center);
-  view.camera.near = Math.max(radius / 100, 0.01);
-  view.camera.far = Math.max(radius * 20, 20);
-  view.camera.updateProjectionMatrix();
 }
 
 function createJoystick(view) {
@@ -48,7 +27,7 @@ function createJoystick(view) {
   view.inputLabel = holder.querySelector('[data-joystick-input]');
 }
 
-function createView(root, axisIndex, direction) {
+function createView(root, axisIndex, onResize) {
   const container = root.querySelector('.mapping-canvas');
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xe8f2ff);
@@ -65,7 +44,7 @@ function createView(root, axisIndex, direction) {
   fill.position.set(-3, 1, -2);
   scene.add(fill);
   const view = {
-    root, container, scene, camera, renderer, direction, axisIndex, robot: null,
+    root, container, scene, camera, renderer, axisIndex, robot: null,
     source: root.querySelector('[data-mapping-source]'),
     directionLabel: root.querySelector('[data-mapping-direction]'),
     limit: root.querySelector('[data-mapping-limit]'),
@@ -78,14 +57,14 @@ function createView(root, axisIndex, direction) {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    if (view.robot) frameRobot(view);
+    onResize();
   };
   new ResizeObserver(resize).observe(container);
   resize();
   return view;
 }
 
-async function loadModel(view) {
+async function loadModel(view, onModelChange) {
   const manager = new THREE.LoadingManager();
   const loader = new URDFLoader(manager);
   loader.parseCollision = false;
@@ -93,7 +72,7 @@ async function loadModel(view) {
     done(object, error);
     view.completedMeshes += 1;
     if (view.completedMeshes === view.expectedMeshes) {
-      requestAnimationFrame(() => { if (view.robot) frameRobot(view); });
+      requestAnimationFrame(onModelChange);
     }
   };
   loader.loadMeshCb = (path, loadingManager, done) => {
@@ -124,13 +103,15 @@ async function loadModel(view) {
   view.robot = loader.parse(xml, '');
   view.robot.rotation.x = -Math.PI / 2;
   view.scene.add(view.robot);
-  frameRobot(view);
+  onModelChange();
 }
 
 export class MappingAnimator {
   constructor(roots, onState = () => {}, onError = () => {}) {
-    this.views = roots.map((root, axis) => createView(root, axis,
-      axis === 0 ? new THREE.Vector3(1.8, 1.2, 1.7) : new THREE.Vector3(-1.5, 1.2, 1.8)));
+    this.views = [];
+    this.cameraBounds = new THREE.Box3();
+    this.cameraView = 'view_1';
+    this.views = roots.map((root, axis) => createView(root, axis, () => this.frameCameras()));
     this.onState = onState;
     this.onError = onError;
     this.config = null;
@@ -146,6 +127,7 @@ export class MappingAnimator {
     const response = await fetch(`${PREFIX}/api/config`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Mapping configuration: HTTP ${response.status}`);
     this.config = await response.json();
+    this.setCameraView(this.config.camera?.default_view || 'view_1');
     for (const view of this.views) {
       view.config = this.config;
       view.container.setAttribute('aria-label', `${this.config.robot_label} animated robot, axis ${view.axisIndex}`);
@@ -155,9 +137,24 @@ export class MappingAnimator {
       title.textContent = `${this.config.robot_label} · robot model`;
       document.title = `${this.config.robot_label} · 3D model preview`;
     }
-    await Promise.all(this.views.map(loadModel));
+    await Promise.all(this.views.map(view => loadModel(view, () => this.updateFraming())));
     if (this.active && this.selection) void this.refreshCycle();
     return this.config;
+  }
+
+  setCameraView(viewId) {
+    cameraDirection(viewId); // Reject unknown views before changing the current choice.
+    this.cameraView = viewId;
+    this.frameCameras();
+  }
+
+  frameCameras() {
+    frameCameras(this.views, this.cameraBounds, this.cameraView);
+  }
+
+  updateFraming() {
+    this.cameraBounds = combinedCycleBounds(this.views);
+    this.frameCameras();
   }
 
   setSelection(mode, submode, snakeHeld = false) {
@@ -253,7 +250,6 @@ export class MappingAnimator {
       for (const view of this.views) {
         view.endpoints = solveAxisEndpoints(view.robot, pose, this.config,
           this.selection.mode, this.selection.submode, view.axisIndex, this.selection.snakeHeld);
-        frameRobot(view);
         setText(view.source, source);
         if (view.source.classList.contains('pill')) {
           view.source.className = source === 'Live pose' ? 'pill pill--active' : 'pill pill--warning';
@@ -263,6 +259,7 @@ export class MappingAnimator {
           ? 'No feasible movement from this pose; the view remains neutral.'
           : `Movement reduced to ${Math.round(fraction * 100)}% due to reachability or joint limits.`);
       }
+      this.updateFraming();
       this.cycleStart = performance.now();
     } catch (error) {
       this.cycleStart = null;

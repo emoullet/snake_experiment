@@ -15,6 +15,21 @@ let lastBlock = null;
 let lastKnownSubmode = null;
 let illustrationNote = '';
 let poseSource = null;
+const viewButtons = [...document.querySelectorAll('[data-preview-view]')];
+
+function updateViewButtons() {
+  for (const button of viewButtons) {
+    button.disabled = false;
+    button.setAttribute('aria-pressed', String(button.dataset.previewView === animator.cameraView));
+  }
+}
+
+for (const button of viewButtons) {
+  button.addEventListener('click', () => {
+    animator.setCameraView(button.dataset.previewView);
+    updateViewButtons();
+  });
+}
 
 function updateMessage() {
   if (!animator.selection) return;
@@ -71,6 +86,7 @@ function update(state) {
 
 window.addEventListener('participant:state', event => update(event.detail));
 animator.initialize().then(() => {
+  updateViewButtons();
   if (latestState) update(latestState);
   else fetch('/participant/api/state').then(response => response.json()).then(update).catch(() => {});
 }).catch(error => {

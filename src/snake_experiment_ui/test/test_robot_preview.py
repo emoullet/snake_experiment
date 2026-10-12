@@ -345,7 +345,7 @@ class PreviewAssetsTest(unittest.TestCase):
         for name in (
             "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
             "src/main.js", "src/participant.js", "src/animation.js",
-            "src/mapping.js", "src/kinematics.js",
+            "src/mapping.js", "src/kinematics.js", "src/camera.js",
         ):
             hash_value.update(name.encode("utf-8"))
             hash_value.update((frontend / name).read_bytes())
@@ -361,7 +361,7 @@ class PreviewAssetsTest(unittest.TestCase):
         self.assertIn('id="preview-mode"', html)
         self.assertIn('id="preview-submode"', html)
         self.assertIn('id="preview-snake-held"', html)
-        self.assertIn('v=participant-3d-5', html)
+        self.assertIn('v=participant-3d-6', html)
         participant = (PACKAGE_ROOT / "snake_experiment_ui/templates/participant_index.html").read_text(
             encoding="utf-8"
         )

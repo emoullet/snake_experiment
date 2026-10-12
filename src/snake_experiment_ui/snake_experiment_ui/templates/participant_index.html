@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Snake experiment · Participant</title>
     <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-3" />
-    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-mapping-1" />
+    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-camera-views-1" />
     <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
     <script src="/session-static/participant_app.js?v=participant-discovery-preview-1" defer></script>
-    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-5" defer></script>
+    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-6" defer></script>
   </head>
   <body>
     <main class="participant-workspace">
@@ -66,6 +66,14 @@
         <section id="participant-mapping" class="participant-mapping" aria-label="Current joystick mapping explanation">
           <div class="participant-mapping-heading"><h2>Joystick mapping · example inputs</h2><span id="participant-snake-indicator" class="pill pill--neutral" hidden></span></div>
           <p id="participant-mapping-message" class="preview-note" role="status">Waiting for the current mapper state.</p>
+          <div class="participant-camera-views" role="group" aria-label="Robot preview viewpoint">
+            <button class="secondary-button" type="button" data-preview-view="view_1" aria-pressed="false" disabled>View 1</button>
+            <button class="secondary-button" type="button" data-preview-view="view_2" aria-pressed="false" disabled>View 2</button>
+            <button class="secondary-button" type="button" data-preview-view="view_3" aria-pressed="false" disabled>View 3</button>
+            <button class="secondary-button" type="button" data-preview-view="view_4" aria-pressed="false" disabled>View 4</button>
+            <button class="secondary-button" type="button" data-preview-view="view_5" aria-pressed="false" disabled>View 5</button>
+            <button class="secondary-button" type="button" data-preview-view="view_6" aria-pressed="false" disabled>View 6</button>
+          </div>
           <div class="preview-grid">
             <article class="preview-card mapping-view" id="participant-horizontal-view">
               <div class="preview-card-heading"><span class="step-number">01</span><h3>Horizontal input</h3></div>

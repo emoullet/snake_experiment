@@ -39,6 +39,12 @@ class ParticipantProfile:
             ) from error
         if not isinstance(data, dict) or data.get("schema_version") != 1:
             raise ParticipantProfileError("Unsupported participant interface profile schema.")
+        preview = data.get("preview", {})
+        if not isinstance(preview, dict) or preview.get("default_view", "view_1") not in (
+            "view_1", "view_2", "view_3", "view_4", "view_5", "view_6"
+        ):
+            raise ParticipantProfileError("Participant preview default_view must be view_1 through view_6.")
+        self.preview_default_view = preview.get("default_view", "view_1")
         videos = data.get("videos")
         explanations = videos.get("mode_explanation") if isinstance(videos, dict) else None
         if not isinstance(videos, dict) or not isinstance(explanations, dict):

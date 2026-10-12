@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const inputs = [
   'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml',
   'src/main.js', 'src/participant.js', 'src/animation.js',
-  'src/mapping.js', 'src/kinematics.js',
+  'src/mapping.js', 'src/kinematics.js', 'src/camera.js',
 ];
 const hash = createHash('sha256');
 for (const name of inputs) {

@@ -11,6 +11,28 @@ from snake_experiment_ui.participant_profile import (
 
 
 class ParticipantProfileTest(unittest.TestCase):
+    def test_preview_default_view_is_optional_and_accepts_six_views(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "participant_interface.yaml"
+            base = (
+                'schema_version: 1\nvideos:\n'
+                '  experiment_presentation: ""\n'
+                '  mode_explanation:\n    baseline: ""\n    snake: ""\n'
+            )
+            path.write_text(base)
+            self.assertEqual(ParticipantProfile(path).preview_default_view, "view_1")
+            for index in range(1, 7):
+                path.write_text(base + f"preview:\n  default_view: view_{index}\n")
+                self.assertEqual(ParticipantProfile(path).preview_default_view, f"view_{index}")
+            for invalid in ('view_7', 'null', '1', '[view_1]', '""'):
+                with self.subTest(invalid=invalid):
+                    path.write_text(base + f"preview:\n  default_view: {invalid}\n")
+                    with self.assertRaisesRegex(ParticipantProfileError, "default_view"):
+                        ParticipantProfile(path)
+            path.write_text(base + "preview: null\n")
+            with self.assertRaisesRegex(ParticipantProfileError, "default_view"):
+                ParticipantProfile(path)
+
     def test_packaged_profile_has_five_png_slots(self):
         path = Path(__file__).parents[1] / "config/participant_interface.yaml"
         profile = ParticipantProfile(path)

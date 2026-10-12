@@ -190,6 +190,12 @@ install Python dependencies.
 
 ## Develop the 3D preview
 
+Both participant joystick previews share a viewpoint. Set `preview.default_view`
+in `config/participant_interface.yaml` to `view_1` through `view_6`; the views
+rotate around the robot in 60-degree steps. The participant can use the six
+View buttons during Discovery, Training or Recording. The choice lasts until
+the page is reloaded, when the configured default is restored.
+
 JavaScript bundles are included in the package, so a normal ROS build does not
 require Node. After changing `frontend/participant_3d/src/`, rebuild the
 bundles from the repository root:

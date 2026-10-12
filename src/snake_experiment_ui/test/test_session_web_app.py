@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import unittest
 
@@ -236,6 +237,24 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         transport = httpx.ASGITransport(app=self.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             return await client.request(method, path, json=json)
+
+    async def test_preview_config_exposes_configured_camera_without_mutating_mapping(self):
+        from snake_experiment_ui.session_web_app import create_session_app
+
+        configuration = {"robot": "explorer", "mapper": {"baseline": {"b1": {}}}}
+        preview = SimpleNamespace(configuration=lambda: configuration)
+        for default in ("view_1", "view_4"):
+            options = {} if default == "view_1" else {"preview_default_view": default}
+            self.app = create_session_app(
+                self.checkup, Path(self.temporary_directory.name) / "static",
+                Path(self.temporary_directory.name) / "templates",
+                robot_preview=preview, **options,
+            )
+            response = await self.request("GET", "/participant/3d-preview/api/config")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["camera"], {"default_view": default})
+            self.assertEqual(response.json()["mapper"], configuration["mapper"])
+            self.assertNotIn("camera", configuration)
 
     async def test_stack_mode_confirmation_and_validation_routes(self):
         self.assertEqual((await self.request("POST", "/api/stack/start")).status_code, 200)
@@ -584,8 +603,8 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('workspace.classList.toggle("participant-workspace--trial", showC)', script)
         self.assertIn('.participant-workspace--trial { width: min(1540px, calc(100% - 32px)); }', style)
         self.assertIn('grid-template-columns: minmax(0, 1.1fr) minmax(250px, 1fr)', style)
-        self.assertIn('participant_style.css?v=participant-mapping-1', html)
-        self.assertIn('participant_mapping.bundle.js?v=participant-mapping-5', html)
+        self.assertIn('participant_style.css?v=participant-camera-views-1', html)
+        self.assertIn('participant_mapping.bundle.js?v=participant-mapping-6', html)
         self.assertIn('data-mapping-source class="pill pill--neutral"', html)
         self.assertNotIn('id="participant-state-image"', html)
         self.assertIn('new CustomEvent("participant:state", { detail: state })', script)

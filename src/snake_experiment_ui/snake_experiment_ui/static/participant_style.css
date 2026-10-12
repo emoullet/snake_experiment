@@ -24,6 +24,9 @@
 .participant-mapping-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .participant-mapping-heading h2 { margin: 0; font-size: clamp(1.15rem, 2vw, 1.5rem); }
 .participant-mapping > .preview-note { min-height: 24px; }
+.participant-camera-views { display: flex; flex-wrap: wrap; gap: 8px; }
+.participant-camera-views button { padding: 8px 14px; }
+.participant-camera-views button[aria-pressed="true"] { background: var(--accent, #176bff); border-color: var(--accent, #176bff); color: #fff; }
 .participant-mapping .preview-grid { margin-top: 18px; }
 .participant-mapping .mapping-canvas { height: clamp(300px, 34vw, 520px); }
 .participant-camera h2 { margin-top: 0; font-size: 1.1rem; }

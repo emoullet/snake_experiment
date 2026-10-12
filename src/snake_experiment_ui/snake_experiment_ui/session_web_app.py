@@ -105,6 +105,7 @@ def create_session_app(
     protection_snapshot=None,
     protection_guard=None,
     protection_action=None,
+    preview_default_view="view_1",
 ):
     """Create the View B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
@@ -203,7 +204,7 @@ def create_session_app(
         if robot_preview is None:
             raise HTTPException(status_code=503, detail="Robot preview is unavailable.")
         try:
-            return robot_preview.configuration()
+            return {**robot_preview.configuration(), "camera": {"default_view": preview_default_view}}
         except RobotPreviewError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
 
