@@ -70,6 +70,17 @@ class ParticipantOverloadWarning:
             return {"phase": "paused"}
 
 
+def protection_waiting_for_initial_feedback(state):
+    """An initial feedback hold is not a latched overload episode."""
+    return (
+        state.get("fresh") is True
+        and state.get("state") == "normal"
+        and state.get("event") == 0
+        and state.get("reason") == "waiting_for_feedback"
+        and state.get("overloaded") is not True
+    )
+
+
 def protection_action_state(queued, current):
     """Retain latched manager episodes; decide telemetry loss from live state.
 

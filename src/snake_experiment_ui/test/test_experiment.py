@@ -1361,6 +1361,75 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertIsNone(self.modes.active)
         self.assertFalse(self.controller.snapshot()["control_active"])
 
+    def test_initial_feedback_exception_requires_idle_processes_and_workflow(self):
+        self.prepare_session()
+        self.controller.start("mode_1_discovery")
+        startup = {"fresh": True, "state": "normal", "event": 0,
+                   "reason": "waiting_for_feedback", "blocked": True}
+        self.assertTrue(self.controller.protection_startup_is_idle(startup))
+        block = self.controller._block("mode_1_discovery")
+        for field, value in (("control_active", True), ("current_segment", "rosbag_001"),
+                             ("training_workflow", "recording")):
+            previous = block.get(field)
+            block[field] = value
+            self.assertFalse(self.controller.protection_startup_is_idle(startup))
+            block[field] = previous
+        self.modes.active = "snake"
+        self.assertFalse(self.controller.protection_startup_is_idle(startup))
+        self.modes.active = None
+        self.rosbag.active = True
+        self.assertFalse(self.controller.protection_startup_is_idle(startup))
+        self.rosbag.active = False
+        self.go_to.start("starting_point", self.pose("starting_point"))
+        self.assertFalse(self.controller.protection_startup_is_idle(startup))
+
+    def test_clear_only_persisted_initial_feedback_warning_after_valid_feedback(self):
+        self.prepare_session()
+        self.controller.start("mode_1_discovery")
+        self.controller.interrupt_overload({"state": "normal", "reason": "waiting_for_feedback", "event": 0})
+        warning = self.controller.snapshot()["error"]
+        healthy = {"fresh": True, "state": "normal", "blocked": False,
+                   "pose_valid": True, "overload_valid": True, "overloaded": False}
+        block = self.controller._block("mode_1_discovery")
+        before = json.loads(json.dumps(block))
+        for changes in ({"fresh": False}, {"blocked": True}, {"pose_valid": False},
+                        {"overload_valid": False}, {"overloaded": True}, {"state": "error"}):
+            self.controller.clear_initial_feedback_warning({**healthy, **changes})
+            self.assertEqual(block, before)
+        self.controller.clear_initial_feedback_warning(healthy)
+        self.assertIsNone(block["error"])
+        self.assertNotIn("protection_interruption", block)
+        self.assertIsNone(self.controller.snapshot()["error"])
+        self.assertIsNone(self.modes.active)
+        self.assertFalse(self.rosbag.active)
+        self.assertFalse(block["control_active"])
+        for filename in ("experiment_progress.json", "snake_discovery/block.json"):
+            saved = json.loads((self.participant_folder / filename).read_text())
+            saved_block = saved if "blocks" not in saved else saved["blocks"][0]
+            self.assertIsNone(saved_block["error"])
+            self.assertNotIn("protection_interruption", saved_block)
+        # A different error or a real episode must never be cleared.
+        for interruption, error in ((before["protection_interruption"], "Another failure"),
+                                    ({"state": "locked", "reason": "completed", "event": 1}, warning)):
+            block["protection_interruption"] = interruption
+            block["error"] = error
+            self.controller._error = error
+            self.controller.clear_initial_feedback_warning(healthy)
+            self.assertEqual(block["error"], error)
+            self.assertEqual(self.controller.snapshot()["error"], error)
+
+    def test_initial_feedback_warning_can_be_cleaned_after_session_reload(self):
+        self.prepare_session()
+        self.controller.start("mode_1_discovery")
+        self.controller.interrupt_overload({"state": "normal", "reason": "waiting_for_feedback", "event": 0})
+        self.controller._block("mode_1_discovery")["status"] = "interrupted"
+        self.controller._progress["current_block"] = None
+        self.controller._persist(self.participant_folder)
+        self.controller.prepare(self.participant)
+        self.controller.clear_initial_feedback_warning({"fresh": True, "state": "normal", "blocked": False,
+                                                     "pose_valid": True, "overload_valid": True})
+        self.assertIsNone(self.controller._block("mode_1_discovery")["error"])
+
     def test_training_without_acquisition_reports_telemetry_loss_precisely(self):
         self.prepare_session()
         self.complete_discovery("mode_1_discovery")
@@ -1453,6 +1522,29 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertFalse(state["control_active"])
         self.assertEqual(state["segments"][0]["status"], "incomplete")
         self.assertEqual(state["segments"][0]["stop_reason"], "effort_overload")
+
+    def test_discovery_rearm_requires_manual_activation_and_creates_new_segment(self):
+        self.prepare_session()
+        for block_id in ("mode_1_discovery", "mode_2_discovery"):
+            with self.subTest(block=block_id):
+                self.controller.start(block_id)
+                self.set_control(block_id, True)
+                self.controller._command_allowed = lambda: False
+                self.modes.shutdown()
+                self.controller.interrupt_overload({"event": 1, "state": "locked", "reason": "completed"})
+                with self.assertRaisesRegex(ExperimentError, "Rearm"):
+                    self.controller.set_control(block_id, True)
+                self.controller._command_allowed = lambda: True
+                state = self.controller.snapshot()
+                self.assertFalse(state["control_active"])
+                self.assertIsNone(self.modes.active)
+                self.assertFalse(self.rosbag.active)
+                state = self.controller.set_control(block_id, True)
+                self.assertTrue(state["control_active"])
+                self.assertEqual([s["name"] for s in state["segments"]], ["rosbag_001", "rosbag_002"])
+                self.assertFalse(state["segments"][0]["valid"])
+                self.controller.set_control(block_id, False)
+                self.controller.end(block_id, True)
 
 
 

@@ -19,6 +19,7 @@ import yaml
 from .calibration import CalibrationError, validate_calibration_robot
 
 from .go_to import GoToError
+from .overload import protection_waiting_for_initial_feedback
 from .participant_profile import STATE_NAMES, state_image_is_available
 from .training import (
     TrainingError,
@@ -447,6 +448,58 @@ class ExperimentController:
         # A configuration worker must remain able to configure a newly spawned
         # controller while restart_stack holds the workflow lock.
         return dict(self._protection_context_cache)
+
+    def protection_startup_is_idle(self, state: dict) -> bool:
+        """Ignore an initial feedback hold only when no user operation exists."""
+        if not protection_waiting_for_initial_feedback(state):
+            return False
+        with self._lock:
+            if self._modes.snapshot().get("status") != "inactive":
+                return False
+            if self._rosbag.snapshot().get("status") != "inactive":
+                return False
+            if self._go_to is not None and self._go_to.active():
+                return False
+            current = self._progress.get("current_block") if self._progress else None
+            if current:
+                block = self._block(current)
+                if (block.get("control_active") or block.get("current_segment")
+                    or block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload")):
+                    return False
+            return True
+
+    def clear_initial_feedback_warning(self, state: dict) -> None:
+        """Repair only the obsolete startup warning, never a real interruption."""
+        if not (state.get("fresh") is True and state.get("state") == "normal"
+                and state.get("blocked") is False and state.get("overload_valid") is True
+                and state.get("pose_valid") is True and state.get("overloaded") is not True):
+            return
+        warning = "Effort overload: user control remains locked until explicit rearm."
+        # Stack/mapper activation can hold this lock while waiting for the
+        # protection worker to configure the controller. Retry next tick.
+        if not self._lock.acquire(blocking=False):
+            return
+        try:
+            if self._progress is None or self._participant is None:
+                return
+            folder = Path(self._participant["folder"])
+            cleared_blocks = set()
+            for block in self._progress["blocks"]:
+                interruption = block.get("protection_interruption") or {}
+                if (interruption.get("state") == "normal"
+                    and interruption.get("reason") == "waiting_for_feedback"
+                    and interruption.get("event") == 0 and block.get("error") == warning):
+                    block["error"] = None
+                    del block["protection_interruption"]
+                    self._write_block(folder, block)
+                    cleared_blocks.add(block["id"])
+            if cleared_blocks:
+                current = self._progress.get("current_block")
+                if self._error == warning and (current is None or current in cleared_blocks):
+                    self._error = None
+                self._persist(folder)
+        finally:
+            self._lock.release()
 
     def interrupt_overload(self, episode: dict) -> None:
         """Called by the protection worker; recorder finalisation cannot delay cutoff."""

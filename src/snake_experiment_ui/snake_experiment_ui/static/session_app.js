@@ -389,7 +389,10 @@ class SessionInterface {
     const state = this.state?.protection;
     const panel = document.getElementById("protection-panel");
     if (!panel) return;
-    const stackActive = this.state?.stack?.status === "active";
+    const stack = ["E", "F", "G"].includes(this.state?.current_view)
+      ? this.state?.experiment?.stack ?? this.state?.stack
+      : this.state?.stack;
+    const stackActive = stack?.status === "active";
     const blocked = Boolean(state?.blocked || state?.cleanup_pending || state?.configuration === "pending");
     this.setHidden(panel, !state || !stackActive || (!blocked && state?.configuration === "ready"));
     if (!state) return;
@@ -632,6 +635,15 @@ class SessionInterface {
       return `<article class="segment-entry" data-dom-key="segment:${this.escape(segment.name)}"><div><strong>${this.escape(segment.name)}</strong><span>${this.escape(countText)}</span></div><span class="pill ${pillClass}">${this.escape(label)}</span></article>`;
     }).join("") : '<p class="supporting-copy">No recording segment yet.</p>';
     const controlActive = experiment.control_active;
+    const protection = this.state?.protection;
+    const protectionClear = protection?.fresh && !protection.blocked
+      && !protection.cleanup_pending && protection.configuration === "ready";
+    const overloadInterrupted = !controlActive && block.protection_interruption?.event > 0;
+    const recoveryHelp = protectionClear
+      ? "Protection is clear. Activate mode and recording manually to resume with a new segment."
+      : "Control and recording were stopped by overload protection. Use Rearm protection above when available, then activate mode and recording manually to resume with a new segment.";
+    const showBlockError = block.error && !(overloadInterrupted && protectionClear
+      && block.error === "Effort overload: user control remains locked until explicit rearm.");
     const processItems = [
       ["Stack", experiment.stack.status],
       ["Mapper", experiment.mapper.status],
@@ -641,7 +653,7 @@ class SessionInterface {
     this.setClass(view, "view-page");
     this.patchMarkup(view, `<section class="hero-card"><div><p class="step-number">Discovery</p><h2>${this.escape(this.title(block.mode))} discovery</h2><p class="supporting-copy">Free movement without specified or validated targets.</p></div><span class="pill ${controlActive ? "pill--active" : "pill--neutral"}">${controlActive ? "Control and recording active" : "Control inactive"}</span></section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Participant explanation</p><h2>Mode explanation</h2></div><span class="pill ${explanationDone ? "pill--active" : explanation.status === "showing" ? "pill--warning" : "pill--neutral"}">${explanationDone ? "Done" : explanation.status === "showing" ? "On participant screen" : "Pending"}</span></div><p class="supporting-copy">Show the ${this.escape(this.title(block.mode))} video on the participant screen, then confirm the explanation.</p>${!experiment.mode_explanation_video_available ? '<p class="inline-warning">Mode explanation video is unavailable. Manual validation remains possible for development.</p>' : ""}<div class="discovery-controls"><button class="text-button" data-mode-explanation="show" data-block-id="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Show mode explanation</button><button class="primary-button" data-mode-explanation="complete" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || explanation.status !== "showing" ? "disabled" : ""}>Explanation done</button></div></section>
-      <section class="card"><div class="section-heading"><div><p class="step-number">Control</p><h2>Mode and recording</h2></div><span class="supporting-copy">${this.escape(block.folder)}</span></div><dl class="participant-summary process-summary">${processItems}</dl><div class="discovery-controls"><button class="${controlActive ? "reject-button" : "primary-button"}" data-block-control="${this.escape(block.id)}" data-active="${controlActive ? "false" : "true"}" type="button" ${this.busy || (!controlActive && !explanationDone) ? "disabled" : ""}>${controlActive ? "Deactivate mode and recording" : "Activate mode and recording"}</button><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button></div>${block.error ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
+      <section class="card"><div class="section-heading"><div><p class="step-number">Control</p><h2>Mode and recording</h2></div><span class="supporting-copy">${this.escape(block.folder)}</span></div><dl class="participant-summary process-summary">${processItems}</dl><div class="discovery-controls"><button class="${controlActive ? "reject-button" : "primary-button"}" data-block-control="${this.escape(block.id)}" data-active="${controlActive ? "false" : "true"}" type="button" ${this.busy || (!controlActive && !explanationDone) ? "disabled" : ""}>${controlActive ? "Deactivate mode and recording" : "Activate mode and recording"}</button><button class="text-button" data-restart-stack="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Restart stack</button></div><p class="supporting-copy" data-dom-key="discovery-protection-recovery" ${overloadInterrupted ? "" : "hidden"}>${this.escape(recoveryHelp)}</p>${showBlockError ? `<p class="inline-error">${this.escape(block.error)}</p>` : ""}</section>
       <section class="card"><div class="section-heading"><div><p class="step-number">Recordings</p><h2>MCAP segments</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--warning"}">${experiment.can_end ? "Required data verified" : "Valid segment required"}</span></div><div class="segment-list">${segmentRows}</div></section>
       <section class="validation-card"><div><p class="step-number">Complete discovery</p><h2>Return to the experiment sequence</h2><p class="supporting-copy">Confirm the explanation and collect at least one segment with messages for all three expected topics.</p></div><div class="validation-actions"><button class="reject-button" data-block-abort="${this.escape(block.id)}" type="button" ${this.busy ? "disabled" : ""}>Stop and return</button><button class="primary-button" data-block-end="${this.escape(block.id)}" data-phase="discovery" type="button" ${this.busy || !experiment.can_end ? "disabled" : ""}>End discovery</button></div></section>`, `${experiment.participant.folder}:${block.id}`);
   }

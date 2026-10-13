@@ -766,7 +766,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
         self.assertIn("session_style.css?v=session-style-3", html)
-        self.assertIn("session_app.js?v=session-app-6", html)
+        self.assertIn("session_app.js?v=session-app-7", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(

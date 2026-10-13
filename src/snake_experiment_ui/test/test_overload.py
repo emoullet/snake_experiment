@@ -9,7 +9,7 @@ import pytest
 
 from snake_experiment_ui.calibration import CalibrationError
 from snake_experiment_ui.gripper_gate import GripperGate
-from snake_experiment_ui.overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal, protection_action_state
+from snake_experiment_ui.overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal, protection_action_state, protection_waiting_for_initial_feedback
 from snake_experiment_ui.session_web_app import create_session_app
 
 
@@ -63,6 +63,21 @@ def test_queued_startup_and_telemetry_states_do_not_override_live_protection():
     episode = {"state": "locked", "blocked": True, "fresh": True, "event": 1}
     assert protection_action_state(episode, clear) is episode
     assert protection_action_state(episode, stale) is episode
+
+
+def test_initial_feedback_hold_is_not_an_overload_but_still_blocks_commands():
+    monitor = ProtectionState("kinova")
+    startup = monitor.record(status(reason="waiting_for_feedback", pose_valid="false", overload_valid="false"))
+    assert protection_waiting_for_initial_feedback(startup)
+    assert startup["blocked"]
+    with pytest.raises(ProtectionError):
+        monitor.require_clear()
+    for changes in ({"fresh": False}, {"event": 1}, {"overloaded": True},
+                    {"state": "error"}, {"state": "unavailable"}, {"reason": "invalid_pose"}):
+        assert not protection_waiting_for_initial_feedback({**startup, **changes})
+    healthy = monitor.record(status())
+    assert not protection_waiting_for_initial_feedback(healthy)
+    monitor.require_clear()
 
 
 def test_status_fail_closed_and_freshness():

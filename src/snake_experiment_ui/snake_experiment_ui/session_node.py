@@ -38,7 +38,7 @@ from .session_web_app import create_session_app
 from .stack_manager import StackManager
 from .storage import default_calibration_path
 from .calibration import CalibrationError
-from .overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal, protection_action_state
+from .overload import ProtectionState, ProtectionError, recovery_parameters, EventJournal, protection_action_state, protection_waiting_for_initial_feedback
 
 
 CONTROLLER_REQUEST_TIMEOUT_SEC = 5.0
@@ -457,9 +457,19 @@ class SessionInterfaceNode(Node):
                     continue
                 context = self._experiment.protection_context()
                 folder = Path(context["folder"]) if context.get("folder") else self._repository_root
+                startup_idle = (
+                    state["blocked"]
+                    and not self._protection_restarting
+                    and not self._protection_cleanup_pending
+                    and protection_waiting_for_initial_feedback(state)
+                    and not self._mode_manager.active_mode()
+                    and not self._checkup_go_to.active()
+                    and not self._experiment_go_to.active()
+                    and self._experiment.protection_startup_is_idle(state)
+                )
                 # A new event, or loss of fresh status during control, interrupts once.
                 identity = (state.get("instance"), state.get("event"), state.get("state") == "unavailable")
-                if state["blocked"] and not self._protection_restarting and (identity != seen or self._protection_cleanup_pending):
+                if state["blocked"] and not startup_idle and not self._protection_restarting and (identity != seen or self._protection_cleanup_pending):
                     seen = identity
                     self._protection_cleanup_pending = True
                     self.get_logger().warning(
@@ -479,6 +489,7 @@ class SessionInterfaceNode(Node):
                 journal_state["robot"] = self._protection.robot
                 journal.append(folder / "safety/overload_events.jsonl", journal_state, {"block": context.get("block")})
                 state = current_state
+                self._experiment.clear_initial_feedback_warning(state)
                 # Install a complete configuration atomically. Never replace an
                 # ongoing retreat's targets, and never leave an old participant's
                 # targets installed if the next calibration is invalid.
