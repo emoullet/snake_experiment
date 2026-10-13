@@ -1,6 +1,7 @@
 """Media locations for the participant-facing interface."""
 
 from pathlib import Path
+import math
 
 import yaml
 
@@ -45,6 +46,18 @@ class ParticipantProfile:
         ):
             raise ParticipantProfileError("Participant preview default_view must be view_1 through view_6.")
         self.preview_default_view = preview.get("default_view", "view_1")
+        sounds = data.get("sounds", {})
+        overload = sounds.get("overload", {}) if isinstance(sounds, dict) else None
+        if not isinstance(overload, dict):
+            raise ParticipantProfileError("Participant overload sound configuration must be a mapping.")
+        duration = overload.get("duration_sec", 3.0)
+        try:
+            valid_duration = type(duration) in (int, float) and math.isfinite(duration) and duration > 0
+        except OverflowError:
+            valid_duration = False
+        if not valid_duration:
+            raise ParticipantProfileError("Participant overload sound duration_sec must be finite and positive.")
+        self.overload_sound_duration_sec = float(duration)
         videos = data.get("videos")
         explanations = videos.get("mode_explanation") if isinstance(videos, dict) else None
         if not isinstance(videos, dict) or not isinstance(explanations, dict):

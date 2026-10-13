@@ -122,6 +122,17 @@ timeout excludes this initial delay. The manager ROS parameter is
 recovery phase, including the initial hold.
 
 The participant page shows an orange warning throughout a confirmed overload
+episode and plays the local Tarkov reserve alarm once per episode. Set
+`sounds.overload.duration_sec` in `participant_interface.yaml` to a positive finite
+number of seconds (default `3.0`), then restart the backend. Playback stops at
+that duration or the end of the full MP3, whichever comes first. If audible
+autoplay is blocked, the banner offers **Play warning sound**. Reconnects and
+retreat phase changes do not replay the alarm; a newly loaded page does warn
+about an ongoing episode. The alarm takes priority over the success cue without
+interrupting video, camera or previews. The local MP3 originates from
+https://www.myinstants.com/en/instant/tarkov-reserve-alarm-92526/.
+
+The warning remains visible throughout the confirmed overload
 episode while the stack is active. It distinguishes retreat motion, waiting for
 contact force to clear, and completed or stopped retreat. Commands remain paused
 until the experimenter rearms protection. Missing telemetry alone does not create

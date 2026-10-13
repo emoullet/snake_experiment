@@ -29,6 +29,15 @@
   // Local copy of https://www.myinstants.com/media/sounds/mario_coin_sound.mp3.
   const successSound = new Audio("/session-static/mario_coin_sound.mp3");
   successSound.preload = "auto";
+  // Local copy of https://www.myinstants.com/media/sounds/reserve-alarm-type-beat-mp3cut.mp3.
+  const overloadSound = new Audio("/session-static/tarkov_reserve_alarm.mp3");
+  overloadSound.preload = "auto";
+  overloadSound.loop = false;
+  const overloadSoundRetry = document.getElementById("participant-overload-sound-retry");
+  const handledOverloadEpisodes = new Set();
+  let overloadEpisode = null;
+  let overloadDuration = 3;
+  let overloadPlayback = null;
   const connection = document.getElementById("participant-connection");
   const overloadBanner = document.getElementById("participant-overload-warning");
   const overloadMessage = document.getElementById("participant-overload-message");
@@ -147,22 +156,87 @@
   window.addEventListener("pagehide", stopCamera);
 
   async function playSuccessSound() {
+    if (overloadEpisode) return;
     try {
       successSound.currentTime = 0;
       await successSound.play();
+      if (overloadEpisode) successSound.pause();
       soundRetry.hidden = true;
     } catch {
       // Audible autoplay can be blocked until the participant interacts with the page.
-      if (currentView === "C") soundRetry.hidden = false;
+      if (currentView === "C" && !overloadEpisode) soundRetry.hidden = false;
     }
   }
 
   soundRetry.addEventListener("click", () => { void playSuccessSound(); });
 
+  function stopOverloadSound() {
+    if (overloadPlayback?.timer != null) window.clearTimeout(overloadPlayback.timer);
+    overloadPlayback = null;
+    overloadSound.pause();
+    overloadSound.currentTime = 0;
+    overloadSoundRetry.hidden = true;
+  }
+
+  async function playOverloadSound() {
+    if (!overloadEpisode) return;
+    stopOverloadSound();
+    const playback = { episode: overloadEpisode, timer: null };
+    overloadPlayback = playback;
+    successSound.pause();
+    soundRetry.hidden = true;
+    try {
+      await overloadSound.play();
+      if (overloadPlayback !== playback || overloadEpisode !== playback.episode) {
+        if (!overloadPlayback) overloadSound.pause();
+        return;
+      }
+      if (overloadSound.ended) { stopOverloadSound(); return; }
+      const fileDuration = Number.isFinite(overloadSound.duration) && overloadSound.duration > 0
+        ? overloadSound.duration : overloadDuration;
+      playback.timer = window.setTimeout(() => {
+        if (overloadPlayback === playback) stopOverloadSound();
+      }, Math.min(overloadDuration, fileDuration, 2147483.647) * 1000);
+    } catch {
+      if (overloadPlayback !== playback || overloadEpisode !== playback.episode) return;
+      overloadPlayback = null;
+      overloadSoundRetry.hidden = false;
+    }
+  }
+
+  function updateOverloadSound(warning) {
+    const episode = typeof warning?.episode_id === "string" && warning.episode_id
+      ? warning.episode_id : null;
+    if (episode !== overloadEpisode) {
+      stopOverloadSound();
+      overloadEpisode = episode;
+      overloadDuration = Number.isFinite(warning?.duration_sec) && warning.duration_sec > 0
+        ? warning.duration_sec : 3;
+    }
+    if (episode && !handledOverloadEpisodes.has(episode)) {
+      handledOverloadEpisodes.add(episode);
+      void playOverloadSound();
+    }
+  }
+
+  overloadSoundRetry.addEventListener("click", () => { void playOverloadSound(); });
+  overloadSound.addEventListener("ended", stopOverloadSound);
+  overloadSound.addEventListener("playing", () => {
+    if (!overloadPlayback || !overloadEpisode) overloadSound.pause();
+  });
+  successSound.addEventListener("playing", () => {
+    if (overloadEpisode) { successSound.pause(); soundRetry.hidden = true; }
+  });
+  window.addEventListener("pagehide", () => {
+    overloadEpisode = null;
+    stopOverloadSound();
+  });
+
   function render(state) {
     const warning = overloadMessages[state.overload_warning?.phase] || "";
     setText(overloadMessage, warning);
     overloadBanner.hidden = !warning;
+    updateOverloadSound(warning ? state.overload_warning : null);
     const showA = state.view === "A";
     const showB = state.view === "B" && ["baseline", "snake"].includes(state.mode);
     const showC = state.view === "C" && ["baseline", "snake"].includes(state.mode);

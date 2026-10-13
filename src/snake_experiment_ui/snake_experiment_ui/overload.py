@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import threading
 import time
+import uuid
 
 from .calibration import validate_calibration_robot, CalibrationError
 from .robot_preview import robot_definition
@@ -30,17 +31,20 @@ class ParticipantOverloadWarning:
         self._lock = threading.Lock()
         self._episode = None
         self._confirmed = False
+        self._public_episode_id = None
 
     def snapshot(self, state, stack_active):
         with self._lock:
             fresh = state.get("fresh") is True
             if not stack_active or (fresh and state.get("state") == "normal" and not state.get("blocked")):
                 self._episode, self._confirmed = None, False
+                self._public_episode_id = None
                 return None
             event = state.get("event", 0)
             episode = (state.get("instance"), event)
             if fresh and episode != self._episode:
                 self._episode, self._confirmed = episode, False
+                self._public_episode_id = None
             if fresh and type(event) is int and event > 0 and state.get("blocked"):
                 history = state.get("phase_history", [])
                 previous_retreat = isinstance(history, list) and any(
@@ -55,21 +59,26 @@ class ParticipantOverloadWarning:
                 )
             if not self._confirmed:
                 return None
+            if self._public_episode_id is None:
+                self._public_episode_id = uuid.uuid4().hex
             if not fresh:
-                return {"phase": "unavailable"}
+                return self._warning("unavailable")
             if not state.get("blocked"):
                 return None
             phase = state.get("state")
             valid_feedback = state.get("overload_valid") is True and state.get("pose_valid") is True
             if valid_feedback and phase == "waiting_retreat":
-                return {"phase": "waiting_retreat"}
+                return self._warning("waiting_retreat")
             if valid_feedback and phase in ("translating", "rotating"):
-                return {"phase": "retreating"}
+                return self._warning("retreating")
             if valid_feedback and phase == "waiting_clear":
-                return {"phase": "waiting_clear"}
+                return self._warning("waiting_clear")
             if valid_feedback and phase == "locked" and state.get("reason") == "completed":
-                return {"phase": "retreat_complete"}
-            return {"phase": "paused"}
+                return self._warning("retreat_complete")
+            return self._warning("paused")
+
+    def _warning(self, phase):
+        return {"phase": phase, "episode_id": self._public_episode_id}
 
 
 def protection_waiting_for_initial_feedback(state):

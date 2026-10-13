@@ -357,6 +357,7 @@ class SessionInterfaceNode(Node):
             state_images=state_images,
             robot_preview=self._robot_preview,
             preview_default_view=self._participant_profile.preview_default_view,
+            overload_sound_duration_sec=self._participant_profile.overload_sound_duration_sec,
             protection_snapshot=self._protection_snapshot,
             stack_snapshot=self._stack_manager.snapshot,
             protection_guard=self._require_protection_clear,

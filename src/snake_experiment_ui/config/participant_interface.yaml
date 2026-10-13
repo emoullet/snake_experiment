@@ -1,5 +1,11 @@
 schema_version: 1
 
+# Seconds of the local overload alarm to play, once per confirmed episode.
+# Positive finite values only; reload the backend after changing this setting.
+sounds:
+  overload:
+    duration_sec: 3.0
+
 # Shared viewpoint for both joystick previews: view_1 through view_6.
 # The participant may change it until the page is reloaded.
 preview:

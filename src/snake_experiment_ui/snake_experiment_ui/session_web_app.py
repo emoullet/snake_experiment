@@ -107,6 +107,7 @@ def create_session_app(
     protection_action=None,
     preview_default_view="view_1",
     stack_snapshot=None,
+    overload_sound_duration_sec=3.0,
 ):
     """Create the View B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
@@ -257,7 +258,8 @@ def create_session_app(
         if protection_snapshot is not None:
             protection = protection_snapshot()
             stack = stack_snapshot() if stack_snapshot is not None else checkup.snapshot().get("stack", {})
-            state["overload_warning"] = participant_warning.snapshot(protection, stack.get("status") == "active")
+            warning = participant_warning.snapshot(protection, stack.get("status") == "active")
+            state["overload_warning"] = {**warning, "duration_sec": overload_sound_duration_sec} if warning else None
         return state
 
     @app.get("/participant/api/state")

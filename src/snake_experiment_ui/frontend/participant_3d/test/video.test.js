@@ -7,12 +7,15 @@ const script = readFileSync(new URL('../../../snake_experiment_ui/static/partici
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 class Element extends EventTarget {
-  constructor() {
+  constructor(source) {
     super();
     this.hidden = true;
     this.textContent = '';
     this.classList = { toggle() {} };
     this.attributes = {};
+    if (source) this.attributes.src = source;
+    this.duration = 10.292245;
+    this.ended = false;
     this.readyState = 0;
     this.currentTime = 0;
     this.paused = true;
@@ -32,6 +35,7 @@ class Element extends EventTarget {
     if (this.playResult) return this.playResult();
     this.paused = false;
     this.dispatchEvent(new Event('play'));
+    this.dispatchEvent(new Event('playing'));
     return Promise.resolve();
   }
   loaded() { this.readyState = 1; this.dispatchEvent(new Event('loadedmetadata')); }
@@ -45,13 +49,17 @@ async function client(initial = { view: 'waiting' }, delayedInitial = null, came
   };
   element('participant-mapping').parentElement = element('participant-trial');
   let socket;
+  const audios = [];
+  const timers = new Map();
+  let timerId = 0;
   const window = new EventTarget();
   window.location = { protocol: 'http:', host: 'test' };
-  window.setTimeout = () => {};
+  window.setTimeout = (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; };
+  window.clearTimeout = id => timers.delete(id);
   vm.runInNewContext(script, {
     document: { getElementById: element, querySelector: element }, window,
     navigator: { mediaDevices: cameraProvider ? { getUserMedia: cameraProvider } : undefined },
-    Audio: Element,
+    Audio: class extends Element { constructor(source) { super(source); audios.push(this); } },
     WebSocket: class { constructor() { socket = this; } },
     CustomEvent: class extends Event { constructor(name, options) { super(name); this.detail = options.detail; } },
     fetch: async () => ({ json: async () => delayedInitial || initial }),
@@ -60,11 +68,136 @@ async function client(initial = { view: 'waiting' }, delayedInitial = null, came
   return {
     element, send: state => socket.onmessage({ data: JSON.stringify(state) }),
     disconnect: () => socket.onclose(),
+    audio: filename => audios.find(audio => audio.getAttribute('src').endsWith(filename)),
+    timers,
+    runTimer: id => { const timer = timers.get(id); timers.delete(id); timer?.callback(); },
+    pagehide: () => window.dispatchEvent(new Event('pagehide')),
   };
 }
 
 const videoState = (id, view = 'A', mode = null, available = true) => ({
   view, mode, video_available: available, video_play_request_id: id,
+});
+
+const overloadState = (episode = 'episode-1', duration = 3, phase = 'waiting_retreat') => ({
+  view: 'waiting', overload_warning: { episode_id: episode, duration_sec: duration, phase },
+});
+
+test('alarm plays once per episode across phases, panels, duplicates and reconnection', async () => {
+  const c = await client(overloadState('first', 2.25));
+  const alarm = c.audio('tarkov_reserve_alarm.mp3');
+  assert.equal(alarm.playCalls.length, 1);
+  assert.equal(alarm.loop, false);
+  assert.equal(alarm.getAttribute('src'), '/session-static/tarkov_reserve_alarm.mp3');
+  const [timerId, timer] = [...c.timers][0];
+  assert.equal(timer.delay, 2250);
+  alarm.currentTime = 1;
+  for (const phase of ['retreating', 'waiting_clear', 'retreat_complete', 'paused', 'unavailable']) {
+    c.send({ ...overloadState('first', 2.25, phase), view: 'B', mode: 'snake' });
+    assert.equal(alarm.playCalls.length, 1);
+    assert.equal(alarm.currentTime, 1);
+  }
+  c.disconnect();
+  const reconnectId = [...c.timers].find(([, item]) => item.delay === 500)[0];
+  c.runTimer(reconnectId);
+  c.send(overloadState('first', 2.25));
+  assert.equal(alarm.playCalls.length, 1);
+  c.runTimer(timerId);
+  assert.equal(alarm.paused, true);
+  c.send(overloadState('first', 2.25));
+  assert.equal(alarm.playCalls.length, 1);
+  c.send(overloadState('second', .5));
+  await flush();
+  assert.equal(alarm.playCalls.length, 2);
+  timer.callback(); // Even an obsolete timer cannot stop the next episode.
+  assert.equal(alarm.paused, false);
+  c.send({ view: 'waiting', overload_warning: null });
+  assert.equal(alarm.paused, true);
+  assert.equal(c.timers.size, 0);
+});
+
+test('alarm duration uses defaults, configured values and natural file ending', async () => {
+  for (const [duration, expected] of [[undefined, 3000], [.1, 100], [15, 10292.245]]) {
+    const state = overloadState();
+    state.overload_warning.duration_sec = duration;
+    const c = await client(state);
+    const alarm = c.audio('tarkov_reserve_alarm.mp3');
+    assert.ok(Math.abs([...c.timers.values()][0].delay - expected) < .000001);
+    alarm.ended = true;
+    alarm.dispatchEvent(new Event('ended'));
+    assert.equal(alarm.paused, true);
+    assert.equal(c.timers.size, 0);
+    c.send(state);
+    assert.equal(alarm.playCalls.length, 1);
+    const reloaded = await client(state);
+    assert.equal(reloaded.audio('tarkov_reserve_alarm.mp3').playCalls.length, 1);
+  }
+});
+
+test('blocked autoplay exposes manual alarm playback only for the active episode', async () => {
+  const c = await client();
+  const alarm = c.audio('tarkov_reserve_alarm.mp3');
+  const retry = c.element('participant-overload-sound-retry');
+  alarm.playResult = () => Promise.reject(new Error('NotAllowedError'));
+  c.send(overloadState());
+  await flush();
+  assert.equal(retry.hidden, false);
+  c.send(overloadState());
+  assert.equal(alarm.playCalls.length, 1);
+  alarm.playResult = null;
+  retry.dispatchEvent(new Event('click'));
+  await flush();
+  assert.equal(alarm.playCalls.length, 2);
+  assert.equal(retry.hidden, true);
+  c.pagehide();
+  assert.equal(alarm.paused, true);
+  assert.equal(c.timers.size, 0);
+  retry.dispatchEvent(new Event('click'));
+  assert.equal(alarm.playCalls.length, 2);
+});
+
+test('late alarm play promises cannot revive cleared alarms or affect a new episode', async () => {
+  for (const reject of [false, true]) {
+    const c = await client();
+    const alarm = c.audio('tarkov_reserve_alarm.mp3');
+    let finish;
+    alarm.playResult = () => new Promise((resolve, fail) => { finish = reject ? fail : resolve; });
+    c.send(overloadState('first'));
+    c.send({ view: 'waiting' });
+    if (!reject) { alarm.paused = false; alarm.dispatchEvent(new Event('playing')); }
+    finish();
+    await flush();
+    assert.equal(alarm.paused, true);
+    assert.equal(c.element('participant-overload-sound-retry').hidden, true);
+    assert.equal(c.timers.size, 0);
+    alarm.playResult = () => new Promise(resolve => { finish = resolve; });
+    c.send(overloadState('second'));
+    alarm.playResult = null;
+    c.send(overloadState('third'));
+    await flush();
+    finish();
+    await flush();
+    assert.equal(alarm.paused, false);
+    assert.equal(c.timers.size, 1);
+  }
+});
+
+test('alarm has priority over success sounds without queued success playback', async () => {
+  const c = await client({ view: 'C', mode: 'snake', success_event_id: null });
+  const success = c.audio('mario_coin_sound.mp3');
+  c.send({ view: 'C', mode: 'snake', success_event_id: 'success-1' });
+  await flush();
+  assert.equal(success.playCalls.length, 1);
+  c.send({ ...overloadState(), view: 'C', mode: 'snake', success_event_id: 'success-2' });
+  await flush();
+  assert.equal(success.paused, true);
+  assert.equal(success.playCalls.length, 1);
+  c.send({ view: 'C', mode: 'snake', success_event_id: 'success-2' });
+  await flush();
+  assert.equal(success.playCalls.length, 1);
+  c.send({ view: 'C', mode: 'snake', success_event_id: 'success-3' });
+  await flush();
+  assert.equal(success.playCalls.length, 2);
 });
 
 test('display starts all three videos from zero, while duplicate snapshots never restart them', async () => {

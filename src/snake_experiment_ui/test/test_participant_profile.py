@@ -11,6 +11,25 @@ from snake_experiment_ui.participant_profile import (
 
 
 class ParticipantProfileTest(unittest.TestCase):
+    def test_overload_sound_duration_defaults_and_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "participant_interface.yaml"
+            base = ('schema_version: 1\nvideos:\n  experiment_presentation: ""\n'
+                    '  mode_explanation:\n    baseline: ""\n    snake: ""\n')
+            path.write_text(base)
+            self.assertEqual(ParticipantProfile(path).overload_sound_duration_sec, 3.0)
+            for value in ("0.25", "1", "3.0", "15.5"):
+                path.write_text(base + f"sounds:\n  overload:\n    duration_sec: {value}\n")
+                self.assertEqual(ParticipantProfile(path).overload_sound_duration_sec, float(value))
+            for value in ("0", "-1", ".nan", ".inf", "true", '"3"', "null", "[]", str(10**400)):
+                path.write_text(base + f"sounds:\n  overload:\n    duration_sec: {value}\n")
+                with self.assertRaisesRegex(ParticipantProfileError, "duration_sec"):
+                    ParticipantProfile(path)
+            for value in ("sounds: []\n", "sounds:\n  overload: null\n"):
+                path.write_text(base + value)
+                with self.assertRaisesRegex(ParticipantProfileError, "sound configuration"):
+                    ParticipantProfile(path)
+
     def test_preview_default_view_is_optional_and_accepts_six_views(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "participant_interface.yaml"

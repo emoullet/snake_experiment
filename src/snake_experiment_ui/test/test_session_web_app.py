@@ -615,8 +615,11 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('successEventInitialized = true', script)
         self.assertIn('await successSound.play()', script)
         self.assertIn('soundRetry.hidden = false', script)
-        self.assertIn('participant_app.js?v=participant-overload-2', html)
+        self.assertIn('participant_app.js?v=participant-overload-3', html)
         self.assertTrue((package_root / "static/mario_coin_sound.mp3").is_file())
+        self.assertTrue((package_root / "static/tarkov_reserve_alarm.mp3").is_file())
+        self.assertIn('new Audio("/session-static/tarkov_reserve_alarm.mp3")', script)
+        self.assertIn('id="participant-overload-sound-retry"', html)
         self.assertNotIn('innerHTML', script)
         self.assertNotIn('/api/experiment/', script)
 

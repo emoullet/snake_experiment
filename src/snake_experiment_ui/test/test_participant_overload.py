@@ -20,6 +20,11 @@ def protection(**changes):
 
 
 class ParticipantOverloadWarningTest(unittest.TestCase):
+    def assertWarning(self, result, phase):
+        self.assertEqual(set(result), {"phase", "episode_id"})
+        self.assertEqual(result["phase"], phase)
+        self.assertRegex(result["episode_id"], r"^[a-f0-9]{32}$")
+
     def test_retreat_phases_and_disabled_or_failed_retreat(self):
         for state, reason, expected in (
             ("waiting_retreat", "overload", "waiting_retreat"),
@@ -35,12 +40,12 @@ class ParticipantOverloadWarningTest(unittest.TestCase):
                 projector = ParticipantOverloadWarning()
                 raw = protection(state=state, reason=reason, overloaded=False)
                 before = copy.deepcopy(raw)
-                self.assertEqual(projector.snapshot(raw, True), {"phase": expected})
+                self.assertWarning(projector.snapshot(raw, True), expected)
                 self.assertEqual(raw, before)
 
     def test_signal_or_history_identifies_an_episode_without_current_force(self):
         projector = ParticipantOverloadWarning()
-        self.assertEqual(projector.snapshot(protection(state="error", reason="operator_stop"), True), {"phase": "paused"})
+        self.assertWarning(projector.snapshot(protection(state="error", reason="operator_stop"), True), "paused")
         for historical in ("waiting_retreat", "translating", "waiting_clear", "rotating", "locked"):
             with self.subTest(historical=historical):
                 projector = ParticipantOverloadWarning()
@@ -48,7 +53,7 @@ class ParticipantOverloadWarningTest(unittest.TestCase):
                     state="error", reason="invalid_feedback", overloaded=False,
                     phase_history=[{"state": historical, "elapsed_sec": 0.1}],
                 )
-                self.assertEqual(projector.snapshot(raw, True), {"phase": "paused"})
+                self.assertWarning(projector.snapshot(raw, True), "paused")
 
     def test_telemetry_fault_or_startup_alone_never_announces_overload(self):
         for raw in (
@@ -65,10 +70,10 @@ class ParticipantOverloadWarningTest(unittest.TestCase):
 
     def test_loss_of_freshness_preserves_warning_until_rearm_or_stack_stop(self):
         projector = ParticipantOverloadWarning()
-        self.assertEqual(projector.snapshot(protection(), True), {"phase": "retreating"})
-        self.assertEqual(projector.snapshot(protection(overloaded=False), True), {"phase": "retreating"})
-        self.assertEqual(projector.snapshot({"fresh": False, "blocked": True}, True), {"phase": "unavailable"})
-        self.assertEqual(projector.snapshot(protection(overload_valid=False), True), {"phase": "paused"})
+        self.assertWarning(projector.snapshot(protection(), True), "retreating")
+        self.assertWarning(projector.snapshot(protection(overloaded=False), True), "retreating")
+        self.assertWarning(projector.snapshot({"fresh": False, "blocked": True}, True), "unavailable")
+        self.assertWarning(projector.snapshot(protection(overload_valid=False), True), "paused")
         normal = protection(state="normal", blocked=False, reason="rearmed", overloaded=False)
         self.assertIsNone(projector.snapshot(normal, True))
         self.assertIsNone(projector.snapshot({"fresh": False, "blocked": True}, True))
@@ -83,6 +88,17 @@ class ParticipantOverloadWarningTest(unittest.TestCase):
             raw = protection(state="error", reason="invalid_pose", overloaded=False, **changed)
             self.assertIsNone(projector.snapshot(raw, True))
 
+    def test_episode_id_stays_stable_and_changes_only_for_new_episode(self):
+        projector = ParticipantOverloadWarning()
+        first = projector.snapshot(protection(state="waiting_retreat"), True)["episode_id"]
+        for phase in ("translating", "waiting_clear", "rotating", "locked"):
+            self.assertEqual(projector.snapshot(protection(state=phase), True)["episode_id"], first)
+        self.assertEqual(projector.snapshot({"fresh": False, "blocked": True}, True)["episode_id"], first)
+        second = projector.snapshot(protection(event=2), True)["episode_id"]
+        self.assertNotEqual(first, second)
+        third = projector.snapshot(protection(instance="manager-2", event=2), True)["episode_id"]
+        self.assertNotIn(third, (first, second))
+
 
 class ParticipantOverloadProjectionTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -94,6 +110,7 @@ class ParticipantOverloadProjectionTest(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(snapshot=lambda: {}), Path(self.directory.name), Path(self.directory.name),
             experiment=SimpleNamespace(participant_snapshot=lambda: self.public),
             protection_snapshot=lambda: self.raw, stack_snapshot=lambda: self.stack,
+            overload_sound_duration_sec=1.25,
         )
 
     def tearDown(self):
@@ -105,7 +122,10 @@ class ParticipantOverloadProjectionTest(unittest.IsolatedAsyncioTestCase):
             self.public["view"] = view
             result = await endpoint()
             self.assertEqual(result["view"], view)
-            self.assertEqual(result["overload_warning"], {"phase": "retreating"})
+            warning = result["overload_warning"]
+            self.assertEqual(set(warning), {"phase", "episode_id", "duration_sec"})
+            self.assertEqual(warning["phase"], "retreating")
+            self.assertEqual(warning["duration_sec"], 1.25)
             self.assertNotIn("overload_warning", self.public)
             for private in ("private-target", "private_pose", "original_target", "manager-1"):
                 self.assertNotIn(private, json.dumps(result))
@@ -133,7 +153,9 @@ class ParticipantOverloadProjectionTest(unittest.IsolatedAsyncioTestCase):
         endpoint = next(route.endpoint for route in self.app.routes if route.path == "/participant/ws")
         with patch("snake_experiment_ui.session_web_app.asyncio.sleep", side_effect=tick):
             await endpoint(Socket())
-        self.assertEqual([message["overload_warning"] for message in messages], [
-            {"phase": "retreating"}, {"phase": "waiting_clear"}, {"phase": "retreat_complete"}, None,
-        ])
+        self.assertEqual([message["overload_warning"]["phase"] if message["overload_warning"] else None
+                          for message in messages], ["retreating", "waiting_clear", "retreat_complete", None])
+        warnings = [message["overload_warning"] for message in messages if message["overload_warning"]]
+        self.assertEqual(len({warning["episode_id"] for warning in warnings}), 1)
+        self.assertTrue(all(warning["duration_sec"] == 1.25 for warning in warnings))
         self.assertTrue(all(message["view"] == "waiting" for message in messages))
