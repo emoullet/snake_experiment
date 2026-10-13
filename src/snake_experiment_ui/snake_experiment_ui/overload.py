@@ -19,7 +19,7 @@ class ProtectionError(RuntimeError):
 class ParticipantOverloadWarning:
     """Remember confirmed episodes for display only, never influence protection."""
 
-    _RETREAT_STATES = {"translating", "waiting_clear", "rotating", "locked"}
+    _RETREAT_STATES = {"waiting_retreat", "translating", "waiting_clear", "rotating", "locked"}
     _OVERLOAD_REASONS = {
         "overload", "overload_during_rotation", "retreat_disabled", "completed",
         "waiting_for_clear_force", "no_compatible_calibration",
@@ -61,6 +61,8 @@ class ParticipantOverloadWarning:
                 return None
             phase = state.get("state")
             valid_feedback = state.get("overload_valid") is True and state.get("pose_valid") is True
+            if valid_feedback and phase == "waiting_retreat":
+                return {"phase": "waiting_retreat"}
             if valid_feedback and phase in ("translating", "rotating"):
                 return {"phase": "retreating"}
             if valid_feedback and phase == "waiting_clear":
@@ -140,7 +142,7 @@ class ProtectionState:
             values = {v.key: v.value for v in status.values}
             stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
             if (status.hardware_id != self.robot or values["enabled"] != "true"
-                or status.message not in ("normal", "translating", "waiting_clear", "rotating", "locked", "error")
+                or status.message not in ("normal", "waiting_retreat", "translating", "waiting_clear", "rotating", "locked", "error")
                 or values["blocked"] not in ("true", "false")
                 or (status.message == "normal") != (values["blocked"] == "false")
                 or (ros_now is not None and not 0 <= ros_now - stamp <= 0.5)):

@@ -396,11 +396,11 @@ class SessionInterface {
     const blocked = Boolean(state?.blocked || state?.cleanup_pending || state?.configuration === "pending");
     this.setHidden(panel, !state || !stackActive || (!blocked && state?.configuration === "ready"));
     if (!state) return;
-    const phases = { translating: "Retreat: translation", waiting_clear: "Waiting for clear force", rotating: "Retreat: rotation", locked: "Retreat complete · locked", error: "Protection locked", unavailable: "Protection status unavailable", normal: "Protection ready" };
+    const phases = { waiting_retreat: "Commands paused · waiting before retreat", translating: "Retreat: translation", waiting_clear: "Waiting for clear force", rotating: "Retreat: rotation", locked: "Retreat complete · locked", error: "Protection locked", unavailable: "Protection status unavailable", normal: "Protection ready" };
     this.setText(document.getElementById("protection-status"), state.reason === "retreat_disabled" ? "Protection locked · retreat disabled" : phases[state.state] || state.state);
     this.setText(document.getElementById("protection-message"), `${state.reason || ""} · ${state.target || "no retreat target"}${state.flipped ? " · orientation adapted by π around tool Z" : ""} · ${state.configuration || "pending"}`);
     this.setDisabled(document.getElementById("protection-rearm"), this.busy || !state.fresh || !state.rearm_ready || state.cleanup_pending);
-    this.setDisabled(document.getElementById("protection-stop"), !state.fresh || !["translating", "waiting_clear", "rotating"].includes(state.state));
+    this.setDisabled(document.getElementById("protection-stop"), !state.fresh || !["waiting_retreat", "translating", "waiting_clear", "rotating"].includes(state.state));
     if (blocked) {
       document.querySelectorAll("[data-mode-start], [data-checkup-go-to], [data-block-start]:not([data-stack-bootstrap]), [data-block-control], [data-restart-stack], [data-block-go-to], [data-trial-action='start'], [data-trial-action='prepare']").forEach(button => this.setDisabled(button, true));
     }

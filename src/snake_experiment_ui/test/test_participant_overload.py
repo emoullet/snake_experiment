@@ -22,6 +22,7 @@ def protection(**changes):
 class ParticipantOverloadWarningTest(unittest.TestCase):
     def test_retreat_phases_and_disabled_or_failed_retreat(self):
         for state, reason, expected in (
+            ("waiting_retreat", "overload", "waiting_retreat"),
             ("translating", "overload", "retreating"),
             ("rotating", "overload", "retreating"),
             ("waiting_clear", "waiting_for_clear_force", "waiting_clear"),
@@ -40,7 +41,7 @@ class ParticipantOverloadWarningTest(unittest.TestCase):
     def test_signal_or_history_identifies_an_episode_without_current_force(self):
         projector = ParticipantOverloadWarning()
         self.assertEqual(projector.snapshot(protection(state="error", reason="operator_stop"), True), {"phase": "paused"})
-        for historical in ("translating", "waiting_clear", "rotating", "locked"):
+        for historical in ("waiting_retreat", "translating", "waiting_clear", "rotating", "locked"):
             with self.subTest(historical=historical):
                 projector = ParticipantOverloadWarning()
                 raw = protection(

@@ -24,6 +24,7 @@ def generate_launch_description():
 
     arguments = [
         DeclareLaunchArgument("overload_protection", default_value="false", choices=["true", "false"]),
+        DeclareLaunchArgument("overload_retreat_delay_sec", default_value="1.0"),
         DeclareLaunchArgument(
             "gui",
             default_value="true",

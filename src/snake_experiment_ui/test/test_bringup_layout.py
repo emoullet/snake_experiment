@@ -89,6 +89,9 @@ class BringupLayoutTest(unittest.TestCase):
         from snake_experiment_ui import protected_launch
         for robot in ("explorer", "kinova"):
             params = protected_launch.manager_protection_parameters(robot)
+            delay_context = LaunchContext()
+            delay_context.launch_configurations["overload_retreat_delay_sec"] = "2.5"
+            self.assertEqual(params["overload_protection.retreat_delay_sec"].evaluate(delay_context), 2.5)
             profile = yaml.safe_load((PACKAGE_ROOT / "bringup/cartesian_manager/config" / f"{robot}_params.yaml").read_text())["qontrol_explorer"]["ros__parameters"]
             self.assertEqual(params["overload_protection.controller_linear_gain"], profile["command_max_linear_velocity"])
             self.assertEqual(params["overload_protection.controller_angular_gain"], profile["command_max_angular_velocity"])

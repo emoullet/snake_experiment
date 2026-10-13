@@ -31,7 +31,7 @@ function interfaceFor(view = 'E') {
 test('shared protection panel uses active block stack on Discovery, Training and Recording', () => {
   for (const view of ['E', 'F', 'G']) {
     const { ui, elements, control } = interfaceFor(view);
-    for (const phase of ['translating', 'waiting_clear', 'rotating', 'locked']) {
+    for (const phase of ['waiting_retreat', 'translating', 'waiting_clear', 'rotating', 'locked']) {
       ui.state.protection.state = phase;
       ui.renderProtection();
       assert.equal(elements.get('protection-panel').hidden, false);

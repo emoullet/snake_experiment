@@ -13,6 +13,7 @@ def generate_launch_description():
         DeclareLaunchArgument("stack_robot", default_value="explorer", choices=["explorer", "kinova"]),
         DeclareLaunchArgument("stack_robot_ip", default_value="192.168.1.10"),
         DeclareLaunchArgument("stack_use_simulation", default_value="false"),
+        DeclareLaunchArgument("overload_retreat_delay_sec", default_value="1.0"),
         DeclareLaunchArgument("diagnostic_profile", default_value=""),
         DeclareLaunchArgument("experiment_profile", default_value=""),
         DeclareLaunchArgument("participant_interface_profile", default_value=""),
@@ -49,6 +50,7 @@ def generate_launch_description():
                 "port": LaunchConfiguration("port"),
                 "stack_robot": LaunchConfiguration("stack_robot"),
                 "stack_robot_ip": LaunchConfiguration("stack_robot_ip"),
+                "overload_retreat_delay_sec": LaunchConfiguration("overload_retreat_delay_sec"),
                 "stack_use_simulation": LaunchConfiguration(
                     "stack_use_simulation"
                 ),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ipaddress import AddressValueError, IPv4Address
+import math
 import os
 import signal
 import subprocess
@@ -29,6 +30,7 @@ class StackManager:
         robot: str = "explorer",
         robot_ip: str = "192.168.1.10",
         overload_protection: bool = False,
+        overload_retreat_delay_sec: float = 1.0,
         before_start: Callable[[], None] = lambda: None,
     ) -> None:
         if robot not in ("explorer", "kinova"):
@@ -40,6 +42,9 @@ class StackManager:
                 raise StackError(f"Invalid Kinova IPv4 address: {robot_ip}") from error
         self._before_start = before_start
         self._overload_protection = overload_protection
+        if not math.isfinite(overload_retreat_delay_sec) or overload_retreat_delay_sec < 0:
+            raise StackError("Retreat delay must be finite and non-negative.")
+        self._overload_retreat_delay_sec = overload_retreat_delay_sec
         self._robot = robot
         self._robot_ip = robot_ip
         self._node_names = node_names
@@ -109,6 +114,7 @@ class StackManager:
                 command.append(f"robot_ip:={self._robot_ip}")
             if self._overload_protection:
                 command.append("overload_protection:=true")
+                command.append(f"overload_retreat_delay_sec:={self._overload_retreat_delay_sec}")
             try:
                 self._process = self._popen_factory(command, start_new_session=True)
             except OSError as error:

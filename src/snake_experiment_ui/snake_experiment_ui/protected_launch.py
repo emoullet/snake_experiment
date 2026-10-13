@@ -17,6 +17,7 @@ def manager_protection_parameters(robot):
         "overload_protection.enabled": ParameterValue(LaunchConfiguration("overload_protection"), value_type=bool),
         "overload_protection.use_simulation": ParameterValue(LaunchConfiguration("use_simulation"), value_type=bool),
         "overload_protection.robot": robot,
+        "overload_protection.retreat_delay_sec": ParameterValue(LaunchConfiguration("overload_retreat_delay_sec"), value_type=float),
         "overload_retreat_strategy": "closest_target_out",
         "overload_protection.controller_linear_gain": float(controller["command_max_linear_velocity"]),
         "overload_protection.controller_angular_gain": float(controller["command_max_angular_velocity"]),

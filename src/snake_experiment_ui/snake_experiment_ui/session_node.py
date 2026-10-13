@@ -67,6 +67,7 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("mode_shutdown_timeout_sec", 5.0)
         self.declare_parameter("stack_startup_timeout_sec", 30.0)
         self.declare_parameter("stack_shutdown_timeout_sec", 10.0)
+        self.declare_parameter("overload_retreat_delay_sec", 1.0)
         self.declare_parameter("rosbag_startup_timeout_sec", 5.0)
         self.declare_parameter("rosbag_shutdown_timeout_sec", 10.0)
         self.declare_parameter("go_to_timeout_sec", 120.0)
@@ -148,6 +149,7 @@ class SessionInterfaceNode(Node):
             node_names=self._node_names,
             use_simulation=use_simulation,
             overload_protection=True,
+            overload_retreat_delay_sec=float(self.get_parameter("overload_retreat_delay_sec").value),
             before_start=self._before_stack_start,
             startup_timeout_sec=float(
                 self.get_parameter("stack_startup_timeout_sec").value
@@ -504,7 +506,7 @@ class SessionInterfaceNode(Node):
                 # Install a complete configuration atomically. Never replace an
                 # ongoing retreat's targets, and never leave an old participant's
                 # targets installed if the next calibration is invalid.
-                if not state.get("fresh") or state.get("state") in ("translating", "waiting_clear", "rotating"):
+                if not state.get("fresh") or state.get("state") in ("waiting_retreat", "translating", "waiting_clear", "rotating"):
                     continue
                 document = context.get("calibration")
                 if document is None:

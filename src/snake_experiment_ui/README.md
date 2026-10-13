@@ -112,6 +112,15 @@ Robotiq description required by Kortex.
    in order. Acquisitions are saved as MCAP files; interrupted attempts can be
    retried or recorded as deviations.
 
+The session launch accepts `overload_retreat_delay_sec:=1.0` (seconds, finite and
+non-negative). An overload blocks arm/gripper input immediately, then holds zero
+motion during `waiting_retreat` before automatic translation. Use `0.0` for the
+previous immediate retreat. Stop retreat also cancels this stationary hold;
+rearming never restores control or recording automatically. The retreat motion
+timeout excludes this initial delay. The manager ROS parameter is
+`overload_protection.retreat_delay_sec`; changes are rejected during any active
+recovery phase, including the initial hold.
+
 The participant page shows an orange warning throughout a confirmed overload
 episode while the stack is active. It distinguishes retreat motion, waiting for
 contact force to clear, and completed or stopped retreat. Commands remain paused

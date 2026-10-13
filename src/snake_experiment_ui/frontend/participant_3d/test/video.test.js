@@ -177,6 +177,7 @@ test('overload banner updates on all screens without replacing nodes or restarti
     player.currentTime = 7;
     const plays = player.playCalls.length;
     for (const [phase, expected] of [
+      ['waiting_retreat', 'Automatic retreat will begin shortly.'],
       ['retreating', 'Automatic retreat in progress.'],
       ['waiting_clear', 'Retreat paused while contact force clears.'],
       ['retreat_complete', 'Retreat complete.'],

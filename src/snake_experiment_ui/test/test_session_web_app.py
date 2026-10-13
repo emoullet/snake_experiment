@@ -615,7 +615,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('successEventInitialized = true', script)
         self.assertIn('await successSound.play()', script)
         self.assertIn('soundRetry.hidden = false', script)
-        self.assertIn('participant_app.js?v=participant-overload-1', html)
+        self.assertIn('participant_app.js?v=participant-overload-2', html)
         self.assertTrue((package_root / "static/mario_coin_sound.mp3").is_file())
         self.assertNotIn('innerHTML', script)
         self.assertNotIn('/api/experiment/', script)
@@ -766,7 +766,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
         self.assertIn("session_style.css?v=session-style-3", html)
-        self.assertIn("session_app.js?v=session-app-7", html)
+        self.assertIn("session_app.js?v=session-app-8", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(

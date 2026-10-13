@@ -34,6 +34,7 @@
   const overloadMessage = document.getElementById("participant-overload-message");
   const overloadMessages = {
     retreating: "Force overload detected. Commands paused. Automatic retreat in progress.",
+    waiting_retreat: "Force overload detected. Commands paused. Automatic retreat will begin shortly.",
     waiting_clear: "Commands paused. Retreat paused while contact force clears.",
     retreat_complete: "Retreat complete. Commands remain paused. Please wait for the experimenter.",
     paused: "Force overload detected. Commands paused. Please wait for the experimenter.",

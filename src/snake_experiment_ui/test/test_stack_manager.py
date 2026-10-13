@@ -93,10 +93,28 @@ class StackManagerTest(unittest.TestCase):
             popen_factory=create_process, before_start=lambda: starts.append("start"))
         manager.start()
         manager.start()
-        self.assertEqual(processes[0].command[-1], "overload_protection:=true")
+        self.assertIn("overload_protection:=true", processes[0].command)
+        self.assertEqual(processes[0].command[-1], "overload_retreat_delay_sec:=1.0")
         self.assertEqual(starts, ["start"])
 
+    def test_retreat_delay_is_forwarded_to_both_robot_launches(self):
+        for robot in ("explorer", "kinova"):
+            for delay in (0.0, 1.0, 2.5):
+                names, processes = [], []
+                def create_process(*args, **kwargs):
+                    process = FakeProcess(*args, **kwargs)
+                    processes.append(process)
+                    names.append("cartesian_manager")
+                    return process
+                manager = StackManager(node_names=lambda: names, robot=robot, overload_protection=True,
+                    overload_retreat_delay_sec=delay, popen_factory=create_process)
+                manager.start()
+                self.assertIn(f"overload_retreat_delay_sec:={delay}", processes[0].command)
+
     def test_invalid_configuration_cannot_start_a_process(self):
+        for value in (-1.0, float("inf"), float("nan")):
+            with self.assertRaisesRegex(StackError, "Retreat delay"):
+                StackManager(node_names=lambda: [], overload_retreat_delay_sec=value)
         configurations = [{"robot": "unknown"}] + [
             {"robot": "kinova", "robot_ip": address}
             for address in ("", "robot.local", "::1", "256.0.0.1", "192.168.1.10/24",

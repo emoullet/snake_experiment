@@ -95,6 +95,17 @@ def test_status_fail_closed_and_freshness():
     assert monitor.record(status(), ros_now=11)["blocked"]
 
 
+def test_pending_retreat_is_valid_blocked_feedback_and_is_journaled(tmp_path):
+    monitor = ProtectionState("kinova")
+    waiting = monitor.record(status(state="waiting_retreat", event=1), ros_now=10.1)
+    assert waiting["fresh"] and waiting["blocked"] and waiting["state"] == "waiting_retreat"
+    with pytest.raises(ProtectionError):
+        monitor.require_clear()
+    path = tmp_path / "overload_events.jsonl"
+    EventJournal().append(path, waiting)
+    assert json.loads(path.read_text())["state"] == "waiting_retreat"
+
+
 def test_gripper_drops_cached_commands_and_holds_measured_position():
     tick = [0.]
     published = []
