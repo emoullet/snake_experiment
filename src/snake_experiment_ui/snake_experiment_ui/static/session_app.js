@@ -462,11 +462,11 @@ class SessionInterface {
       ? `${this.title(goToMotion?.status)} · ${this.title(goToMotion?.pose_id)}`
       : `${completedGoTo}/4 poses reached`);
     this.setClass(goToPill, `pill ${completedGoTo === 4 ? "pill--active" : goToActive ? "pill--warning" : "pill--neutral"}`);
-    this.setText(document.getElementById("goto-help"), goToMotion?.error
+    this.setText(document.getElementById("goto-help"), this.goToTimeoutMessage(goToMotion) || (goToMotion?.error
       ? goToMotion.error
       : goToActive
         ? `Linear error: ${goToMotion.linear_error_mm === null ? "—" : Number(goToMotion.linear_error_mm).toFixed(1) + " mm"} · Angular error: ${goToMotion.angular_error_deg === null ? "—" : Number(goToMotion.angular_error_deg).toFixed(1) + "°"}`
-        : "The four calibrated poses must be reached before validation.");
+        : "The four calibrated poses must be reached before validation."));
     document.querySelectorAll("[data-checkup-go-to]").forEach((button) => {
       const succeeded = !!goToResults[button.dataset.checkupGoTo];
       const latestAttempt = [...(goTo.history || [])]
@@ -725,7 +725,7 @@ class SessionInterface {
             <div class="decision-card" ${workflow === "decision_required" ? "" : "hidden"}><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-trial-resolve="retry" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-trial-resolve="advance_with_deviation" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Continue with deviation</button></div></div>
             <p class="inline-error" ${block.error ? "" : "hidden"}>${this.escape(block.error || "")}</p></section>
           <section class="card"><div class="section-heading"><div><p class="step-number">Trial issue</p><h2>Incident occurrences</h2></div><span class="pill ${reviewRequired ? "pill--warning" : incidents.length ? "pill--error" : "pill--neutral"}">${incidents.length} occurrence${incidents.length === 1 ? "" : "s"}</span></div>${incidentView}</section>
-          <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Calibrated start positioning</h2></div><span class="pill ${experiment.go_to?.motion?.active ? "pill--warning" : "pill--neutral"}">${experiment.go_to?.motion?.active ? this.escape(this.title(experiment.go_to.motion.current?.status)) : reviewRequired ? "Review required" : "Ready"}</span></div><p class="supporting-copy">Manual control is suspended during motion and restored afterwards. Target buttons use the calibrated target_out poses.</p><div class="go-to-grid"><button class="secondary-button" data-block-go-to="starting_point" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to starting point</button>${[1, 2, 3].map((target) => `<button class="secondary-button" data-block-go-to="target_out_${target}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to target ${target}</button>`).join("")}</div><button class="reject-button" data-block-go-to-stop data-block-id="${this.escape(block.id)}" type="button" ${experiment.go_to?.motion?.active ? "" : "hidden"} ${this.busy || !experiment.go_to?.motion?.active ? "disabled" : ""}>Stop motion</button></section>
+          <section class="card"><div class="section-heading"><div><p class="step-number">Go to</p><h2>Calibrated start positioning</h2></div><span class="pill ${experiment.go_to?.motion?.active ? "pill--warning" : "pill--neutral"}">${experiment.go_to?.motion?.active ? this.escape(this.title(experiment.go_to.motion.current?.status)) : reviewRequired ? "Review required" : "Ready"}</span></div><p class="supporting-copy" ${this.goToTimeoutMessage(experiment.go_to?.motion?.current) ? "" : "hidden"}>${this.escape(this.goToTimeoutMessage(experiment.go_to?.motion?.current))}</p><p class="supporting-copy">Manual control is suspended during motion and restored afterwards. Target buttons use the calibrated target_out poses.</p><div class="go-to-grid"><button class="secondary-button" data-block-go-to="starting_point" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to starting point</button>${[1, 2, 3].map((target) => `<button class="secondary-button" data-block-go-to="target_out_${target}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || reviewRequired || !experiment.go_to?.available || experiment.go_to?.motion?.active ? "disabled" : ""}>Go to target ${target}</button>`).join("")}</div><button class="reject-button" data-block-go-to-stop data-block-id="${this.escape(block.id)}" type="button" ${experiment.go_to?.motion?.active ? "" : "hidden"} ${this.busy || !experiment.go_to?.motion?.active ? "disabled" : ""}>Stop motion</button></section>
         </div>
         <section class="card trial-progress-card"><div class="section-heading"><div><p class="step-number">Protocol progress</p><h2>${title} trials</h2></div><span class="pill ${experiment.can_end ? "pill--active" : "pill--neutral"}">${completed}/${trials.length}</span></div><div class="segment-list">${trialRows}</div></section>
       </div>
@@ -735,6 +735,16 @@ class SessionInterface {
   title(value) {
     const text = String(value || "").replaceAll("_", " ");
     return text ? text[0].toUpperCase() + text.slice(1) : text;
+  }
+
+  goToTimeoutMessage(motion) {
+    if (motion?.status !== "timed_out") return "";
+    const reasons = {
+      progress_stalled: "Go-to cancelled: insufficient progress towards the target.",
+      total_timeout: "Go-to cancelled: maximum total motion duration exceeded.",
+      feedback_timeout: "Go-to cancelled: no valid end-effector pose feedback received in time.",
+    };
+    return reasons[motion.stop_reason] || "Go-to cancelled: motion timed out.";
   }
 
   renderMode(mode) {

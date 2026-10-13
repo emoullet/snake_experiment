@@ -245,3 +245,44 @@ view C and on the dedicated page, check Baseline b1/b2/b3 and Snake with the
 button released/held, the complete meshes, labels, framing, and return to
 neutral. Check both demo fallback without joint states and live poses with
 fresh joint states. Run only one robot stack at a time.
+
+
+## Go-to progress supervision
+
+Check-up and experiment Go-to motions share the following startup parameters
+(and launch arguments). All values must be finite and strictly positive.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `go_to_timeout_sec` | 120 s | Maximum total duration; explicit existing overrides still apply. |
+| `go_to_stall_timeout_sec` | 5 s | Maximum continuous interval of insufficient progress. |
+| `go_to_progress_window_sec` | 1 s | Sliding window for measuring reduction in target errors. |
+| `go_to_linear_progress_threshold_mps` | 0.0005 m/s | Minimum positional progress (0.5 mm/s). |
+| `go_to_angular_progress_threshold_radps` | 0.008726646259971648 rad/s | Minimum angular progress (0.5 degrees/s). |
+| `go_to_feedback_timeout_sec` | 2 s | Maximum interval without a valid `/ee_pose`, including startup. |
+| `go_to_dwell_sec` | 0.5 s | Stability interval within 5 mm and 5 degrees of the target. |
+
+Progress is the decrease in error towards the target, rather than absolute
+robot speed. Error values are interpolated at the start of the sliding window.
+After the first complete window, the stall clock starts if no component still
+outside its tolerance progresses sufficiently. Progress in either component
+resets that clock; components already within tolerance are ignored. Arrival
+within both tolerances resets it and allows the stability interval to finish.
+The threshold defaults should be validated on representative robot movements.
+
+A ROS timer supervises deadlines every 100 ms independently of browser polling;
+deadlines are also checked before processing pose feedback. Wrong-frame,
+non-finite or otherwise invalid feedback does not refresh the feedback clock
+and breaks the arrival stability interval. A late pose cannot rescue an expired
+motion. Simultaneous deadlines have this priority: `feedback_timeout`,
+`total_timeout`, `progress_stalled`. Each uses status `timed_out`, sends
+`behaviour/passthrough` once, and follows the existing mapper restoration rules.
+The operator interface explains the reason, and motion state/history exposes
+`linear_progress_mps`, `angular_progress_radps` (null before a complete window)
+and `stall_sec`. The motion snapshot configuration includes all configured
+thresholds.
+
+Rebuild the package and restart the session interface to apply startup parameter
+changes; refresh the operator page after changing its JavaScript. For example,
+append `go_to_stall_timeout_sec:=10.0` to the usual session launch command to
+allow ten seconds of continuous insufficient progress.

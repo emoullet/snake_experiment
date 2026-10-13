@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timezone
 import json
 import math
@@ -62,6 +63,8 @@ def validate_pose(pose: dict, expected_frame: str) -> dict:
     if not all(math.isfinite(item) for item in position + orientation):
         raise GoToError("Pose contains a non-finite value.")
     norm = math.sqrt(sum(item * item for item in orientation))
+    if not math.isfinite(norm):
+        raise GoToError("Pose orientation quaternion norm is non-finite.")
     if norm <= 1.0e-9:
         raise GoToError("Pose orientation quaternion is zero.")
     value["frame_id"] = frame
@@ -84,13 +87,21 @@ class GoToController:
         linear_tolerance_m: float = 0.005,
         angular_tolerance_rad: float = math.radians(5.0),
         dwell_sec: float = 0.5,
-        timeout_sec: float = 30.0,
+        timeout_sec: float = 120.0,
         monotonic_clock: Callable[[], float] = time.monotonic,
         utc_clock: Callable[[], str] = _utc_now,
         feedback_finish_dispatch: Callable = lambda callback, record: callback(record),
+        stall_timeout_sec: float = 5.0,
+        progress_window_sec: float = 1.0,
+        linear_progress_threshold_mps: float = 0.0005,
+        angular_progress_threshold_radps: float = math.radians(0.5),
+        feedback_timeout_sec: float = 2.0,
     ) -> None:
-        if min(linear_tolerance_m, angular_tolerance_rad, dwell_sec, timeout_sec) <= 0:
-            raise ValueError("Go-to tolerances and time limits must be positive.")
+        limits = (linear_tolerance_m, angular_tolerance_rad, dwell_sec, timeout_sec,
+                  stall_timeout_sec, progress_window_sec, linear_progress_threshold_mps,
+                  angular_progress_threshold_radps, feedback_timeout_sec)
+        if any(not math.isfinite(value) or value <= 0 for value in limits):
+            raise ValueError("Go-to tolerances and time limits must be finite and positive.")
         self._publish_target = publish_target
         self._publish_passthrough = publish_passthrough
         self._preflight = preflight
@@ -99,6 +110,14 @@ class GoToController:
         self._angular_tolerance_rad = angular_tolerance_rad
         self._dwell_sec = dwell_sec
         self._timeout_sec = timeout_sec
+        self._stall_timeout_sec = stall_timeout_sec
+        self._progress_window_sec = progress_window_sec
+        self._linear_progress_threshold_mps = linear_progress_threshold_mps
+        self._angular_progress_threshold_radps = angular_progress_threshold_radps
+        self._feedback_timeout_sec = feedback_timeout_sec
+        self._last_feedback_monotonic = None
+        self._stall_started_monotonic = None
+        self._progress_samples = deque()
         self._clock = monotonic_clock
         self._utc_clock = utc_clock
         self._feedback_finish_dispatch = feedback_finish_dispatch
@@ -143,8 +162,14 @@ class GoToController:
                 "angular_error_deg": None,
                 "dwell_sec": 0.0,
                 "timeout_sec": self._timeout_sec,
+                "linear_progress_mps": None,
+                "angular_progress_radps": None,
+                "stall_sec": 0.0,
             }
             self._started_monotonic = now
+            self._last_feedback_monotonic = None
+            self._stall_started_monotonic = None
+            self._progress_samples.clear()
             self._dwell_started_monotonic = None
             self._on_finish = on_finish
             try:
@@ -161,49 +186,88 @@ class GoToController:
             self._current["status"] = "moving"
             return self.snapshot()
 
-    def update_pose(self, message) -> None:
-        callback = None
-        record = None
+    def tick(self) -> None:
+        """Supervise deadlines without relying on a browser or pose messages."""
         with self._lock:
-            if not self._current or self._current["status"] not in ACTIVE_STATES:
-                return
-            try:
-                observed = pose_document(message)
-                linear, angular = pose_error(observed, self._current["target"])
-            except (AttributeError, TypeError, ValueError, TrainingError) as error:
-                self._current["error"] = f"Invalid /ee_pose feedback: {error}"
-                self._dwell_started_monotonic = None
-                self._current["dwell_sec"] = 0.0
-                return
-            self._current.update(
-                {
-                    "linear_error_m": linear,
-                    "linear_error_mm": linear * 1000.0,
-                    "angular_error_rad": angular,
-                    "angular_error_deg": math.degrees(angular),
-                    "error": None,
-                }
-            )
-            within = (
-                linear <= self._linear_tolerance_m
-                and angular <= self._angular_tolerance_rad
-            )
-            now = self._clock()
-            if not within:
-                self._current["status"] = "moving"
-                self._dwell_started_monotonic = None
-                self._current["dwell_sec"] = 0.0
-                return
-            if self._dwell_started_monotonic is None:
-                self._dwell_started_monotonic = now
-            self._current["status"] = "settling"
-            self._current["dwell_sec"] = max(
-                0.0, now - self._dwell_started_monotonic
-            )
-            if self._current["dwell_sec"] >= self._dwell_sec:
-                callback, record = self._finish_locked("succeeded", "target_reached")
+            callback, record = self._refresh_timeout()
         if callback:
             self._feedback_finish_dispatch(callback, record)
+
+    def update_pose(self, message) -> None:
+        with self._lock:
+            callback, record = self._refresh_timeout()
+            if self._current and self._current["status"] in ACTIVE_STATES:
+                callback, record = self._update_pose_locked(message)
+        if callback:
+            self._feedback_finish_dispatch(callback, record)
+
+    def _update_pose_locked(self, message):
+        try:
+            observed = validate_pose(pose_document(message), self._expected_frame)
+            linear, angular = pose_error(observed, self._current["target"])
+            if not math.isfinite(linear) or not math.isfinite(angular):
+                raise GoToError("Pose error is non-finite.")
+        except (AttributeError, KeyError, TypeError, ValueError, OverflowError, TrainingError, GoToError) as error:
+            self._current["error"] = f"Invalid /ee_pose feedback: {error}"
+            self._dwell_started_monotonic = None
+            self._current["dwell_sec"] = 0.0
+            # Do not bridge a stability interval across an invalid sample.
+            self._current["status"] = "moving"
+            return None, None
+        now = self._clock()
+        self._last_feedback_monotonic = now
+        self._current.update({
+            "linear_error_m": linear,
+            "linear_error_mm": linear * 1000.0,
+            "angular_error_rad": angular,
+            "angular_error_deg": math.degrees(angular),
+            "error": None,
+        })
+        self._update_progress(now, linear, angular)
+        within = linear <= self._linear_tolerance_m and angular <= self._angular_tolerance_rad
+        if not within:
+            self._current["status"] = "moving"
+            self._dwell_started_monotonic = None
+            self._current["dwell_sec"] = 0.0
+            return None, None
+        if self._dwell_started_monotonic is None:
+            self._dwell_started_monotonic = now
+        self._current["status"] = "settling"
+        self._current["dwell_sec"] = max(0.0, now - self._dwell_started_monotonic)
+        if self._current["dwell_sec"] >= self._dwell_sec:
+            return self._finish_locked("succeeded", "target_reached")
+        return None, None
+
+    def _update_progress(self, now, linear, angular):
+        samples = self._progress_samples
+        sample = (now, linear, angular)
+        # Multiple callbacks at the same clock instant must not divide by zero.
+        if samples and samples[-1][0] == now:
+            samples[-1] = sample
+        else:
+            samples.append(sample)
+        boundary = now - self._progress_window_sec
+        while len(samples) > 1 and samples[1][0] <= boundary:
+            samples.popleft()
+        rates = None
+        if len(samples) >= 2 and samples[0][0] <= boundary:
+            before, after = samples[0], samples[1]
+            fraction = (boundary - before[0]) / (after[0] - before[0])
+            baseline = [before[i] + fraction * (after[i] - before[i]) for i in (1, 2)]
+            rates = ((baseline[0] - linear) / self._progress_window_sec,
+                     (baseline[1] - angular) / self._progress_window_sec)
+            self._current["linear_progress_mps"], self._current["angular_progress_radps"] = rates
+        within = linear <= self._linear_tolerance_m and angular <= self._angular_tolerance_rad
+        progressing = rates is not None and (
+            (linear > self._linear_tolerance_m and rates[0] >= self._linear_progress_threshold_mps)
+            or (angular > self._angular_tolerance_rad and rates[1] >= self._angular_progress_threshold_radps)
+        )
+        if within or progressing:
+            self._stall_started_monotonic = None
+        elif rates is not None and self._stall_started_monotonic is None:
+            self._stall_started_monotonic = now
+        self._current["stall_sec"] = (0.0 if self._stall_started_monotonic is None
+                                      else max(0.0, now - self._stall_started_monotonic))
 
     def stop(self, reason: str = "operator_stop") -> dict:
         callback = None
@@ -243,6 +307,11 @@ class GoToController:
                     "angular_tolerance_rad": self._angular_tolerance_rad,
                     "dwell_sec": self._dwell_sec,
                     "timeout_sec": self._timeout_sec,
+                    "stall_timeout_sec": self._stall_timeout_sec,
+                    "progress_window_sec": self._progress_window_sec,
+                    "linear_progress_threshold_mps": self._linear_progress_threshold_mps,
+                    "angular_progress_threshold_radps": self._angular_progress_threshold_radps,
+                    "feedback_timeout_sec": self._feedback_timeout_sec,
                 },
             }
         if callback:
@@ -250,14 +319,21 @@ class GoToController:
         return result
 
     def _refresh_timeout(self):
-        if (
-            not self._current
-            or self._current["status"] not in ACTIVE_STATES
-            or self._started_monotonic is None
-            or self._clock() - self._started_monotonic < self._timeout_sec
-        ):
+        if (not self._current or self._current["status"] not in ACTIVE_STATES
+                or self._started_monotonic is None):
             return None, None
-        return self._finish_locked("timed_out", "timeout")
+        now = self._clock()
+        self._current["stall_sec"] = (0.0 if self._stall_started_monotonic is None
+                                      else max(0.0, now - self._stall_started_monotonic))
+        feedback_origin = (self._last_feedback_monotonic if self._last_feedback_monotonic is not None
+                           else self._started_monotonic)
+        if now - feedback_origin >= self._feedback_timeout_sec:
+            return self._finish_locked("timed_out", "feedback_timeout")
+        if now - self._started_monotonic >= self._timeout_sec:
+            return self._finish_locked("timed_out", "total_timeout")
+        if self._current["stall_sec"] >= self._stall_timeout_sec:
+            return self._finish_locked("timed_out", "progress_stalled")
+        return None, None
 
     def _finish_locked(self, status: str, reason: str):
         try:
@@ -272,6 +348,9 @@ class GoToController:
         record = self._public_current()
         self._started_monotonic = None
         self._dwell_started_monotonic = None
+        self._stall_started_monotonic = None
+        self._last_feedback_monotonic = None
+        self._progress_samples.clear()
         return callback, record
 
     def _take_finish_callback(self):

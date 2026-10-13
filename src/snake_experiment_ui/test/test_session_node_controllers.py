@@ -87,6 +87,16 @@ class ProtectionCallbackConcurrencyTest(unittest.TestCase):
                     node._experiment.interrupt_overload.assert_called_once_with(state)
                 node._experiment.clear_initial_feedback_warning.assert_called_once_with(state)
 
+    def test_go_to_supervisor_ticks_both_controllers_and_skips_shutdown(self):
+        node = SimpleNamespace(_closing=False, _checkup_go_to=Mock(), _experiment_go_to=Mock())
+        SessionInterfaceNode._supervise_go_to(node)
+        node._checkup_go_to.tick.assert_called_once_with()
+        node._experiment_go_to.tick.assert_called_once_with()
+        node._closing = True
+        SessionInterfaceNode._supervise_go_to(node)
+        node._checkup_go_to.tick.assert_called_once_with()
+        node._experiment_go_to.tick.assert_called_once_with()
+
     def test_go_to_restoration_does_not_block_feedback_dispatch(self):
         entered, release, returned = threading.Event(), threading.Event(), threading.Event()
         with ThreadPoolExecutor(max_workers=1) as executor:

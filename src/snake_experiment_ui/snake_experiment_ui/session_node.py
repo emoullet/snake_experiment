@@ -69,8 +69,13 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("stack_shutdown_timeout_sec", 10.0)
         self.declare_parameter("rosbag_startup_timeout_sec", 5.0)
         self.declare_parameter("rosbag_shutdown_timeout_sec", 10.0)
-        self.declare_parameter("go_to_timeout_sec", 30.0)
+        self.declare_parameter("go_to_timeout_sec", 120.0)
         self.declare_parameter("go_to_dwell_sec", 0.5)
+        self.declare_parameter("go_to_stall_timeout_sec", 5.0)
+        self.declare_parameter("go_to_progress_window_sec", 1.0)
+        self.declare_parameter("go_to_linear_progress_threshold_mps", 0.0005)
+        self.declare_parameter("go_to_angular_progress_threshold_radps", 0.008726646259971648)
+        self.declare_parameter("go_to_feedback_timeout_sec", 2.0)
 
         share = Path(get_package_share_directory("snake_experiment_ui"))
         configured_profile = str(self.get_parameter("diagnostic_profile").value)
@@ -172,6 +177,11 @@ class SessionInterfaceNode(Node):
             "preflight": self._go_to_preflight,
             "timeout_sec": float(self.get_parameter("go_to_timeout_sec").value),
             "dwell_sec": float(self.get_parameter("go_to_dwell_sec").value),
+            "stall_timeout_sec": float(self.get_parameter("go_to_stall_timeout_sec").value),
+            "progress_window_sec": float(self.get_parameter("go_to_progress_window_sec").value),
+            "linear_progress_threshold_mps": float(self.get_parameter("go_to_linear_progress_threshold_mps").value),
+            "angular_progress_threshold_radps": float(self.get_parameter("go_to_angular_progress_threshold_radps").value),
+            "feedback_timeout_sec": float(self.get_parameter("go_to_feedback_timeout_sec").value),
             "feedback_finish_dispatch": self._dispatch_go_to_finish,
         }
         self._checkup_go_to = GoToController(**go_to_options)
@@ -241,6 +251,7 @@ class SessionInterfaceNode(Node):
         self._parameter_get_client = self.create_client(
             GetParameters, "/joystick_mapper/get_parameters"
         )
+        self._go_to_timer = self.create_timer(0.1, self._supervise_go_to)
         self._graph_timer = self.create_timer(0.5, self._refresh_graph)
         self._service_timer = self.create_timer(1.0, self._refresh_services)
 
@@ -527,6 +538,11 @@ class SessionInterfaceNode(Node):
                 # A failed cleanup must continue blocking rearm and mode activation.
                 self._protection_shutdown.wait(1.0)
 
+    def _supervise_go_to(self):
+        if not self._closing:
+            self._checkup_go_to.tick()
+            self._experiment_go_to.tick()
+
     def _dispatch_go_to_finish(self, callback, record):
         # Restoring a mapper waits on process discovery. Never run that wait in
         # the ROS feedback callback that also feeds protection telemetry.
@@ -803,6 +819,7 @@ class SessionInterfaceNode(Node):
     def destroy_node(self):
         # End web polling and background ROS users before destroying handles.
         self._closing = True
+        self._go_to_timer.cancel()
         self._app.state.shutting_down = True
         self._server.should_exit = True
         self._protection_shutdown.set()

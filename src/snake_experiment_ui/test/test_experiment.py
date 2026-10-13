@@ -814,6 +814,35 @@ class ExperimentControllerTest(unittest.TestCase):
         )
         self.assertEqual(progress["blocks"][2]["go_to_history"][0]["status"], "succeeded")
 
+    def test_go_to_timeouts_restore_mapper_and_persist_distinct_reasons(self):
+        self.prepare_session()
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        block_id = "mode_1_training"
+        self.controller.start(block_id)
+        for reason in ("feedback_timeout", "progress_stalled", "total_timeout"):
+            with self.subTest(reason=reason):
+                self.controller.start_go_to(block_id, "target_out_1")
+                self.assertIsNone(self.modes.active)
+                origin = self.monotonic_value
+                if reason == "feedback_timeout":
+                    self.monotonic_value += 2.0
+                    self.go_to.tick()
+                else:
+                    for second in range(7 if reason == "progress_stalled" else 121):
+                        self.monotonic_value = origin + second
+                        observed = json.loads(json.dumps(self.pose("target_out_1")))
+                        observed["position"]["x"] += 1 - (second * .001 if reason == "total_timeout" else 0)
+                        self.controller.update_ee_pose(observed)
+                        self.go_to.tick()
+                state = self.controller.snapshot()
+                self.assertFalse(state["go_to"]["motion"]["active"])
+                self.assertEqual(state["go_to"]["history"][-1]["stop_reason"], reason)
+                self.assertEqual(self.modes.active, "snake")
+                saved = json.loads((self.participant_folder / "experiment_progress.json").read_text())
+                self.assertEqual(saved["blocks"][2]["go_to_history"][-1]["stop_reason"], reason)
+        self.assertEqual(self.passthrough_requests, 3)
+
     def test_legacy_participant_ready_transition_remains_supported(self):
         self.prepare_session()
         self.complete_discovery("mode_1_discovery")
