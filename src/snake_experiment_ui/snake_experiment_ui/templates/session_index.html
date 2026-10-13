@@ -174,6 +174,12 @@
         <section class="card process-card">
           <div><p class="step-number">Process ownership</p><h2>Robot processes</h2></div>
           <dl id="process-summary" class="participant-summary"></dl>
+          <p id="experiment-stack-operation" class="supporting-copy" role="status" aria-live="polite" hidden></p>
+          <div class="button-row">
+            <button id="experiment-stack-start" class="secondary-button" data-experiment-stack="start" type="button" disabled>Start stack</button>
+            <button id="experiment-stack-stop" class="reject-button" data-experiment-stack="stop" type="button" disabled>Stop stack</button>
+            <button id="experiment-stack-restart" class="text-button" data-experiment-stack="restart" type="button" disabled>Restart stack</button>
+          </div>
         </section>
         <p id="experiment-error" class="inline-error" hidden></p>
       </section>
@@ -195,6 +201,6 @@
       </section>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/session-static/session_app.js?v=session-app-8"></script>
+    <script src="/session-static/session_app.js?v=session-app-10"></script>
   </body>
 </html>

@@ -121,7 +121,8 @@ def create_session_app(
             return JSONResponse(status_code=503, content={"detail": "Session interface is shutting down."})
         path = request.url.path
         commands = (
-            path.startswith("/api/checkup/modes/") and path.endswith(("/start", "/retry"))
+            path == "/api/experiment/stack/restart"
+            or path.startswith("/api/checkup/modes/") and path.endswith(("/start", "/retry"))
             or path == "/api/checkup/go-to"
             or path.startswith("/api/experiment/blocks/") and path.endswith(("/start", "/control", "/restart-stack", "/go-to", "/ready", "/prepare"))
         )
@@ -150,7 +151,7 @@ def create_session_app(
         if protection_action is None or command not in ("stop", "rearm"):
             raise HTTPException(status_code=404, detail="Unknown protection action.")
         await asyncio.to_thread(action, lambda: protection_action(command))
-        return combined_snapshot()
+        return await asyncio.to_thread(combined_snapshot)
 
     app.mount(
         "/session-static",
@@ -184,7 +185,7 @@ def create_session_app(
 
     @app.get("/api/state")
     async def state():
-        return combined_snapshot()
+        return await asyncio.to_thread(combined_snapshot)
 
     @app.get("/participant", include_in_schema=False)
     async def participant_interface():
@@ -264,7 +265,7 @@ def create_session_app(
 
     @app.get("/participant/api/state")
     async def participant_state():
-        return participant_projection()
+        return await asyncio.to_thread(participant_projection)
 
     @app.get("/participant/video", include_in_schema=False)
     async def participant_video():
@@ -305,7 +306,7 @@ def create_session_app(
         previous = None
         try:
             while not app.state.shutting_down:
-                current = participant_projection()
+                current = await asyncio.to_thread(participant_projection)
                 serialised = json.dumps(current, sort_keys=True)
                 if serialised != previous:
                     await websocket.send_json(current)
@@ -464,6 +465,18 @@ def create_session_app(
         action(callback)
         return combined_snapshot()
 
+    @app.post("/api/experiment/stack/start")
+    def start_experiment_stack():
+        return experiment_action(lambda: experiment.manage_experiment_stack("start"))
+
+    @app.post("/api/experiment/stack/stop")
+    def stop_experiment_stack():
+        return experiment_action(lambda: experiment.manage_experiment_stack("stop"))
+
+    @app.post("/api/experiment/stack/restart")
+    def restart_experiment_stack_between_blocks():
+        return experiment_action(lambda: experiment.manage_experiment_stack("restart"))
+
     @app.post("/api/experiment/presentation/show")
     def show_presentation():
         return experiment_action(lambda: experiment.show_presentation())
@@ -608,7 +621,7 @@ def create_session_app(
         previous = None
         try:
             while not app.state.shutting_down:
-                current = combined_snapshot()
+                current = await asyncio.to_thread(combined_snapshot)
                 serialised = json.dumps(current, sort_keys=True)
                 if serialised != previous:
                     await websocket.send_json(current)

@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
+import asyncio
 import tempfile
+import threading
 import unittest
 
 try:
@@ -109,13 +111,27 @@ class FakeExperiment:
         self.view = "D"
         self.calls = []
         self.public_state = None
+        self.stack_status = "inactive"
+        self.stack_operation = None
 
     def snapshot(self):
         return {
             "workflow": "ready",
             "current_view": self.view,
             "progress": {"workflow": "ready", "blocks": []},
+            "stack": {"status": self.stack_status, "owned": self.stack_status == "active"},
+            "can_start_stack": self.stack_status == "inactive",
+            "can_stop_stack": self.stack_status == "active",
+            "can_restart_stack": self.stack_status == "active",
+            "stack_operation": self.stack_operation,
         }
+
+    def manage_experiment_stack(self, command):
+        from snake_experiment_ui.experiment import ExperimentError
+        if self.view != "D":
+            raise ExperimentError("An experiment block is active.")
+        self.calls.append(("stack", command))
+        self.stack_status = "inactive" if command == "stop" else "active"
 
     def participant_snapshot(self):
         return self.public_state or {"view": "A", "presentation_status": "showing", "video_available": False}
@@ -255,6 +271,83 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.json()["camera"], {"default_view": default})
             self.assertEqual(response.json()["mapper"], configuration["mapper"])
             self.assertNotIn("camera", configuration)
+
+    async def test_experiment_stack_routes_and_protection_guard(self):
+        from snake_experiment_ui.session_web_app import create_session_app
+        from snake_experiment_ui.overload import ProtectionError
+        root = Path(self.temporary_directory.name)
+        def guard():
+            raise ProtectionError("Protection is locked")
+        self.app = create_session_app(self.checkup, root / "static", root / "templates",
+                                      self.enrollment, self.experiment, protection_guard=guard)
+        self.assertEqual((await self.request("POST", "/api/experiment/stack/start")).status_code, 409)
+        self.checkup.workflow = "validated"
+        self.assertEqual((await self.request("POST", "/api/experiment/stack/start")).status_code, 409)
+        self.enrollment.view = "D"
+        started = await self.request("POST", "/api/experiment/stack/start")
+        self.assertEqual(started.status_code, 200)
+        self.assertTrue(started.json()["experiment"]["stack"]["owned"])
+        self.assertEqual((await self.request("POST", "/api/experiment/stack/restart")).status_code, 409)
+        self.assertEqual((await self.request("POST", "/api/experiment/stack/stop")).status_code, 200)
+        self.experiment.view = "F"
+        self.assertEqual((await self.request("POST", "/api/experiment/stack/start")).status_code, 409)
+        self.experiment.view = "D"
+        self.app = create_session_app(self.checkup, root / "static", root / "templates", self.enrollment, self.experiment)
+        self.assertEqual((await self.request("POST", "/api/experiment/stack/start")).status_code, 200)
+        self.assertEqual((await self.request("POST", "/api/experiment/stack/restart")).status_code, 200)
+        self.assertEqual(self.experiment.calls[-1], ("stack", "restart"))
+
+    async def test_experiment_stack_flags_are_broadcast_by_websocket(self):
+        from unittest.mock import patch
+        self.checkup.workflow = "validated"
+        self.enrollment.view = "D"
+        messages = []
+        class Socket:
+            async def accept(self): pass
+            async def send_json(self, message): messages.append(message)
+        tick_count = 0
+        async def tick(_):
+            nonlocal tick_count
+            tick_count += 1
+            if tick_count == 1:
+                self.experiment.manage_experiment_stack("start")
+            else:
+                self.app.state.shutting_down = True
+        endpoint = next(route.endpoint for route in self.app.routes if route.path == "/ws")
+        with patch("snake_experiment_ui.session_web_app.asyncio.sleep", side_effect=tick):
+            await endpoint(Socket())
+        self.assertEqual([message["experiment"]["can_start_stack"] for message in messages], [True, False])
+        self.assertEqual([message["experiment"]["stack"]["owned"] for message in messages], [False, True])
+
+    async def test_websocket_snapshot_runs_off_event_loop_and_broadcasts_graph_wait(self):
+        self.checkup.workflow = "validated"
+        self.enrollment.view = "D"
+        self.experiment.stack_operation = {"action": "start", "phase": "waiting_for_graph"}
+        entered, release = threading.Event(), threading.Event()
+        original = self.experiment.snapshot
+        worker_ids = []
+        def delayed_snapshot():
+            worker_ids.append(threading.get_ident())
+            entered.set()
+            release.wait(2)
+            return original()
+        self.experiment.snapshot = delayed_snapshot
+        messages = []
+        class Socket:
+            async def accept(self): pass
+            async def send_json(socket, message):
+                messages.append(message)
+                self.app.state.shutting_down = True
+        endpoint = next(route.endpoint for route in self.app.routes if route.path == "/ws")
+        task = asyncio.create_task(endpoint(Socket()))
+        try:
+            self.assertTrue(await asyncio.to_thread(entered.wait, 1))
+            self.assertFalse(task.done())
+            self.assertNotEqual(worker_ids[0], threading.get_ident())
+        finally:
+            release.set()
+            await asyncio.wait_for(task, 3)
+        self.assertEqual(messages[0]["experiment"]["stack_operation"]["phase"], "waiting_for_graph")
 
     async def test_stack_mode_confirmation_and_validation_routes(self):
         self.assertEqual((await self.request("POST", "/api/stack/start")).status_code, 200)
@@ -769,7 +862,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
         self.assertIn("session_style.css?v=session-style-3", html)
-        self.assertIn("session_app.js?v=session-app-8", html)
+        self.assertIn("session_app.js?v=session-app-10", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(

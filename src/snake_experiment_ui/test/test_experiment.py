@@ -2,6 +2,7 @@ import json
 import hashlib
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 
 import yaml
@@ -36,8 +37,18 @@ class FakeStack:
     def shutdown(self):
         self.status = "inactive"
 
+    def stop_and_wait(self):
+        return self.stop()
+
+    def stop_for_experiment(self):
+        return self.stop()
+
+    def start_for_experiment(self, phase_changed):
+        phase_changed("starting")
+        return self.start()
+
     def snapshot(self):
-        return {"status": self.status, "error": None, "use_simulation": True}
+        return {"status": self.status, "owned": self.status == "active", "error": None, "use_simulation": True}
 
 
 class FakeModes:
@@ -219,6 +230,173 @@ class ExperimentControllerTest(unittest.TestCase):
             self.controller.show_presentation()
             return self.controller.complete_presentation()
         return state
+
+    def test_experiment_stack_actions_leave_all_durable_data_unchanged(self):
+        self.prepare_session()
+        before = {path: path.read_bytes() for path in self.participant_folder.rglob("*") if path.is_file()}
+        progress = self.controller.snapshot()["progress"]
+        waits = []
+        self.controller._wait_for_control = lambda: waits.append("ready")
+        state = self.controller.manage_experiment_stack("start")
+        self.assertTrue(state["can_stop_stack"])
+        self.assertTrue(state["can_restart_stack"])
+        self.assertFalse(state["can_start_stack"])
+        self.controller.manage_experiment_stack("restart")
+        state = self.controller.manage_experiment_stack("stop")
+        self.assertTrue(state["can_start_stack"])
+        self.assertFalse(state["can_stop_stack"])
+        self.assertEqual(self.stack.start_count, 2)
+        self.assertEqual(self.stack.stop_count, 2)
+        self.assertEqual(waits, [])
+        self.assertIsNone(self.modes.active)
+        self.assertFalse(self.rosbag.active)
+        self.assertEqual(state["progress"], progress)
+        self.assertEqual(before, {path: path.read_bytes() for path in self.participant_folder.rglob("*") if path.is_file()})
+
+    def test_experiment_stack_actions_require_idle_experiment(self):
+        for command in ("start", "stop", "restart"):
+            with self.assertRaises(ExperimentError):
+                self.controller.manage_experiment_stack(command)
+        self.prepare_session()
+        self.controller.manage_experiment_stack("start")
+        for invalid in ("view", "block", "mapper", "recorder", "motion"):
+            with self.subTest(invalid=invalid):
+                if invalid == "view": self.controller._current_view = "F"
+                if invalid == "block": self.controller._progress["current_block"] = "mode_1_discovery"
+                if invalid == "mapper": self.modes.active = "snake"
+                if invalid == "recorder": self.rosbag.active = True
+                if invalid == "motion": self.go_to.start("starting_point", self.pose("starting_point"))
+                for command in ("start", "stop", "restart"):
+                    with self.assertRaises(ExperimentError):
+                        self.controller.manage_experiment_stack(command)
+                self.controller._current_view = "D"
+                self.controller._progress["current_block"] = None
+                self.modes.active = None
+                self.rosbag.active = False
+                self.go_to.cancel_if_active("test_cleanup")
+        self.assertEqual(self.stack.start_count, 1)
+        self.assertEqual(self.stack.stop_count, 0)
+
+    def test_experiment_stack_stop_is_available_during_protection_lock(self):
+        self.prepare_session()
+        self.controller._command_allowed = lambda: False
+        self.controller.manage_experiment_stack("start") # No telemetry is required to bootstrap.
+        state = self.controller.snapshot()
+        self.assertFalse(state["can_restart_stack"])
+        self.assertTrue(state["can_stop_stack"])
+        with self.assertRaises(ExperimentError):
+            self.controller.manage_experiment_stack("restart")
+        self.controller.manage_experiment_stack("stop")
+        self.controller._command_allowed = lambda: True
+        self.controller.manage_experiment_stack("start")
+        self.controller._stack_command_allowed = lambda: False # Pending configuration/cleanup also vetoes restart.
+        self.assertFalse(self.controller.snapshot()["can_restart_stack"])
+
+    def test_experiment_stack_failures_keep_real_state_and_allow_retry(self):
+        self.prepare_session()
+        self.stack.fail_start = True
+        with self.assertRaisesRegex(ExperimentError, "startup failed"):
+            self.controller.manage_experiment_stack("start")
+        self.assertTrue(self.controller.snapshot()["can_start_stack"])
+        self.assertIn("startup failed", self.controller.snapshot()["error"])
+        self.stack.fail_start = False
+        self.controller.manage_experiment_stack("start")
+        self.stack.fail_start = True
+        with self.assertRaises(ExperimentError):
+            self.controller.manage_experiment_stack("restart")
+        self.assertEqual(self.controller.snapshot()["stack"]["status"], "inactive")
+        self.assertTrue(self.controller.snapshot()["can_start_stack"])
+        self.stack.fail_start = False
+        self.assertIsNone(self.controller.manage_experiment_stack("start")["error"])
+        original_stop = self.stack.stop
+        def failed_stop():
+            raise RuntimeError("shutdown failed")
+        self.stack.stop = failed_stop
+        with self.assertRaisesRegex(ExperimentError, "shutdown failed"):
+            self.controller.manage_experiment_stack("stop")
+        self.assertTrue(self.controller.snapshot()["stack"]["owned"])
+        self.assertTrue(self.controller.snapshot()["can_stop_stack"])
+        self.stack.stop = original_stop
+        self.assertIsNone(self.controller.manage_experiment_stack("stop")["error"])
+
+    def test_experiment_stack_actions_allow_crashed_inactive_mapper_and_recorder(self):
+        self.prepare_session()
+        self.modes.snapshot = lambda: {"status": "error", "active_mode": None}
+        self.rosbag.snapshot = lambda: {"status": "error", "owned": False}
+        self.controller.manage_experiment_stack("start")
+        self.controller.manage_experiment_stack("stop")
+        self.assertEqual(self.stack.stop_count, 1)
+        self.assertIsNone(self.modes.active)
+        self.assertFalse(self.rosbag.active)
+
+    def test_experiment_stack_does_not_stop_external_stack(self):
+        self.prepare_session()
+        self.stack.snapshot = lambda: {"status": "active", "owned": False}
+        for command in ("start", "stop", "restart"):
+            with self.assertRaises(ExperimentError):
+                self.controller.manage_experiment_stack(command)
+        self.assertEqual(self.stack.stop_count, 0)
+
+    def test_concurrent_experiment_stack_starts_recheck_state_after_lock(self):
+        self.prepare_session()
+        entered, release = threading.Event(), threading.Event()
+        original = self.stack.start
+        def delayed_start():
+            entered.set()
+            release.wait(2)
+            return original()
+        self.stack.start = delayed_start
+        outcomes = []
+        def start():
+            try:
+                self.controller.manage_experiment_stack("start")
+                outcomes.append("started")
+            except ExperimentError:
+                outcomes.append("rejected")
+        first = threading.Thread(target=start)
+        second = threading.Thread(target=start)
+        first.start()
+        self.assertTrue(entered.wait(1))
+        state = self.controller.snapshot()
+        self.assertEqual(state["stack_operation"], {"action": "start", "phase": "starting"})
+        self.assertFalse(state["can_start_stack"])
+        with self.assertRaisesRegex(ExperimentError, "operation is in progress"):
+            self.controller.start("mode_1_discovery")
+        second.start()
+        release.set()
+        first.join(2)
+        second.join(2)
+        self.assertCountEqual(outcomes, ["started", "rejected"])
+        self.assertEqual(self.stack.start_count, 1)
+
+    def test_waiting_graph_snapshot_is_available_and_durable_data_unchanged(self):
+        self.prepare_session()
+        before = {path: path.read_bytes() for path in self.participant_folder.rglob("*") if path.is_file()}
+        entered, release = threading.Event(), threading.Event()
+        original = self.stack.start_for_experiment
+        def wait_for_graph(phase_changed):
+            phase_changed("waiting_for_graph")
+            entered.set()
+            release.wait(2)
+            return original(phase_changed)
+        self.stack.start_for_experiment = wait_for_graph
+        outcomes = []
+        worker = threading.Thread(target=lambda: outcomes.append(self.controller.manage_experiment_stack("start")))
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            state = self.controller.snapshot()
+            self.assertEqual(state["stack_operation"]["phase"], "waiting_for_graph")
+            self.assertFalse(any(state[f"can_{command}_stack"] for command in ("start", "stop", "restart")))
+            with self.assertRaises(ExperimentError):
+                self.controller.manage_experiment_stack("start")
+            self.assertEqual(self.stack.start_count, 0)
+        finally:
+            release.set()
+            worker.join(2)
+        self.assertEqual(len(outcomes), 1)
+        self.assertIsNone(outcomes[0]["stack_operation"])
+        self.assertEqual(before, {path: path.read_bytes() for path in self.participant_folder.rglob("*") if path.is_file()})
 
     def mark_as_new_session(self):
         profile_folder = self.participant_folder / "experimental_environment"

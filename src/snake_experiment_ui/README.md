@@ -112,6 +112,21 @@ Robotiq description required by Kortex.
    in order. Acquisitions are saved as MCAP files; interrupted attempts can be
    retried or recorded as deviations.
 
+Between blocks, Experiment's **Robot processes** card provides **Start stack**,
+**Stop stack**, and **Restart stack**. They launch no mapper or recorder and leave
+all session progress unchanged. Only this interface's processes may be stopped;
+restart requires clear protection, while stop remains available during an overload.
+Stack startup does not require prior telemetry, but robot commands remain locked
+until protection is ready. These controls are unavailable during any active block,
+motion, mapper or recording. Session suspension/closure is not part of these actions.
+Stop completes as soon as the owned processes have exited, making Start available
+again. A subsequent start/restart may display **Waiting for ROS graph cleanup**
+before launching: DDS can retain the departed node for about 20 seconds. This
+wait is bounded by the larger of the configured stack startup/shutdown timeouts,
+separately from the new launch's startup allowance. No still-visible node is adopted
+or killed, and a timeout allows a safe retry. State updates remain available while
+waiting. Controller polling pauses during a voluntary stop and resumes on launch.
+
 The session launch accepts `overload_retreat_delay_sec:=1.0` (seconds, finite and
 non-negative). An overload blocks arm/gripper input immediately, then holds zero
 motion during `waiting_retreat` before automatic translation. Use `0.0` for the

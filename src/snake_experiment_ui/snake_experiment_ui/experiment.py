@@ -266,9 +266,11 @@ class ExperimentController:
         robot: str = "explorer",
         command_allowed: Callable[[], bool] = lambda: True,
         wait_for_control: Callable[[], None] = lambda: None,
+        stack_command_allowed: Optional[Callable[[], bool]] = None,
     ) -> None:
         self._command_allowed = command_allowed
         self._wait_for_control = wait_for_control
+        self._stack_command_allowed = stack_command_allowed
         self._protection_context_cache = {"folder": None, "block": None, "calibration": None}
         self._robot = robot
         self._source_profile = profile
@@ -299,6 +301,9 @@ class ExperimentController:
         self._mapper_local_mode_lock = threading.Lock()
         self._snake_button_provider = snake_button_provider or (lambda: None)
         self._lock = threading.RLock()
+        self._stack_operation_lock = threading.Lock()
+        self._stack_operation: Optional[dict] = None
+        self._stack_shutdown_requested = threading.Event()
         self._participant: Optional[dict] = None
         self._progress: Optional[dict] = None
         self._current_view = "D"
@@ -311,6 +316,8 @@ class ExperimentController:
     def prepare(self, participant: dict) -> dict:
         """Load or create durable progress without starting a ROS process."""
         with self._lock:
+            if self._stack_operation is not None:
+                raise ExperimentError("An experiment stack operation is in progress.")
             folder = Path(participant["folder"]).resolve()
             if not folder.is_dir():
                 raise ExperimentError(f"Participant folder not found: {folder}")
@@ -1489,6 +1496,64 @@ class ExperimentController:
         if worker is not None:
             worker.start()
 
+    def _experiment_stack_permissions(self, stack, mapper, recorder) -> dict:
+        idle = (
+            self._participant is not None and self._progress is not None
+            and self._stack_operation is None
+            and self._current_view == "D" and not self._progress.get("current_block")
+            and not (self._go_to and self._go_to.active())
+            and mapper.get("status") in ("inactive", "error") and not mapper.get("active_mode")
+            and recorder.get("status") in ("inactive", "error") and not recorder.get("owned")
+        )
+        owned = bool(stack.get("owned"))
+        protection_clear = (self._stack_command_allowed or self._command_allowed)() if idle and owned and stack.get("status") == "active" else False
+        return {
+            "can_start_stack": bool(idle and not owned and stack.get("status") in ("inactive", "error")),
+            "can_stop_stack": bool(idle and owned and stack.get("status") in ("active", "error")),
+            "can_restart_stack": bool(idle and owned and stack.get("status") == "active" and protection_clear),
+        }
+
+    def manage_experiment_stack(self, command: str) -> dict:
+        """Manage only the stack between blocks; never change durable progress."""
+        if not self._stack_operation_lock.acquire(blocking=False):
+            raise ExperimentError("An experiment stack operation is in progress.")
+        try:
+            with self._lock:
+                self._require_prepared()
+                if self._stack_shutdown_requested.is_set():
+                    raise ExperimentError("The interface is shutting down.")
+                if command not in ("start", "stop", "restart"):
+                    raise ExperimentError("Unknown experiment stack action.")
+                permissions = self._experiment_stack_permissions(
+                    self._stack.snapshot(), self._modes.snapshot(), self._rosbag.snapshot())
+                if not permissions[f"can_{command}_stack"]:
+                    raise ExperimentError("Stack action requires Experiment with no active block, motion, mapper or recorder. Stop/restart require an owned stack; restart also requires clear protection.")
+                self._stack_operation = {"action": command, "phase": "stopping" if command != "start" else "starting"}
+                self._error = None
+            try:
+                if command in ("stop", "restart"):
+                    self._stack.stop_for_experiment()
+                if command in ("start", "restart"):
+                    self._stack.start_for_experiment(self._set_stack_operation_phase)
+                    # No control is restored here. Telemetry/configuration can
+                    # converge afterwards; the existing command guards stay closed.
+            except Exception as error:
+                with self._lock:
+                    self._error = f"Unable to {command} experiment stack: {error}"
+                raise ExperimentError(self._error) from error
+            finally:
+                with self._lock:
+                    self._stack_operation = None
+            return self.snapshot()
+        finally:
+            self._stack_operation_lock.release()
+
+    def _set_stack_operation_phase(self, phase: str) -> None:
+        with self._lock:
+            if self._stack_shutdown_requested.is_set():
+                raise ExperimentError("The interface is shutting down.")
+            self._stack_operation["phase"] = phase
+
     def restart_stack(self, block_id: str) -> dict:
         """Restart the owned stack and restore the previous control state."""
         with self._lock:
@@ -1998,6 +2063,8 @@ class ExperimentController:
             if self._progress is None:
                 return {
                     "workflow": "not_prepared",
+                    "can_start_stack": False, "can_stop_stack": False, "can_restart_stack": False,
+                    "stack_operation": None,
                     "current_view": "D",
                     "error": None,
                     "participant": None,
@@ -2214,6 +2281,8 @@ class ExperimentController:
                 }
             return {
                 "workflow": self._progress["workflow"],
+                **self._experiment_stack_permissions(stack_state, mapper_state, recorder_state),
+                "stack_operation": dict(self._stack_operation) if self._stack_operation else None,
                 "current_view": self._current_view,
                 "error": self._error,
                 "participant": {
@@ -2290,7 +2359,8 @@ class ExperimentController:
             }
 
     def shutdown(self) -> None:
-        with self._lock:
+        self._stack_shutdown_requested.set()
+        with self._stack_operation_lock, self._lock:
             if self._go_to is not None:
                 self._go_to.cancel_if_active("backend_shutdown")
             if self._progress is not None and self._progress.get("current_block"):
@@ -2325,6 +2395,8 @@ class ExperimentController:
             self._current_view = "D"
 
     def _require_prepared(self) -> tuple[dict, Path]:
+        if self._stack_operation is not None:
+            raise ExperimentError("An experiment stack operation is in progress.")
         if self._progress is None or self._participant is None:
             raise ExperimentError("Prepare a participant from View C first.")
         return self._progress, Path(self._participant["folder"])

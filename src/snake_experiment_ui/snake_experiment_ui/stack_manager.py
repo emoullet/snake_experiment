@@ -32,6 +32,7 @@ class StackManager:
         overload_protection: bool = False,
         overload_retreat_delay_sec: float = 1.0,
         before_start: Callable[[], None] = lambda: None,
+        monitoring_changed: Callable[[bool], None] = lambda active: None,
     ) -> None:
         if robot not in ("explorer", "kinova"):
             raise StackError(f"Unknown experiment robot: {robot}")
@@ -41,6 +42,7 @@ class StackManager:
             except AddressValueError as error:
                 raise StackError(f"Invalid Kinova IPv4 address: {robot_ip}") from error
         self._before_start = before_start
+        self._monitoring_changed = monitoring_changed
         self._overload_protection = overload_protection
         if not math.isfinite(overload_retreat_delay_sec) or overload_retreat_delay_sec < 0:
             raise StackError("Retreat delay must be finite and non-negative.")
@@ -54,6 +56,8 @@ class StackManager:
         self._popen_factory = popen_factory
         self._sleep = sleep
         self._lock = threading.RLock()
+        self._lifecycle_lock = threading.RLock()
+        self._cleanup_pending = False
         self._process: Optional[subprocess.Popen] = None
         self._status = "inactive"
         self._error: Optional[str] = None
@@ -83,6 +87,7 @@ class StackManager:
             self._refresh_process_state()
             return {
                 "status": self._status,
+                "owned": self._process is not None,
                 "error": self._error,
                 "use_simulation": self._use_simulation,
                 "robot": self._robot,
@@ -91,18 +96,23 @@ class StackManager:
 
     def start(self) -> dict:
         """Start the stack and wait until cartesian_manager is visible."""
-        with self._lock:
-            self._refresh_process_state()
-            if self._status == "active":
-                return self.snapshot()
-            if self._process is None and self._stack_visible():
-                raise StackError(
-                    "A cartesian_manager node is already running outside this interface."
-                )
+        with self._lifecycle_lock:
+            with self._lock:
+                self._refresh_process_state()
+                if self._status == "active":
+                    return self.snapshot()
+                if self._process is not None:
+                    raise StackError("The owned stack process is still running; stop it before starting again.")
+                if self._process is None and self._stack_visible():
+                    raise StackError(
+                        "A cartesian_manager node is already running outside this interface."
+                    )
 
             self._before_start()
-            self._status = "starting"
-            self._error = None
+            self._monitoring_changed(True)
+            with self._lock:
+                self._status = "starting"
+                self._error = None
             command = [
                 "ros2",
                 "launch",
@@ -116,62 +126,123 @@ class StackManager:
                 command.append("overload_protection:=true")
                 command.append(f"overload_retreat_delay_sec:={self._overload_retreat_delay_sec}")
             try:
-                self._process = self._popen_factory(command, start_new_session=True)
+                with self._lock:
+                    self._process = self._popen_factory(command, start_new_session=True)
             except OSError as error:
-                self._status = "error"
-                self._error = f"Unable to start the experiment stack: {error}"
+                with self._lock:
+                    self._status = "error"
+                    self._error = f"Unable to start the experiment stack: {error}"
                 raise StackError(self._error) from error
 
             deadline = time.monotonic() + self._startup_timeout_sec
             while time.monotonic() < deadline:
-                self._refresh_process_state()
-                if self._process is None:
-                    raise StackError(self._error or "Experiment stack failed to start.")
+                with self._lock:
+                    self._refresh_process_state()
+                    if self._process is None:
+                        raise StackError(self._error or "Experiment stack failed to start.")
                 if self._stack_visible():
-                    self._status = "active"
+                    with self._lock:
+                        self._status = "active"
                     return self.snapshot()
                 self._sleep(0.05)
 
-            self._status = "error"
-            self._error = "cartesian_manager did not appear in the ROS graph in time."
+            with self._lock:
+                self._status = "error"
+                self._error = "cartesian_manager did not appear in the ROS graph in time."
             self._stop_locked(preserve_error=True)
             raise StackError(self._error)
 
     def stop(self) -> dict:
         """Stop the stack if it was started by this view."""
-        with self._lock:
-            self._refresh_process_state()
-            if self._process is None:
-                if self._stack_visible():
-                    raise StackError(
-                        "The running experiment stack was not started by this interface."
-                    )
-                self._status = "inactive"
-                self._error = None
-                return self.snapshot()
+        with self._lifecycle_lock:
+            with self._lock:
+                self._refresh_process_state()
+                if self._process is None:
+                    if self._stack_visible():
+                        raise StackError(
+                            "The running experiment stack was not started by this interface."
+                        )
+                    self._status = "inactive"
+                    self._error = None
+                    return self.snapshot()
             self._stop_locked()
             return self.snapshot()
 
+    def stop_for_experiment(self) -> dict:
+        """Stop owned processes now; defer DDS cleanup to the next start."""
+        with self._lifecycle_lock:
+            owned = self.snapshot()["owned"]
+            state = self.stop()
+            if owned:
+                self._cleanup_pending = True
+            return state
+
+    def start_for_experiment(self, phase_changed: Callable[[str], None]) -> dict:
+        """Wait for a previously stopped owned graph without holding snapshot locks."""
+        with self._lifecycle_lock:
+            if self._cleanup_pending:
+                phase_changed("waiting_for_graph")
+                self._wait_for_graph_cleanup()
+                self._cleanup_pending = False
+            phase_changed("starting")
+            return self.start()
+
+    def _wait_for_graph_cleanup(self) -> None:
+        deadline = time.monotonic() + max(self._startup_timeout_sec, self._shutdown_timeout_sec)
+        while self._stack_visible():
+            if time.monotonic() >= deadline:
+                with self._lock:
+                    self._status = "error"
+                    self._error = "Owned stack stopped, but cartesian_manager is still visible in the ROS graph."
+                raise StackError(self._error)
+            self._sleep(0.05)
+
+    def stop_and_wait(self) -> dict:
+        """Stop the owned launch, then wait for its ROS graph entries to expire.
+
+        Kept separate from stop() so existing panel lifecycles stay unchanged.
+        A still-visible external node is never killed or adopted.
+        """
+        with self._lifecycle_lock:
+            self.stop_for_experiment()
+            self._wait_for_graph_cleanup()
+            self._cleanup_pending = False
+            return self.snapshot()
+
     def _stop_locked(self, preserve_error: bool = False) -> None:
-        process = self._process
+        with self._lock:
+            process = self._process
         if process is None:
-            if not preserve_error:
-                self._status = "inactive"
-                self._error = None
+            with self._lock:
+                if not preserve_error:
+                    self._status = "inactive"
+                    self._error = None
             return
-        self._status = "stopping"
+        with self._lock:
+            self._status = "stopping"
+        self._monitoring_changed(False)
         try:
-            os.killpg(process.pid, signal.SIGINT)
-            process.wait(timeout=self._shutdown_timeout_sec)
-        except ProcessLookupError:
-            pass
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=1.0)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                pass
-        finally:
+            for stop_signal, timeout in ((signal.SIGINT, self._shutdown_timeout_sec), (signal.SIGTERM, 1.0)):
+                try:
+                    os.killpg(process.pid, stop_signal)
+                    process.wait(timeout=timeout)
+                    break
+                except ProcessLookupError:
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        except OSError as error:
+            with self._lock:
+                self._status = "error"
+                self._error = f"Unable to stop the owned experiment stack: {error}"
+            self._monitoring_changed(True)
+            raise StackError(self._error) from error
+        with self._lock:
+            if process.poll() is None:
+                self._status = "error"
+                self._error = "Experiment stack did not stop; its owned process is still running."
+                self._monitoring_changed(True)
+                raise StackError(self._error)
             self._process = None
             if preserve_error:
                 self._status = "error"
@@ -181,5 +252,5 @@ class StackManager:
 
     def shutdown(self) -> None:
         """Stop the owned stack, if any."""
-        with self._lock:
+        with self._lifecycle_lock:
             self._stop_locked()

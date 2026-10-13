@@ -113,6 +113,8 @@ class SessionInterfaceNode(Node):
         self._controller_future_started_at = None
         self._controller_client_created_at = time.monotonic()
         self._controller_client_generation = 0
+        self._controller_lifecycle_events = queue.SimpleQueue()
+        self._controller_polling_paused = False
         self._parameter_list_future = None
         self._parameter_get_future = None
         self._mapper_client_generation = 0
@@ -151,6 +153,7 @@ class SessionInterfaceNode(Node):
             overload_protection=True,
             overload_retreat_delay_sec=float(self.get_parameter("overload_retreat_delay_sec").value),
             before_start=self._before_stack_start,
+            monitoring_changed=self._controller_lifecycle_events.put,
             startup_timeout_sec=float(
                 self.get_parameter("stack_startup_timeout_sec").value
             ),
@@ -311,6 +314,7 @@ class SessionInterfaceNode(Node):
         self._experiment = ExperimentController(
             robot=preview_robot,
             command_allowed=lambda: not self._protection.snapshot()["blocked"],
+            stack_command_allowed=self._stack_commands_allowed,
             wait_for_control=self._wait_control_configuration,
             profile=self._experiment_profile,
             stack_manager=self._stack_manager,
@@ -426,6 +430,13 @@ class SessionInterfaceNode(Node):
         self._protection.require_clear()
         if self._protection_cleanup_pending or self._protection_configuration == "pending":
             raise ProtectionError("La protection termine la configuration ou l’arrêt de l’acquisition.")
+
+    def _stack_commands_allowed(self):
+        try:
+            self._require_protection_clear()
+            return True
+        except ProtectionError:
+            return False
 
     def _wait_ros_result(self, future):
         complete = threading.Event()
@@ -636,6 +647,14 @@ class SessionInterfaceNode(Node):
 
     def _refresh_controllers(self) -> None:
         now = time.monotonic()
+        # Only the executor thread touches ROS clients; lifecycle hooks enqueue
+        # events which take precedence over timeout handling and new requests.
+        while not self._controller_lifecycle_events.empty():
+            active = self._controller_lifecycle_events.get_nowait()
+            self._controller_polling_paused = not active
+            self._reconnect_controller_client(now)
+        if self._controller_polling_paused:
+            return
         if (
             self._controller_future is not None
             and self._controller_future_started_at is not None

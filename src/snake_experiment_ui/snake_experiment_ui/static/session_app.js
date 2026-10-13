@@ -20,6 +20,8 @@ class SessionInterface {
       }
       const protection = event.target.closest("[data-protection]");
       if (protection) return this.post(`/api/protection/${protection.dataset.protection}`);
+      const experimentStack = event.target.closest("[data-experiment-stack]");
+      if (experimentStack) return this.post(`/api/experiment/stack/${experimentStack.dataset.experimentStack}`);
       const stack = event.target.closest("[data-stack]");
       if (stack) return this.post(`/api/stack/${stack.dataset.stack}`);
       const start = event.target.closest("[data-mode-start]");
@@ -389,7 +391,7 @@ class SessionInterface {
     const state = this.state?.protection;
     const panel = document.getElementById("protection-panel");
     if (!panel) return;
-    const stack = ["E", "F", "G"].includes(this.state?.current_view)
+    const stack = ["D", "E", "F", "G"].includes(this.state?.current_view)
       ? this.state?.experiment?.stack ?? this.state?.stack
       : this.state?.stack;
     const stackActive = stack?.status === "active";
@@ -402,7 +404,7 @@ class SessionInterface {
     this.setDisabled(document.getElementById("protection-rearm"), this.busy || !state.fresh || !state.rearm_ready || state.cleanup_pending);
     this.setDisabled(document.getElementById("protection-stop"), !state.fresh || !["waiting_retreat", "translating", "waiting_clear", "rotating"].includes(state.state));
     if (blocked) {
-      document.querySelectorAll("[data-mode-start], [data-checkup-go-to], [data-block-start]:not([data-stack-bootstrap]), [data-block-control], [data-restart-stack], [data-block-go-to], [data-trial-action='start'], [data-trial-action='prepare']").forEach(button => this.setDisabled(button, true));
+      document.querySelectorAll("[data-mode-start], [data-checkup-go-to], [data-block-start]:not([data-stack-bootstrap]), [data-block-control], [data-restart-stack], [data-experiment-stack='restart'], [data-block-go-to], [data-trial-action='start'], [data-trial-action='prepare']").forEach(button => this.setDisabled(button, true));
     }
   }
 
@@ -580,7 +582,7 @@ class SessionInterface {
       const isNext = next?.id === block.id;
       const labels = { not_started: "Locked", starting: "Starting", running: "Running", completed: "Complete", interrupted: "Interrupted", error: "Error" };
       const pillClass = block.status === "completed" ? "pill--active" : ["interrupted", "error"].includes(block.status) ? "pill--warning" : "pill--neutral";
-      const startable = isNext && ["not_started", "interrupted", "error"].includes(block.status) && progress.workflow !== "sequence_completed" && ["completed", "legacy_skipped"].includes(presentation.status);
+      const startable = !experiment.stack_operation && isNext && ["not_started", "interrupted", "error"].includes(block.status) && progress.workflow !== "sequence_completed" && ["completed", "legacy_skipped"].includes(presentation.status);
       const stackBootstrap = block.phase === "discovery" && experiment.stack.status === "inactive";
       const verb = block.status === "interrupted" ? "Resume" : block.status === "error" ? "Retry" : "Start";
       return `<article class="block-entry${isNext ? " is-next" : ""}" data-dom-key="block:${this.escape(block.id)}">
@@ -595,9 +597,20 @@ class SessionInterface {
     this.patchMarkup(warnings, progress.warnings.length ? `<strong>Session warning</strong><ul>${progress.warnings.map((warning, index) => `<li data-dom-key="warning:${index}">${this.escape(warning)}</li>`).join("")}</ul>` : "");
     this.patchMarkup(document.getElementById("process-summary"), [
       ["Stack", experiment.stack.status], ["Mapper", experiment.mapper.status],
+      ["Stack ownership", experiment.stack.owned ? "This interface" : "Not owned"],
       ["Active mode", experiment.mapper.active_mode || "None"], ["Profile", experiment.profile.sha256.slice(0, 12)],
     ].map(([term, value]) => `<div data-dom-key="summary:${term}"><dt>${this.escape(term)}</dt><dd>${this.escape(this.title(value))}</dd></div>`).join(""));
     const error = document.getElementById("experiment-error");
+    for (const command of ["start", "stop", "restart"]) {
+      this.setDisabled(document.getElementById(`experiment-stack-${command}`), this.busy || !experiment[`can_${command}_stack`]);
+    }
+    const operationLabel = {
+      stopping: "Stopping stack processes",
+      waiting_for_graph: "Waiting for ROS graph cleanup",
+      starting: "Starting stack",
+    }[experiment.stack_operation?.phase] || "";
+    this.setText(document.getElementById("experiment-stack-operation"), operationLabel);
+    this.setHidden(document.getElementById("experiment-stack-operation"), !operationLabel);
     this.setHidden(error, !experiment.error);
     this.setText(error, experiment.error || "");
   }

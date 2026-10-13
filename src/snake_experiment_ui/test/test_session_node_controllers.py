@@ -215,6 +215,8 @@ class ControllerPollingTest(unittest.TestCase):
             _controller_future_started_at=None,
             _controller_client_created_at=100.0,
             _controller_client_generation=0,
+            _controller_lifecycle_events=queue.SimpleQueue(),
+            _controller_polling_paused=False,
             _graph_lock=threading.RLock(),
             _graph={"controllers": {}, "nodes": ["/controller_manager"]},
             get_logger=Mock(return_value=SimpleNamespace(warning=Mock())),
@@ -238,6 +240,26 @@ class ControllerPollingTest(unittest.TestCase):
         with patch("snake_experiment_ui.session_node.time.monotonic", return_value=101.0):
             SessionInterfaceNode._refresh_controllers(self.node)
         self.assertEqual(len(self.client.futures), 2)
+
+    def test_voluntary_stop_cancels_pending_call_without_timeout_and_resumes_on_start(self):
+        with patch("snake_experiment_ui.session_node.time.monotonic", return_value=100.0):
+            SessionInterfaceNode._refresh_controllers(self.node)
+        pending = self.client.futures[0]
+        self.node._controller_lifecycle_events.put(False)
+        with patch("snake_experiment_ui.session_node.time.monotonic", return_value=110.0):
+            SessionInterfaceNode._refresh_controllers(self.node)
+            SessionInterfaceNode._refresh_controllers(self.node)
+        self.assertEqual(self.client.removed, [pending])
+        self.assertTrue(self.node._controller_polling_paused)
+        self.assertEqual(self.replacement_client.futures, [])
+        self.node.get_logger().warning.assert_not_called()
+        pending.complete({"qontrol_explorer": "active"})
+        self.assertEqual(self.node._graph["controllers"], {})
+        self.node._controller_lifecycle_events.put(True)
+        with patch("snake_experiment_ui.session_node.time.monotonic", return_value=120.0):
+            SessionInterfaceNode._refresh_controllers(self.node)
+        self.assertFalse(self.node._controller_polling_paused)
+        self.assertEqual(len(self.replacement_client.futures), 1)
 
     def test_stalled_request_is_replaced_and_late_response_ignored(self):
         with patch("snake_experiment_ui.session_node.time.monotonic", return_value=100.0):
