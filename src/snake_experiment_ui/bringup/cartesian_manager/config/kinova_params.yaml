@@ -31,6 +31,8 @@ qontrol_explorer:
       - velocity
       - effort
     robot_command: position
+    # Estimated end-effector force magnitude threshold, in newtons.
+    force_threshold: 10.0
 
     # Velocity parameters
     command_max_linear_velocity: 0.05
