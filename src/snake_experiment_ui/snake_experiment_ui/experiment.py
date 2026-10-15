@@ -136,7 +136,18 @@ class ExperimentProfile:
             if not isinstance(settings, dict):
                 raise ExperimentError(f"experiment.yaml phase '{phase}' is missing.")
             topics = settings.get("rosbag_topics")
-            if topics != ["/joy", "/ee_pose", "/joint_states"]:
+            if (
+                not isinstance(topics, list)
+                or not topics
+                or any(
+                    not isinstance(topic, str)
+                    or not topic.startswith("/")
+                    or topic == "/"
+                    or any(part in ("", ".", "..") for part in topic[1:].split("/"))
+                    for topic in topics
+                )
+                or len(set(topics)) != len(topics)
+            ):
                 raise ExperimentError(f"Invalid rosbag_topics for phase '{phase}'.")
         default_instructions = {
             "placeholder": True,
