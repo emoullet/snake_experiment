@@ -305,13 +305,6 @@ class SessionInterfaceNode(Node):
             mode: self._participant_profile.video_path("mode_explanation", mode)
             for mode in ("baseline", "snake")
         }
-        state_images = {
-            mode: {
-                state: self._participant_profile.state_image_path(mode, state)
-                for state in states
-            }
-            for mode, states in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2")))
-        }
         self._experiment = ExperimentController(
             robot=preview_robot,
             command_allowed=lambda: not self._protection.snapshot()["blocked"],
@@ -324,7 +317,6 @@ class SessionInterfaceNode(Node):
             go_to_controller=self._experiment_go_to,
             presentation_video=presentation_video,
             mode_explanation_videos=mode_explanation_videos,
-            state_images=state_images,
             snake_button_provider=self._snake_button_monitor.snapshot,
         )
         self._enrollment = EnrollmentController(
@@ -359,7 +351,6 @@ class SessionInterfaceNode(Node):
             experiment=self._experiment,
             presentation_video=str(presentation_video or ""),
             mode_explanation_videos=mode_explanation_videos,
-            state_images=state_images,
             robot_preview=self._robot_preview,
             preview_default_view=self._participant_profile.preview_default_view,
             overload_sound_duration_sec=self._participant_profile.overload_sound_duration_sec,

@@ -17,7 +17,7 @@ from .diagnostics import DiagnosticProfileError
 from .enrollment import EnrollmentError
 from .experiment import ExperimentError
 from .mode_manager import ModeError
-from .participant_profile import state_image_is_available, video_is_available
+from .participant_profile import video_is_available
 from .rosbag_manager import RosbagError
 from .robot_preview import RobotPreviewError
 from .stack_manager import StackError
@@ -122,7 +122,6 @@ def create_session_app(
     experiment=None,
     presentation_video="",
     mode_explanation_videos=None,
-    state_images=None,
     robot_preview=None,
     protection_snapshot=None,
     protection_guard=None,
@@ -308,19 +307,6 @@ def create_session_app(
         ):
             raise HTTPException(status_code=404, detail="Mode explanation video is unavailable.")
         return FileResponse(video, media_type="video/mp4", headers=NO_CACHE_HEADERS)
-
-    @app.get("/participant/state-image/{mode}/{state}", include_in_schema=False)
-    async def participant_state_image(mode: str, state: str):
-        public = experiment.participant_snapshot() if experiment is not None else {}
-        image = (state_images or {}).get(mode, {}).get(state)
-        if (
-            public.get("view") != "C"
-            or public.get("mode") != mode
-            or public.get("local_mode") != state
-            or not state_image_is_available(image)
-        ):
-            raise HTTPException(status_code=404, detail="State explanation image is unavailable.")
-        return FileResponse(image, media_type="image/png", headers=NO_CACHE_HEADERS)
 
     @app.websocket("/participant/ws")
     async def participant_websocket(websocket: WebSocket):

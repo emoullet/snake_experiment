@@ -21,7 +21,7 @@ from .calibration import CalibrationError, validate_calibration_robot
 
 from .go_to import GoToError
 from .overload import protection_waiting_for_initial_feedback
-from .participant_profile import STATE_NAMES, state_image_is_available
+from .participant_profile import STATE_NAMES
 from .training import (
     TrainingError,
     build_trials,
@@ -300,7 +300,6 @@ class ExperimentController:
         go_to_controller=None,
         presentation_video: Optional[Path] = None,
         mode_explanation_videos: Optional[dict] = None,
-        state_images: Optional[dict] = None,
         snake_button_provider: Optional[Callable[[], Optional[bool]]] = None,
         robot: str = "explorer",
         command_allowed: Callable[[], bool] = lambda: True,
@@ -327,14 +326,6 @@ class ExperimentController:
             mode: Path(path).expanduser().resolve() if path else None
             for mode, path in (mode_explanation_videos or {}).items()
             if mode in MODES
-        }
-        self._state_images = {
-            mode: {
-                state: Path(path).expanduser().resolve() if path else None
-                for state, path in (state_images or {}).get(mode, {}).items()
-                if state in STATE_NAMES[mode]
-            }
-            for mode in MODES
         }
         self._mapper_local_mode: Optional[str] = None
         self._mapper_local_mode_lock = threading.Lock()
@@ -640,11 +631,6 @@ class ExperimentController:
             self._mode_explanation_videos.get(mode)
         )
 
-    def state_image_available(self, mode: str, state: str) -> bool:
-        return state in STATE_NAMES.get(mode, ()) and state_image_is_available(
-            self._state_images.get(mode, {}).get(state)
-        )
-
     def record_mapper_local_mode(self, state: str) -> None:
         """Record the mapper's reported local mode, never infer it from joystick input."""
         with self._mapper_local_mode_lock:
@@ -669,7 +655,6 @@ class ExperimentController:
                 self._snake_button_provider()
                 if mode == "snake" and state is not None else None
             ),
-            "state_image_available": bool(state and self.state_image_available(mode, state)),
         }
 
     def show_mode_explanation(self, block_id: str) -> dict:

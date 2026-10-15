@@ -369,7 +369,6 @@ class PreviewAssetsTest(unittest.TestCase):
         self.assertIn("participant_mapping.bundle.js", participant)
         self.assertIn('id="participant-horizontal-view"', participant)
         self.assertIn('id="participant-vertical-view"', participant)
-        self.assertNotIn('id="participant-state-image"', participant)
 
     def test_session_mode_request_is_not_periodically_republished(self):
         node = (PACKAGE_ROOT / "snake_experiment_ui/session_node.py").read_text(encoding="utf-8")

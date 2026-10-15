@@ -106,9 +106,9 @@ the approved success criteria before enrolling participants.
 `config/participant_interface.yaml` contains the participant-facing media paths.
 The current video entries point to machine-local files named
 `*_placeholder.mp4`; replace them with the session videos on the experiment
-computer. Empty `state_images` entries show an image placeholder in the UI.
-When a required video is unavailable, the operator can continue manually and
-the session records a warning.
+computer. When a required video is unavailable, the operator can continue
+manually and the session records a warning. Participant state explanations use
+the 3D animations in the interface.
 
 ## Session workflow
 

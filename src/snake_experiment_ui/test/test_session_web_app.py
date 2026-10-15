@@ -540,46 +540,6 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
                 404,
             )
 
-    async def test_state_image_serves_only_the_active_participant_mode_and_state(self):
-        from snake_experiment_ui.session_web_app import create_session_app
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            images = {
-                mode: {state: root / f"{mode}_{state}.png" for state in states}
-                for mode, states in (("baseline", ("b1", "b2", "b3")), ("snake", ("b1", "b2")))
-            }
-            for states in images.values():
-                for image in states.values():
-                    image.write_bytes(b"test png")
-            self.app = create_session_app(
-                self.checkup, root, root, self.enrollment, self.experiment,
-                state_images=images,
-            )
-            self.experiment.public_state = {
-                "view": "C", "mode": "snake", "local_mode": "b2",
-            }
-            image_route = next(
-                route for route in self.app.routes
-                if route.path == "/participant/state-image/{mode}/{state}"
-            )
-            response = await image_route.endpoint("snake", "b2")
-            self.assertEqual(response.path, images["snake"]["b2"])
-            self.assertEqual(response.media_type, "image/png")
-            self.assertEqual(
-                (await self.request("GET", "/participant/state-image/baseline/b2")).status_code,
-                404,
-            )
-            self.assertEqual(
-                (await self.request("GET", "/participant/state-image/snake/b1")).status_code,
-                404,
-            )
-            self.experiment.public_state = {"view": "waiting"}
-            self.assertEqual(
-                (await self.request("GET", "/participant/state-image/snake/b2")).status_code,
-                404,
-            )
-
     async def test_training_routes(self):
         self.checkup.workflow = "validated"
         self.enrollment.view = "D"
@@ -708,7 +668,6 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('participant_style.css?v=participant-overload-1', html)
         self.assertIn('participant_mapping.bundle.js?v=participant-mapping-7', html)
         self.assertIn('data-mapping-source class="pill pill--neutral"', html)
-        self.assertNotIn('id="participant-state-image"', html)
         self.assertIn('new CustomEvent("participant:state", { detail: state })', script)
         self.assertIn('id="participant-sound-retry"', html)
         self.assertIn('new Audio("/session-static/mario_coin_sound.mp3")', script)

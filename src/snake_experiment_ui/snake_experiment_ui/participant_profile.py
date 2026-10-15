@@ -21,14 +21,6 @@ def video_is_available(path: Path | str | None) -> bool:
     return candidate.suffix.lower() == ".mp4" and candidate.is_file()
 
 
-def state_image_is_available(path: Path | str | None) -> bool:
-    """Only existing PNG files can be shown as state explanations."""
-    if not path:
-        return False
-    candidate = Path(path).expanduser()
-    return candidate.suffix.lower() == ".png" and candidate.is_file()
-
-
 class ParticipantProfile:
     """Validated media and display settings for the participant interface."""
 
@@ -73,28 +65,6 @@ class ParticipantProfile:
             raise ParticipantProfileError("Participant interface video paths must be strings.")
         if any(value.strip() and Path(value).suffix.lower() != ".mp4" for value in values):
             raise ParticipantProfileError("Participant interface videos must be MP4 files.")
-        images = data.get("state_images")
-        if images is None:
-            images = {
-                mode: {state: "" for state in states}
-                for mode, states in STATE_NAMES.items()
-            }
-        if not isinstance(images, dict) or any(
-            not isinstance(images.get(mode), dict)
-            or any(
-                not isinstance(images[mode].get(state), str)
-                or (
-                    images[mode][state].strip()
-                    and Path(images[mode][state]).suffix.lower() != ".png"
-                )
-                for state in states
-            )
-            for mode, states in STATE_NAMES.items()
-        ):
-            raise ParticipantProfileError(
-                "Participant state images need PNG paths for baseline b1/b2/b3 and snake b1/b2."
-            )
-        data["state_images"] = images
         self.data = data
 
     def _resolve_media_path(self, value: str) -> Path | None:
@@ -113,8 +83,3 @@ class ParticipantProfile:
         else:
             raise ParticipantProfileError("Unknown participant video slot.")
         return self._resolve_media_path(value)
-
-    def state_image_path(self, mode: str, state: str) -> Path | None:
-        if state not in STATE_NAMES.get(mode, ()):
-            raise ParticipantProfileError("Unknown participant state image slot.")
-        return self._resolve_media_path(self.data["state_images"][mode][state])
