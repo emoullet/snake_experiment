@@ -390,11 +390,19 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             "POST", "/api/checkup/go-to", json={"pose_id": "target_1"}
         )
         self.assertEqual(response.status_code, 200)
+        response = await self.request(
+            "POST", "/api/checkup/go-to", json={"pose_id": "target_out_1"}
+        )
+        self.assertEqual(response.status_code, 200)
         response = await self.request("POST", "/api/checkup/go-to/stop")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             self.checkup.confirmations,
-            [("go_to", "target_1"), ("go_to", "stop")],
+            [
+                ("go_to", "target_1"),
+                ("go_to", "target_out_1"),
+                ("go_to", "stop"),
+            ],
         )
     async def test_view_c_routes_and_transition_to_d(self):
         self.checkup.workflow = "validated"
@@ -834,6 +842,13 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertNotIn("incidentDrafts", script)
         self.assertNotIn(".innerHTML =", script)
         self.assertIn("data-checkup-go-to", html)
+        for pose_id, button_name in (
+            ("target_out_1", "Go to target 1 (retreated)"),
+            ("target_out_2", "Go to target 2 (retreated)"),
+            ("target_out_3", "Go to target 3 (retreated)"),
+        ):
+            self.assertIn(f'data-checkup-go-to="{pose_id}"', html)
+            self.assertIn(f'>{button_name}</button>', html)
         self.assertIn("data-block-go-to", script)
         self.assertIn("Stop motion", script)
         self.assertIn("renderRecording", script)
@@ -857,12 +872,26 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('button.classList.toggle("is-complete", succeeded)', script)
         self.assertIn('button.classList.toggle("is-timed-out", timedOut)', script)
         self.assertIn('"starting point reached"', script)
-        self.assertIn("target ${button.dataset.checkupGoTo.replace", script)
+        self.assertIn('const goToTargetCount = goTo.targets?.length', script)
+        self.assertIn(
+            'const retreatedLabel = poseId.startsWith("target_out_")', script
+        )
+        self.assertIn(
+            '`Go to target ${poseId.replace("target_out_", "")} (retreated)`',
+            script,
+        )
+        self.assertIn(
+            '`${completedGoTo}/${goToTargetCount} poses reached`', script
+        )
+        self.assertIn(
+            '"Both modes and all seven Go-to checks must pass before validation."',
+            script,
+        )
         self.assertIn("successfully reached", script)
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
         self.assertIn("session_style.css?v=session-style-3", html)
-        self.assertIn("session_app.js?v=session-app-10", html)
+        self.assertIn("session_app.js?v=session-app-12", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(

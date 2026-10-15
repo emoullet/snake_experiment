@@ -458,29 +458,44 @@ class SessionInterface {
     const goToMotion = goTo.motion?.current;
     const goToActive = !!goTo.motion?.active;
     const goToResults = goTo.results || {};
+    const goToTargetCount = goTo.targets?.length
+      || Object.keys(goToResults).length;
     const completedGoTo = Object.values(goToResults).filter(Boolean).length;
     const goToPill = document.getElementById("goto-status");
     this.setText(goToPill, goToActive
       ? `${this.title(goToMotion?.status)} · ${this.title(goToMotion?.pose_id)}`
-      : `${completedGoTo}/4 poses reached`);
-    this.setClass(goToPill, `pill ${completedGoTo === 4 ? "pill--active" : goToActive ? "pill--warning" : "pill--neutral"}`);
+      : `${completedGoTo}/${goToTargetCount} poses reached`);
+    const allGoToReached = completedGoTo === goToTargetCount;
+    const goToPillTone = allGoToReached
+      ? "pill--active"
+      : goToActive
+        ? "pill--warning"
+        : "pill--neutral";
+    this.setClass(
+      goToPill,
+      `pill ${goToPillTone}`,
+    );
     this.setText(document.getElementById("goto-help"), this.goToTimeoutMessage(goToMotion) || (goToMotion?.error
       ? goToMotion.error
       : goToActive
         ? `Linear error: ${goToMotion.linear_error_mm === null ? "—" : Number(goToMotion.linear_error_mm).toFixed(1) + " mm"} · Angular error: ${goToMotion.angular_error_deg === null ? "—" : Number(goToMotion.angular_error_deg).toFixed(1) + "°"}`
-        : "The four calibrated poses must be reached before validation."));
+        : `All ${goToTargetCount} calibrated poses must be reached before validation.`));
     document.querySelectorAll("[data-checkup-go-to]").forEach((button) => {
-      const succeeded = !!goToResults[button.dataset.checkupGoTo];
+      const poseId = button.dataset.checkupGoTo;
+      const succeeded = !!goToResults[poseId];
       const latestAttempt = [...(goTo.history || [])]
         .reverse()
-        .find((attempt) => attempt.pose_id === button.dataset.checkupGoTo);
+        .find((attempt) => attempt.pose_id === poseId);
       const timedOut = !succeeded && latestAttempt?.status === "timed_out";
-      const label = button.dataset.checkupGoTo === "starting_point"
+      const retreatedLabel = poseId.startsWith("target_out_")
+        ? `Go to target ${poseId.replace("target_out_", "")} (retreated)`
+        : null;
+      const label = retreatedLabel || (poseId === "starting_point"
         ? "Go to starting point"
-        : `Go to target ${button.dataset.checkupGoTo.replace("target_", "")}`;
-      const reachedLabel = button.dataset.checkupGoTo === "starting_point"
+        : `Go to target ${poseId.replace("target_", "")}`);
+      const reachedLabel = retreatedLabel || (poseId === "starting_point"
         ? "starting point reached"
-        : `target ${button.dataset.checkupGoTo.replace("target_", "")} reached`;
+        : `target ${poseId.replace("target_", "")} reached`);
       this.setDisabled(button, this.busy || !goTo.available || goToActive);
       button.classList.toggle("is-complete", succeeded);
       button.classList.toggle("is-timed-out", timedOut);
@@ -505,7 +520,7 @@ class SessionInterface {
     this.setDisabled(document.getElementById("validate-button"), this.busy || !this.state.can_validate);
     this.setText(document.getElementById("validation-help"), this.state.can_validate
       ? "Both modes passed. Validation will stop the stack and continue to session setup."
-      : "Both modes and all four Go-to checks must pass before validation.");
+      : "Both modes and all seven Go-to checks must pass before validation.");
     this.setDisabled(document.getElementById("reset-button"), this.busy);
     const error = document.getElementById("global-error");
     this.setHidden(error, !this.state.error);

@@ -4,7 +4,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from snake_experiment_ui.checkup import CheckupController, CheckupError
+from snake_experiment_ui.checkup import (
+    CHECKUP_GO_TO_POSES,
+    CheckupController,
+    CheckupError,
+)
 
 
 class FakeStack:
@@ -114,12 +118,7 @@ class CheckupControllerTest(unittest.TestCase):
                     "robot": {"id": "explorer", "ee_frame": "ft_frame"},
                     "poses": {
                         pose_id: pose
-                        for pose_id in (
-                            "target_1",
-                            "target_2",
-                            "target_3",
-                            "starting_point",
-                        )
+                        for pose_id in CHECKUP_GO_TO_POSES
                     },
                 }
             ),
@@ -161,7 +160,7 @@ class CheckupControllerTest(unittest.TestCase):
         self.controller.confirm_mode(mode, True)
 
     def pass_go_to(self):
-        for pose_id in ("target_1", "target_2", "target_3", "starting_point"):
+        for pose_id in CHECKUP_GO_TO_POSES:
             self.controller.start_go_to(pose_id)
 
     def test_modes_can_pass_in_any_order_then_validate(self):
@@ -175,6 +174,10 @@ class CheckupControllerTest(unittest.TestCase):
         self.assertEqual(state["current_view"], "C")
         self.assertEqual(state["stack"]["status"], "inactive")
         self.assertEqual(state["pending_report"]["status"], "PASSED_WITH_WARNINGS")
+        self.assertEqual(
+            state["pending_report"]["go_to"]["targets"],
+            list(CHECKUP_GO_TO_POSES),
+        )
 
     def test_validation_is_gated_and_operator_can_reject_then_retry(self):
         self.controller.start_stack()
@@ -187,17 +190,33 @@ class CheckupControllerTest(unittest.TestCase):
         self.controller.confirm_mode("baseline", True)
         self.assertEqual(self.controller.snapshot()["modes"]["baseline"]["attempts"], 2)
 
-    def test_validation_requires_all_four_go_to_targets(self):
+    def test_validation_requires_all_seven_go_to_targets(self):
         self.controller.start_stack()
         self.pass_mode("baseline")
         self.pass_mode("snake")
-        for pose_id in ("target_1", "target_2", "target_3"):
+        for pose_id in CHECKUP_GO_TO_POSES[:-1]:
             self.controller.start_go_to(pose_id)
-        self.assertFalse(self.controller.snapshot()["can_validate"])
-        with self.assertRaisesRegex(CheckupError, "starting_point"):
+        snapshot = self.controller.snapshot()
+        self.assertFalse(snapshot["can_validate"])
+        self.assertEqual(
+            snapshot["go_to"]["targets"], list(CHECKUP_GO_TO_POSES)
+        )
+        self.assertFalse(snapshot["go_to"]["results"]["target_out_3"])
+        with self.assertRaisesRegex(CheckupError, "target_out_3"):
             self.controller.validate()
-        self.controller.start_go_to("starting_point")
+        self.controller.start_go_to("target_out_3")
         self.assertTrue(self.controller.snapshot()["can_validate"])
+
+    def test_missing_retreated_pose_blocks_calibration_load(self):
+        """Reject calibrations that omit any required retreat pose."""
+        path = self.controller._calibration_file
+        document = json.loads(path.read_text())
+        document["poses"].pop("target_out_2")
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+        with self.assertRaisesRegex(CheckupError, "target_out_2"):
+            self.controller.start_stack()
+        self.assertEqual(self.stack.status, "inactive")
 
     def test_diagnostic_timeout_fails_and_stops_mapper(self):
         self.diagnostics.passed = False

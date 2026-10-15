@@ -18,6 +18,17 @@ from .diagnostics import evaluate_provenance
 from .go_to import GoToError
 
 
+CHECKUP_GO_TO_POSES = (
+    "target_1",
+    "target_2",
+    "target_3",
+    "starting_point",
+    "target_out_1",
+    "target_out_2",
+    "target_out_3",
+)
+
+
 class CheckupError(RuntimeError):
     """An operator-correctable View B workflow error."""
 
@@ -192,7 +203,7 @@ class CheckupController:
                 raise CheckupError("Baseline and Snake must both pass before validation.")
             missing_go_to = [
                 pose_id
-                for pose_id in ("target_1", "target_2", "target_3", "starting_point")
+                for pose_id in CHECKUP_GO_TO_POSES
                 if not self._go_to_succeeded(pose_id)
             ]
             if missing_go_to:
@@ -239,7 +250,7 @@ class CheckupController:
                 "go_to": {
                     "available": True,
                     "blocking": True,
-                    "targets": ["target_1", "target_2", "target_3", "starting_point"],
+                    "targets": list(CHECKUP_GO_TO_POSES),
                     "calibration_file": str(self._calibration_file),
                     "calibration_sha256": self._go_to_calibration_sha256,
                     "history": json.loads(json.dumps(self._go_to_history)),
@@ -262,8 +273,7 @@ class CheckupController:
 
     def start_go_to(self, pose_id: str) -> dict:
         """Command one required View B calibration pose."""
-        allowed = ("target_1", "target_2", "target_3", "starting_point")
-        if pose_id not in allowed:
+        if pose_id not in CHECKUP_GO_TO_POSES:
             raise CheckupError(f"Unknown check-up Go-to pose: {pose_id}")
         with self._lock:
             if self._go_to is None:
@@ -328,7 +338,7 @@ class CheckupController:
         except (OSError, UnicodeError, json.JSONDecodeError) as error:
             raise CheckupError(f"Unable to read Go-to calibration: {error}") from error
         poses = calibration.get("poses") if isinstance(calibration, dict) else None
-        required = ("target_1", "target_2", "target_3", "starting_point")
+        required = CHECKUP_GO_TO_POSES
         if (
             not isinstance(calibration, dict)
             or calibration.get("schema_version") != 1
@@ -405,7 +415,7 @@ class CheckupController:
             }
             go_to_results = {
                 pose_id: self._go_to_succeeded(pose_id)
-                for pose_id in ("target_1", "target_2", "target_3", "starting_point")
+                for pose_id in CHECKUP_GO_TO_POSES
             }
             return {
                 "workflow": self._workflow,
@@ -427,7 +437,7 @@ class CheckupController:
                         and self._active_mode is None
                     ),
                     "blocking": True,
-                    "targets": ["target_1", "target_2", "target_3", "starting_point"],
+                    "targets": list(CHECKUP_GO_TO_POSES),
                     "results": go_to_results,
                     "motion": go_to_state,
                     "history": json.loads(json.dumps(self._go_to_history)),

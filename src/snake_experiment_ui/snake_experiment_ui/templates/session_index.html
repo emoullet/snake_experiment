@@ -97,14 +97,17 @@
         <section class="card" aria-labelledby="goto-heading">
           <div class="section-heading">
             <div><p class="step-number">03</p><h2 id="goto-heading">Go-to verification</h2></div>
-            <span id="goto-status" class="pill pill--neutral">Four poses required</span>
+            <span id="goto-status" class="pill pill--neutral">Seven poses required</span>
           </div>
-          <p id="goto-help" class="supporting-copy">The four calibrated poses must be reached before validation.</p>
+          <p id="goto-help" class="supporting-copy">All seven calibrated poses must be reached before validation.</p>
           <div class="goto-grid">
             <button class="secondary-button" data-checkup-go-to="starting_point" type="button">Go to starting point</button>
             <button class="secondary-button" data-checkup-go-to="target_1" type="button">Go to target 1</button>
             <button class="secondary-button" data-checkup-go-to="target_2" type="button">Go to target 2</button>
             <button class="secondary-button" data-checkup-go-to="target_3" type="button">Go to target 3</button>
+            <button class="secondary-button" data-checkup-go-to="target_out_1" type="button">Go to target 1 (retreated)</button>
+            <button class="secondary-button" data-checkup-go-to="target_out_2" type="button">Go to target 2 (retreated)</button>
+            <button class="secondary-button" data-checkup-go-to="target_out_3" type="button">Go to target 3 (retreated)</button>
           </div>
           <button id="checkup-stop-motion" class="reject-button" data-checkup-go-to-stop type="button" hidden>Stop motion</button>
         </section>
@@ -201,6 +204,6 @@
       </section>
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/session-static/session_app.js?v=session-app-10"></script>
+    <script src="/session-static/session_app.js?v=session-app-12"></script>
   </body>
 </html>
