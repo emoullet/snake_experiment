@@ -1,3 +1,5 @@
+/** Compute shared viewpoints and framing for the robot mapping previews. */
+
 import { Box3, Vector3 } from 'three';
 import { cyclePose, setArmPose } from './kinematics.js';
 

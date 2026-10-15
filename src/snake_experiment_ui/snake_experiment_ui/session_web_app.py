@@ -41,19 +41,27 @@ class NoCacheStaticFiles(StaticFiles):
 
 
 class Confirmation(BaseModel):
+    """Boolean confirmation submitted by an operator action."""
+
     accepted: bool
 
 
 class FolderSelection(BaseModel):
+    """Selected filesystem directory for a participant session."""
+
     path: str
 
 
 class FolderCreation(BaseModel):
+    """Parent directory and name for a new session folder."""
+
     parent_path: str
     name: str
 
 
 class ParticipantForm(BaseModel):
+    """Participant metadata collected during enrollment."""
+
     pseudonym: str
     gathered_consent: bool
     handedness: str
@@ -62,33 +70,47 @@ class ParticipantForm(BaseModel):
 
 
 class ResumeRequest(BaseModel):
+    """Participant identity and optional mismatch acknowledgement."""
+
     pseudonym: str
     acknowledge_mismatch: bool = False
 
 
 class EndBlockRequest(BaseModel):
+    """Explicit confirmation for completing an experiment block."""
+
     confirmed: bool
 
 
 class ControlRequest(BaseModel):
+    """Requested enabled state for participant control and recording."""
+
     active: bool
 
 
 class IncidentDescription(BaseModel):
+    """Operator description associated with one reported incident."""
+
     id: int
     text: str
 
 
 class IncidentReviewRequest(BaseModel):
+    """Incident descriptions and validity decision for an attempt."""
+
     descriptions: list[IncidentDescription]
     invalidates_attempt: bool
 
 
 class TrainingResolutionRequest(BaseModel):
+    """Operator decision to retry a trial or accept a recorded deviation."""
+
     decision: str
 
 
 class GoToRequest(BaseModel):
+    """Identifier of a calibrated target requested by the operator."""
+
     pose_id: str
 
 

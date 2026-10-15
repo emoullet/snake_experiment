@@ -21,6 +21,8 @@ class RobotPreviewError(RuntimeError):
 
 @dataclass(frozen=True)
 class RobotDefinition:
+    """Display metadata and joint/frame names for a supported robot model."""
+
     identifier: str
     label: str
     arm_joints: tuple[str, ...]

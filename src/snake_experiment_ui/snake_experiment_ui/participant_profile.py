@@ -30,6 +30,8 @@ def state_image_is_available(path: Path | str | None) -> bool:
 
 
 class ParticipantProfile:
+    """Validated media and display settings for the participant interface."""
+
     def __init__(self, path: Path) -> None:
         self.path = Path(path).expanduser().resolve()
         try:

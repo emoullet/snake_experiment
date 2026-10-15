@@ -114,10 +114,11 @@ with Ctrl+C. No web-page refresh is needed at this stage.
   password. Runtime validation with the Robotiq model, RViz, and mock hardware
   remains to be performed after installation. No physical robot was started.
 
-The calibration and session interfaces now select Kinova with
-`stack_robot:=kinova` and accept `stack_robot_ip`. See the
+The calibration and session interfaces select Kinova with `stack_robot:=kinova`
+and accept `stack_robot_ip`. The integration checks below cover profile
+selection and fake-hardware lifecycle; they do not exercise physical robot
+commands or browser rendering. See the
 [interface guide](../src/snake_experiment_ui/README.md#select-the-robot).
-Robot-specific control profiles and the participant preview remain to be adapted.
 
 ### Robot selection integration checks
 

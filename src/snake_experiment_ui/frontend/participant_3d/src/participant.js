@@ -1,3 +1,5 @@
+/** Connect the read-only mapping animation to the participant session view. */
+
 import { MappingAnimator } from './animation.js';
 import { participantMappingSelection } from './mapping.js';
 

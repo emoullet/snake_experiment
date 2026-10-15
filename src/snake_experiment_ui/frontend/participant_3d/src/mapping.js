@@ -1,3 +1,5 @@
+/** Reproduce configured joystick mappings for display-only animations. */
+
 import { Vector3 } from 'three';
 
 const LINEAR = ['linear_x', 'linear_y', 'linear_z'];

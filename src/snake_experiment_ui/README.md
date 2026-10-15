@@ -88,10 +88,27 @@ Kinova profiles use `end_effector_link` for b2/b3; Explorer profiles retain
 `ft_frame`. The Kinova manager also uses `end_effector_link`. The default session
 check-up selects `system_checkup_kinova.yaml` for Kinova and `system_checkup.yaml`
 for Explorer, so it verifies the matching mapper profile. An explicit
-`diagnostic_profile` still takes precedence. Gripper commands and a complete
-Kinova experiment still require validation.
+`diagnostic_profile` still takes precedence. Recorded Kinova integration checks
+use fake hardware; physical robot commands and a complete participant session
+are outside those checks.
 See the [dependency guide](../../docs/kinova_dependencies.md) for the pinned
 Robotiq description required by Kortex.
+
+## Study configuration before enrollment
+
+`config/experiment.yaml` defines the block sequence, trial settings and success
+thresholds. The configured linear and angular tolerances are 5 mm and 5 degrees;
+`success_thresholds.provisional` is currently `true`. The discovery instruction
+text is marked `placeholder: true` and contains a TODO. Replace it with the
+approved study instructions, set the placeholder flag to `false`, and configure
+the approved success criteria before enrolling participants.
+
+`config/participant_interface.yaml` contains the participant-facing media paths.
+The current video entries point to machine-local files named
+`*_placeholder.mp4`; replace them with the session videos on the experiment
+computer. Empty `state_images` entries show an image placeholder in the UI.
+When a required video is unavailable, the operator can continue manually and
+the session records a warning.
 
 ## Session workflow
 
@@ -171,10 +188,6 @@ environment-mismatch acknowledgement before resuming and preserves the original
 `robot` record. Older manifests without robot metadata are treated as unknown;
 acknowledging their first resume records the current configuration in the history
 without assigning a robot retrospectively to the original session.
-
-The supplied success thresholds (5 mm and 5 degrees) are provisional development
-values. The supplied discovery instructions are also placeholders and must be
-replaced before collecting participant data.
 
 ## Files and settings
 

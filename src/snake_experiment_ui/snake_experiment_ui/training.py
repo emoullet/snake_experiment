@@ -81,7 +81,7 @@ def validate_training_settings(
 
 
 def validate_thresholds(thresholds: dict) -> None:
-    """Validate positive development thresholds in operator-facing units."""
+    """Validate positive success thresholds in operator-facing units."""
     required = (
         "linear_mm",
         "angular_deg",

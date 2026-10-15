@@ -1,3 +1,5 @@
+/** Initialize the standalone, read-only robot preview page. */
+
 import { MappingAnimator } from './animation.js';
 
 const PREFIX = '/participant/3d-preview';

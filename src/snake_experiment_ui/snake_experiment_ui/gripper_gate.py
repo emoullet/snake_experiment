@@ -7,6 +7,8 @@ from .robot_preview import robot_definition
 
 
 class GripperGate:
+    """Relay gripper input only while overload protection is healthy."""
+
     def __init__(self, robot, publish, clock=time.monotonic):
         self.status = ProtectionState(robot, clock)
         self._joint = robot_definition(robot).gripper_joint

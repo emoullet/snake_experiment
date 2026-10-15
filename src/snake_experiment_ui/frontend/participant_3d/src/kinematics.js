@@ -1,3 +1,5 @@
+/** Display-only inverse kinematics helpers for schematic robot animations. */
+
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { commandForAxis } from './mapping.js';
 

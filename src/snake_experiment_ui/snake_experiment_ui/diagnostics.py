@@ -22,12 +22,16 @@ class DiagnosticProfileError(RuntimeError):
 
 @dataclass(frozen=True)
 class TopicRequirement:
+    """Expected message type and minimum publication rate for a topic."""
+
     message_type: str
     min_rate_hz: float
 
 
 @dataclass(frozen=True)
 class ModeRequirement:
+    """Mapper profile and observed mode state required by system check-up."""
+
     mode_request: str
     mapper_modes: tuple[str, ...]
     mapper_config: Path

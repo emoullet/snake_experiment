@@ -14,6 +14,8 @@ from .robot_preview import robot_definition
 
 
 class ProtectionError(RuntimeError):
+    """An operator protection action is invalid in the current state."""
+
     pass
 
 

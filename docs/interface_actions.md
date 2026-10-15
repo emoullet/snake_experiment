@@ -76,7 +76,7 @@ Paths, warnings, partial sessions, environment differences and participant summa
 | Control | Availability and effect | Action chain |
 | --- | --- | --- |
 | Presentation “Display” | Available for pending/showing/completed presentations with no active block. Shows or replays the presentation on the participant screen from the beginning. | `bindActions`/`post` → `/api/experiment/presentation/show` → `show_presentation` → `ExperimentController.show_presentation` (`experiment.py`). |
-| Presentation completion button | Requires presentation status `showing`. Records operator confirmation. Missing video permits manual development validation with a recorded warning. | `bindActions`/`post` → `/api/experiment/presentation/complete` → `complete_presentation` → `ExperimentController.complete_presentation`. |
+| Presentation completion button | Requires presentation status `showing`. Records operator confirmation. Missing video permits manual confirmation and records a warning. | `bindActions`/`post` → `/api/experiment/presentation/complete` → `complete_presentation` → `ExperimentController.complete_presentation`. |
 | “Start/Resume/Retry discovery/training/recording” | Only the next unfinished block is startable, with eligible status and no stack operation. Presentation must be completed or `legacy_skipped`. Creates/resumes the block folder and starts the stack; training/recording also activate the mode mapper. Opens the corresponding discovery, training or recording screen. | `bindActions`/`post` → `/api/experiment/blocks/{block_id}/start` → `start_experiment_block` → `ExperimentController.start`. |
 | “Start stack” / “Stop stack” / “Restart stack” in Robot processes | Use `can_start_stack`, `can_stop_stack`, `can_restart_stack`. Available only between blocks, without motion, mapper or recorder activity. Manage interface-owned processes without changing session progress or starting a mapper/recorder. Restart requires clear protection; stop remains available during overload. | `bindActions`/`post` → `/api/experiment/stack/start`, `/stop` or `/restart` → `start_experiment_stack`, `stop_experiment_stack` or `restart_experiment_stack_between_blocks` → `ExperimentController.manage_experiment_stack`. |
 
@@ -89,13 +89,13 @@ Stack stop completes when owned processes exit. A subsequent launch may display 
 | Control | Availability and effect | Action chain |
 | --- | --- | --- |
 | “Show mode explanation” | Shows/replays the selected mode's video on the participant screen from the beginning, including after earlier confirmation. | `bindActions`/`post` → `/api/experiment/blocks/{block_id}/explanation/show` → `show_mode_explanation` → `ExperimentController.show_mode_explanation`. |
-| “Explanation done” | Requires explanation status `showing`. Confirms the explanation. Missing video can be manually validated for development, with a warning recorded. | `bindActions`/`post` → `/api/experiment/blocks/{block_id}/explanation/complete` → `complete_mode_explanation` → `ExperimentController.complete_mode_explanation`. |
+| “Explanation done” | Requires explanation status `showing`. Confirms the explanation. Missing video permits manual confirmation and records a warning. | `bindActions`/`post` → `/api/experiment/blocks/{block_id}/explanation/complete` → `complete_mode_explanation` → `ExperimentController.complete_mode_explanation`. |
 | “Activate/Deactivate mode and recording” | Activation requires a completed explanation; protection checks also apply. Starts joystick mapping and MCAP together, or stops them and closes the current segment. | `bindActions`/`post` → `/api/experiment/blocks/{block_id}/control`, `active=true/false` → `set_experiment_control` → `ExperimentController.set_control`. |
 | “Restart stack” | Requires browser confirmation. Restarts the owned stack and restores the preceding control state when permitted; an active segment may be closed. | `bindActions`/`post` → `/api/experiment/blocks/{block_id}/restart-stack` → `restart_experiment_stack` → `ExperimentController.restart_stack`. |
 | “Stop and return” | Interrupts the block and returns to the experiment sequence; the block can be resumed. | `bindActions`/`post` → `/api/experiment/blocks/{block_id}/abort` → `abort_experiment_block` → `ExperimentController.abort`. |
 | “End discovery” | Requires `experiment.can_end` and browser confirmation. Completes the block and returns to the experiment sequence. | `bindActions`/`post` → `/api/experiment/blocks/{block_id}/end`, `confirmed=true` → `end_experiment_block` → `ExperimentController.end`. |
 
-After overload interruption, rearm protection and activate mode/recording explicitly to start a new segment. Placeholder discovery instructions must be replaced before participant data collection.
+After overload interruption, rearm protection and activate mode/recording explicitly to start a new segment. See the [session setup checklist](../src/snake_experiment_ui/README.md#study-configuration-before-enrollment) for required study content and media.
 
 ## Training and recording
 
@@ -116,7 +116,7 @@ After overload interruption, rearm protection and activate mode/recording explic
 | “Stop and return” | Interrupts the block, stops owned processes and returns to the experiment sequence. An active acquisition is stopped as invalid. | `bindActions`/`post` → `/abort` → `abort_experiment_block` → `abort`. |
 | “End training” / “End recordings” | Requires `experiment.can_end`: all trials succeeded or were explicitly accepted with deviation. Confirmation completes the block and returns to the experiment sequence. The final block completes the sequence and stops the stack. | `bindActions`/`post` → `/end`, `confirmed=true` → `end_experiment_block` → `end`. |
 
-Start/target linear and angular errors, trial history, incident history and technical outcomes are read-only projections of `ExperimentController.snapshot`. Reaching the target for the required dwell can automatically stop acquisition; `/ws` reports the outcome without another click. Incident review remains necessary when occurrences were reported. The supplied 5 mm / 5 degree success thresholds are provisional development values requiring scientific approval before participant sessions.
+Start/target linear and angular errors, trial history, incident history and technical outcomes are read-only projections of `ExperimentController.snapshot`. Reaching the configured target tolerances for the required dwell can automatically stop acquisition; `/ws` reports the outcome without another click. Incident review remains necessary when occurrences were reported. The active threshold values are defined by `success_thresholds` in `config/experiment.yaml`.
 
 The `/{phase}/ready` endpoints still exist (`confirm_training_ready` / `confirm_recording_ready` → `training_participant_ready` / `recording_participant_ready`), but `renderTrialView` does not render a control calling them.
 
@@ -132,4 +132,4 @@ Open `/participant` on the participant display. It displays the general presenta
 
 ## Generic block fallback
 
-For a phase other than discovery/training/recording, `renderActiveBlock` renders a generic block screen with read-only parameters and an implementation placeholder. Restart stack, Stop and return and End use the same `/restart-stack`, `/abort` and `/end` action chains described above.
+For a phase other than discovery/training/recording, `renderActiveBlock` renders a generic fallback screen with read-only parameters. Restart stack, Stop and return and End use the same `/restart-stack`, `/abort` and `/end` action chains described above.

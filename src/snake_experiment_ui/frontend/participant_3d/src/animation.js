@@ -1,3 +1,5 @@
+/** Render read-only robot joint poses for operator and participant previews. */
+
 import * as THREE from 'three';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
