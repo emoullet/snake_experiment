@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 import json
+import math
 import queue
 from pathlib import Path
 import threading
@@ -71,14 +72,19 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("rosbag_startup_timeout_sec", 5.0)
         self.declare_parameter("rosbag_shutdown_timeout_sec", 10.0)
         self.declare_parameter("go_to_timeout_sec", 120.0)
-        self.declare_parameter("go_to_dwell_sec", 0.5)
         self.declare_parameter("go_to_stall_timeout_sec", 5.0)
         self.declare_parameter("go_to_progress_window_sec", 1.0)
-        self.declare_parameter("go_to_linear_progress_threshold_mps", 0.0005)
-        self.declare_parameter("go_to_angular_progress_threshold_radps", 0.008726646259971648)
         self.declare_parameter("go_to_feedback_timeout_sec", 2.0)
 
         share = Path(get_package_share_directory("snake_experiment_ui"))
+        configured_experiment = str(self.get_parameter("experiment_profile").value)
+        experiment_profile_path = (
+            Path(configured_experiment)
+            if configured_experiment
+            else share / "config/experiment.yaml"
+        )
+        self._experiment_profile = ExperimentProfile(experiment_profile_path)
+        go_to_thresholds = self._experiment_profile.data["go_to_thresholds"]
         configured_profile = str(self.get_parameter("diagnostic_profile").value)
         profile_path = (
             Path(configured_profile)
@@ -181,11 +187,13 @@ class SessionInterfaceNode(Node):
             "publish_passthrough": self._publish_passthrough,
             "preflight": self._go_to_preflight,
             "timeout_sec": float(self.get_parameter("go_to_timeout_sec").value),
-            "dwell_sec": float(self.get_parameter("go_to_dwell_sec").value),
+            "linear_tolerance_m": float(go_to_thresholds["linear_mm"]) / 1000.0,
+            "angular_tolerance_rad": math.radians(float(go_to_thresholds["angular_deg"])),
+            "dwell_sec": float(go_to_thresholds["dwell_sec"]),
             "stall_timeout_sec": float(self.get_parameter("go_to_stall_timeout_sec").value),
             "progress_window_sec": float(self.get_parameter("go_to_progress_window_sec").value),
-            "linear_progress_threshold_mps": float(self.get_parameter("go_to_linear_progress_threshold_mps").value),
-            "angular_progress_threshold_radps": float(self.get_parameter("go_to_angular_progress_threshold_radps").value),
+            "linear_progress_threshold_mps": float(go_to_thresholds["linear_progress_mm_per_sec"]) / 1000.0,
+            "angular_progress_threshold_radps": math.radians(float(go_to_thresholds["angular_progress_deg_per_sec"])),
             "feedback_timeout_sec": float(self.get_parameter("go_to_feedback_timeout_sec").value),
             "feedback_finish_dispatch": self._dispatch_go_to_finish,
         }
@@ -280,13 +288,6 @@ class SessionInterfaceNode(Node):
         )
         configured_sessions_root = str(self.get_parameter("sessions_root").value)
         sessions_root = Path(configured_sessions_root) if configured_sessions_root else Path.cwd()
-        configured_experiment = str(self.get_parameter("experiment_profile").value)
-        experiment_profile_path = (
-            Path(configured_experiment)
-            if configured_experiment
-            else share / "config/experiment.yaml"
-        )
-        self._experiment_profile = ExperimentProfile(experiment_profile_path)
         configured_participant_profile = str(
             self.get_parameter("participant_interface_profile").value
         )

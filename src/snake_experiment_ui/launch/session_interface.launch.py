@@ -32,11 +32,8 @@ def generate_launch_description():
         DeclareLaunchArgument("rosbag_startup_timeout_sec", default_value="5.0"),
         DeclareLaunchArgument("rosbag_shutdown_timeout_sec", default_value="10.0"),
         DeclareLaunchArgument("go_to_timeout_sec", default_value="120.0"),
-        DeclareLaunchArgument("go_to_dwell_sec", default_value="0.5"),
         DeclareLaunchArgument("go_to_stall_timeout_sec", default_value="5.0"),
         DeclareLaunchArgument("go_to_progress_window_sec", default_value="1.0"),
-        DeclareLaunchArgument("go_to_linear_progress_threshold_mps", default_value="0.0005"),
-        DeclareLaunchArgument("go_to_angular_progress_threshold_radps", default_value="0.008726646259971648"),
         DeclareLaunchArgument("go_to_feedback_timeout_sec", default_value="2.0"),
     ]
     node = Node(
@@ -83,11 +80,8 @@ def generate_launch_description():
                     "rosbag_shutdown_timeout_sec"
                 ),
                 "go_to_timeout_sec": LaunchConfiguration("go_to_timeout_sec"),
-                "go_to_dwell_sec": LaunchConfiguration("go_to_dwell_sec"),
                 "go_to_stall_timeout_sec": LaunchConfiguration("go_to_stall_timeout_sec"),
                 "go_to_progress_window_sec": LaunchConfiguration("go_to_progress_window_sec"),
-                "go_to_linear_progress_threshold_mps": LaunchConfiguration("go_to_linear_progress_threshold_mps"),
-                "go_to_angular_progress_threshold_radps": LaunchConfiguration("go_to_angular_progress_threshold_radps"),
                 "go_to_feedback_timeout_sec": LaunchConfiguration("go_to_feedback_timeout_sec"),
             }
         ],

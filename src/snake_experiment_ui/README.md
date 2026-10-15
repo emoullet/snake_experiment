@@ -300,15 +300,27 @@ fresh joint states. Run only one robot stack at a time.
 Check-up and experiment Go-to motions share the following startup parameters
 (and launch arguments). All values must be finite and strictly positive.
 
+Arrival and progress thresholds are configured in `config/experiment.yaml`, in
+the `go_to_thresholds` section. Distances use millimetres and angles use
+degrees; the session interface converts them to SI units for the controller.
+
+| YAML key | Default | Meaning |
+| --- | --- | --- |
+| `linear_mm` | 5 mm | Maximum distance error from the target for arrival. |
+| `angular_deg` | 5 degrees | Maximum orientation error from the target for arrival. |
+| `dwell_sec` | 0.5 s | Continuous time both errors must stay within tolerance to succeed. |
+| `linear_progress_mm_per_sec` | 0.5 mm/s | Minimum decrease in distance error per second to count as progress. |
+| `angular_progress_deg_per_sec` | 0.5 degrees/s | Minimum decrease in orientation error per second to count as progress. |
+
+The remaining Go-to supervision controls are ROS parameters and launch
+arguments:
+
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `go_to_timeout_sec` | 120 s | Maximum total duration; explicit existing overrides still apply. |
 | `go_to_stall_timeout_sec` | 5 s | Maximum continuous interval of insufficient progress. |
 | `go_to_progress_window_sec` | 1 s | Sliding window for measuring reduction in target errors. |
-| `go_to_linear_progress_threshold_mps` | 0.0005 m/s | Minimum positional progress (0.5 mm/s). |
-| `go_to_angular_progress_threshold_radps` | 0.008726646259971648 rad/s | Minimum angular progress (0.5 degrees/s). |
 | `go_to_feedback_timeout_sec` | 2 s | Maximum interval without a valid `/ee_pose`, including startup. |
-| `go_to_dwell_sec` | 0.5 s | Stability interval within 5 mm and 5 degrees of the target. |
 
 Progress is the decrease in error towards the target, rather than absolute
 robot speed. Error values are interpolated at the start of the sliding window.

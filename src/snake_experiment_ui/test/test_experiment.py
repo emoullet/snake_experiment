@@ -668,6 +668,16 @@ class ExperimentControllerTest(unittest.TestCase):
 
     def test_profile_requires_mcap_and_standardised_instructions(self):
         profile = ExperimentProfile(self.source_profile)
+        self.assertEqual(
+            profile.data["go_to_thresholds"],
+            {
+                "linear_mm": 5.0,
+                "angular_deg": 5.0,
+                "dwell_sec": 0.5,
+                "linear_progress_mm_per_sec": 0.5,
+                "angular_progress_deg_per_sec": 0.5,
+            },
+        )
         self.assertEqual(profile.data["rosbag"]["storage"], "mcap")
         self.assertTrue(
             profile.data["phases"]["discovery"]["instructions"]["placeholder"]
@@ -681,6 +691,17 @@ class ExperimentControllerTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ExperimentError, "storage must be 'mcap'"):
             ExperimentProfile(invalid)
+
+        invalid_thresholds = self.root / "invalid-go-to-thresholds.yaml"
+        invalid_thresholds_data = yaml.safe_load(
+            self.source_profile.read_text(encoding="utf-8")
+        )
+        invalid_thresholds_data["go_to_thresholds"]["linear_mm"] = 0
+        invalid_thresholds.write_text(
+            yaml.safe_dump(invalid_thresholds_data), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ExperimentError, "go_to_thresholds"):
+            ExperimentProfile(invalid_thresholds)
 
         configurable = self.root / "configurable-experiment.yaml"
         configurable_data = yaml.safe_load(

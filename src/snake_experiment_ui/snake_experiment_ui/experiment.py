@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -70,6 +71,13 @@ DEFAULT_TRAINING_THRESHOLDS = {
     "start_angular_deg": 5.0,
     "success_dwell_sec": 0.5,
     "pose_freshness_sec": 0.5,
+}
+DEFAULT_GO_TO_THRESHOLDS = {
+    "linear_mm": 5.0,
+    "angular_deg": 5.0,
+    "dwell_sec": 0.5,
+    "linear_progress_mm_per_sec": 0.5,
+    "angular_progress_deg_per_sec": 0.5,
 }
 
 
@@ -189,6 +197,26 @@ class ExperimentProfile:
             validate_thresholds(thresholds)
         except TrainingError as error:
             raise ExperimentError(str(error)) from error
+        go_to_thresholds = data.get("go_to_thresholds")
+        if go_to_thresholds is None and allow_legacy:
+            go_to_thresholds = dict(DEFAULT_GO_TO_THRESHOLDS)
+            data["go_to_thresholds"] = go_to_thresholds
+        if (
+            not isinstance(go_to_thresholds, dict)
+            or set(go_to_thresholds) != set(DEFAULT_GO_TO_THRESHOLDS)
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+                for value in go_to_thresholds.values()
+            )
+        ):
+            raise ExperimentError(
+                "experiment.yaml go_to_thresholds must define finite positive "
+                "values for linear_mm, angular_deg, dwell_sec, "
+                "linear_progress_mm_per_sec, and angular_progress_deg_per_sec."
+            )
         rosbag = data.get("rosbag")
         if rosbag is None and allow_legacy:
             rosbag = {"storage": "mcap", "segment_pattern": "rosbag_{index:03d}"}
