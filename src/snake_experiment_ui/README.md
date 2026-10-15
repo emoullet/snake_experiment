@@ -125,6 +125,11 @@ the session records a warning.
    does the same for Baseline and Snake, including after Explanation done.
    If the browser blocks automatic playback with sound, press Play on the participant
    screen. Routine state updates do not restart videos.
+   During a trial, **Webcam live feed** uses the camera selected by the browser or
+   operating system; the participant interface has no webcam selector. To switch
+   cameras, choose another camera in the browser or system settings, allow camera
+   access if prompted, then reload the participant page. The **View 1–6** buttons
+   change only the robot viewpoint in the joystick previews, not the webcam feed.
 5. **Experiment:** complete the six discovery, training, and recording blocks
    in order. Acquisitions are saved as MCAP files; interrupted attempts can be
    retried or recorded as deviations.
