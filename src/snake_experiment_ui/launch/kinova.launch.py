@@ -17,6 +17,8 @@ def generate_launch_description():
     arguments = [
         DeclareLaunchArgument("overload_protection", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("overload_retreat_delay_sec", default_value="1.0"),
+        DeclareLaunchArgument("go_to_linear_tolerance_m", default_value="0.005"),
+        DeclareLaunchArgument("go_to_angular_tolerance_rad", default_value="0.08726646259971647"),
         DeclareLaunchArgument(
             "use_simulation", default_value="false", choices=["true", "false"],
             description="Use fake hardware instead of the physical robot (not Gazebo).",
@@ -58,7 +60,20 @@ def generate_launch_description():
         OpaqueFunction(function=protected_controllers, kwargs={"robot": "kinova"}),
         Node(package="cartesian_manager", executable="cartesian_manager_node",
              name="cartesian_manager",
-             parameters=[config, manager_protection_parameters("kinova")], output="screen"),
+             parameters=[
+                 config,
+                 manager_protection_parameters("kinova"),
+                 {
+                     "behaviours.pose_targets.position_tolerance": ParameterValue(
+                         LaunchConfiguration("go_to_linear_tolerance_m"),
+                         value_type=float,
+                     ),
+                     "behaviours.pose_targets.orientation_tolerance": ParameterValue(
+                         LaunchConfiguration("go_to_angular_tolerance_rad"),
+                         value_type=float,
+                     )
+                 },
+             ], output="screen"),
         Node(package="joy", executable="joy_node", name="joy_node", output="screen"),
         Node(
             package="rviz2", executable="rviz2", name="rviz2", output="screen",

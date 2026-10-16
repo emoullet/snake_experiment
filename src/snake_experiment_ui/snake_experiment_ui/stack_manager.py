@@ -31,6 +31,8 @@ class StackManager:
         robot_ip: str = "192.168.1.10",
         overload_protection: bool = False,
         overload_retreat_delay_sec: float = 1.0,
+        go_to_linear_tolerance_m: Optional[float] = None,
+        go_to_angular_tolerance_rad: Optional[float] = None,
         before_start: Callable[[], None] = lambda: None,
         monitoring_changed: Callable[[bool], None] = lambda active: None,
     ) -> None:
@@ -47,6 +49,18 @@ class StackManager:
         if not math.isfinite(overload_retreat_delay_sec) or overload_retreat_delay_sec < 0:
             raise StackError("Retreat delay must be finite and non-negative.")
         self._overload_retreat_delay_sec = overload_retreat_delay_sec
+        if go_to_linear_tolerance_m is not None and (
+            not math.isfinite(go_to_linear_tolerance_m)
+            or go_to_linear_tolerance_m <= 0
+        ):
+            raise StackError("Go-to linear tolerance must be finite and positive.")
+        self._go_to_linear_tolerance_m = go_to_linear_tolerance_m
+        if go_to_angular_tolerance_rad is not None and (
+            not math.isfinite(go_to_angular_tolerance_rad)
+            or go_to_angular_tolerance_rad <= 0
+        ):
+            raise StackError("Go-to angular tolerance must be finite and positive.")
+        self._go_to_angular_tolerance_rad = go_to_angular_tolerance_rad
         self._robot = robot
         self._robot_ip = robot_ip
         self._node_names = node_names
@@ -122,6 +136,16 @@ class StackManager:
             ]
             if self._robot == "kinova":
                 command.append(f"robot_ip:={self._robot_ip}")
+            if self._go_to_linear_tolerance_m is not None:
+                command.append(
+                    "go_to_linear_tolerance_m:="
+                    f"{self._go_to_linear_tolerance_m}"
+                )
+            if self._go_to_angular_tolerance_rad is not None:
+                command.append(
+                    "go_to_angular_tolerance_rad:="
+                    f"{self._go_to_angular_tolerance_rad}"
+                )
             if self._overload_protection:
                 command.append("overload_protection:=true")
                 command.append(f"overload_retreat_delay_sec:={self._overload_retreat_delay_sec}")

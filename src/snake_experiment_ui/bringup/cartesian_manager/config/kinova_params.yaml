@@ -35,7 +35,7 @@ qontrol_explorer:
     force_threshold: 10.0
 
     # Velocity parameters
-    command_max_linear_velocity: 0.05
+    command_max_linear_velocity: 0.15
     topic_max_linear_velocity: /explorer_user_interfaces/rqt_armcontrol/max_linear_speed
     command_max_angular_velocity: 0.4
     topic_max_angular_velocity: /explorer_user_interfaces/rqt_armcontrol/max_angular_speed
@@ -122,5 +122,5 @@ cartesian_manager:
         angular_kp: 1.0
         max_linear_velocity: 0.5
         max_angular_velocity: 0.2
-        position_tolerance: 0.005
-        orientation_tolerance: 0.08726646259971647
+        position_tolerance: 0.005 # Standalone fallback; session launch overrides this from experiment.yaml.
+        orientation_tolerance: 0.08726646259971647 # Standalone fallback; session launch overrides this from experiment.yaml.

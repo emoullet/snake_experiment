@@ -49,8 +49,8 @@ success_thresholds:
   pose_freshness_sec: 0.5 # Maximum age of pose feedback accepted for success evaluation.
 
 go_to_thresholds:
-  linear_mm: 5.0 # Maximum distance error from the target for arrival.
-  angular_deg: 5.0 # Maximum orientation error from the target for arrival.
+  linear_mm: 1.0 # Maximum distance error from the target for arrival.
+  angular_deg: 1.0 # Maximum orientation error from the target for arrival.
   dwell_sec: 0.5 # Continuous time both errors must stay within tolerance to succeed.
   linear_progress_mm_per_sec: 0.5 # Minimum decrease in distance error per second to count as progress.
   angular_progress_deg_per_sec: 0.5 # Minimum decrease in orientation error per second to count as progress.

@@ -10,6 +10,7 @@ from launch.substitutions import (
     PythonExpression,
 )
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 from snake_experiment_ui.protected_launch import protected_controllers, manager_protection_parameters
@@ -25,6 +26,8 @@ def generate_launch_description():
     arguments = [
         DeclareLaunchArgument("overload_protection", default_value="false", choices=["true", "false"]),
         DeclareLaunchArgument("overload_retreat_delay_sec", default_value="1.0"),
+        DeclareLaunchArgument("go_to_linear_tolerance_m", default_value="0.005"),
+        DeclareLaunchArgument("go_to_angular_tolerance_rad", default_value="0.08726646259971647"),
         DeclareLaunchArgument(
             "gui",
             default_value="true",
@@ -83,7 +86,20 @@ def generate_launch_description():
         executable="cartesian_manager_node",
         name="cartesian_manager",
         output="screen",
-        parameters=[controller_config, manager_protection_parameters("explorer")],
+        parameters=[
+            controller_config,
+            manager_protection_parameters("explorer"),
+            {
+                "behaviours.pose_targets.position_tolerance": ParameterValue(
+                    LaunchConfiguration("go_to_linear_tolerance_m"),
+                    value_type=float,
+                ),
+                "behaviours.pose_targets.orientation_tolerance": ParameterValue(
+                    LaunchConfiguration("go_to_angular_tolerance_rad"),
+                    value_type=float,
+                )
+            },
+        ],
     )
     joy_node = Node(package="joy", executable="joy_node", name="joy_node")
 

@@ -308,6 +308,8 @@ Check-up and experiment Go-to motions share the following startup parameters
 Arrival and progress thresholds are configured in `config/experiment.yaml`, in
 the `go_to_thresholds` section. Distances use millimetres and angles use
 degrees; the session interface converts them to SI units for the controller.
+It also passes both arrival thresholds to `cartesian_manager`, so its pose-target
+controller does not stop correcting before the Go-to thresholds are met.
 
 | YAML key | Default | Meaning |
 | --- | --- | --- |

@@ -158,6 +158,12 @@ class SessionInterfaceNode(Node):
             use_simulation=use_simulation,
             overload_protection=True,
             overload_retreat_delay_sec=float(self.get_parameter("overload_retreat_delay_sec").value),
+            go_to_linear_tolerance_m=(
+                float(go_to_thresholds["linear_mm"]) / 1000.0
+            ),
+            go_to_angular_tolerance_rad=math.radians(
+                float(go_to_thresholds["angular_deg"])
+            ),
             before_start=self._before_stack_start,
             monitoring_changed=self._controller_lifecycle_events.put,
             startup_timeout_sec=float(

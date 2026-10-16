@@ -227,6 +227,8 @@ class StackManagerTest(unittest.TestCase):
                 manager = StackManager(
                     node_names=lambda: names, robot="kinova", robot_ip="192.168.2.10",
                     use_simulation=simulated, popen_factory=create_process,
+                    go_to_linear_tolerance_m=0.001,
+                    go_to_angular_tolerance_rad=0.017453292519943295,
                 )
                 state = manager.start()
                 manager.start()
@@ -234,6 +236,8 @@ class StackManagerTest(unittest.TestCase):
                 self.assertEqual(processes[0].command, [
                     "ros2", "launch", "snake_experiment_ui", "kinova.launch.py",
                     f"use_simulation:={str(simulated).lower()}", "robot_ip:=192.168.2.10",
+                    "go_to_linear_tolerance_m:=0.001",
+                    "go_to_angular_tolerance_rad:=0.017453292519943295",
                 ])
                 self.assertTrue(processes[0].start_new_session)
                 self.assertEqual(state["robot"], "kinova")
@@ -273,6 +277,14 @@ class StackManagerTest(unittest.TestCase):
         for value in (-1.0, float("inf"), float("nan")):
             with self.assertRaisesRegex(StackError, "Retreat delay"):
                 StackManager(node_names=lambda: [], overload_retreat_delay_sec=value)
+        for value in (0.0, -0.1, float("inf"), float("nan")):
+            with self.assertRaisesRegex(StackError, "Go-to angular tolerance"):
+                StackManager(
+                    node_names=lambda: [], go_to_angular_tolerance_rad=value
+                )
+        for value in (0.0, -0.001, float("inf"), float("nan")):
+            with self.assertRaisesRegex(StackError, "Go-to linear tolerance"):
+                StackManager(node_names=lambda: [], go_to_linear_tolerance_m=value)
         configurations = [{"robot": "unknown"}] + [
             {"robot": "kinova", "robot_ip": address}
             for address in ("", "robot.local", "::1", "256.0.0.1", "192.168.1.10/24",

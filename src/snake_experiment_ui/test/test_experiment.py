@@ -671,8 +671,8 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(
             profile.data["go_to_thresholds"],
             {
-                "linear_mm": 5.0,
-                "angular_deg": 5.0,
+                "linear_mm": 1.0,
+                "angular_deg": 1.0,
                 "dwell_sec": 0.5,
                 "linear_progress_mm_per_sec": 0.5,
                 "angular_progress_deg_per_sec": 0.5,
