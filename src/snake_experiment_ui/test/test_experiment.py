@@ -943,6 +943,39 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertIsNotNone(state["training"]["current_trial"]["ready_at_utc"])
         self.controller.stop_training_attempt("mode_1_training")
 
+    def test_timeout_tick_skips_busy_workflow_and_claims_expiry_on_next_tick(self):
+        self.configure_trial_timeout("training", 1.0)
+        self.start_first_training_attempt()
+        self.monotonic_value += 1.0
+        locked, release, returned = threading.Event(), threading.Event(), threading.Event()
+        results = []
+        def lifecycle():
+            with self.controller._lock:
+                locked.set()
+                release.wait(2)
+        def timer():
+            results.append(self.controller.tick_trial_timeout())
+            returned.set()
+        action = threading.Thread(target=lifecycle)
+        callback = threading.Thread(target=timer)
+        action.start()
+        try:
+            self.assertTrue(locked.wait(1))
+            callback.start()
+            self.assertTrue(returned.wait(.2), "ROS timer waited for the workflow lock")
+            self.assertEqual(results, [False])
+            self.assertTrue(self.rosbag.active)
+        finally:
+            release.set()
+            action.join(2)
+            if callback.ident is not None:
+                callback.join(2)
+        self.assertTrue(self.controller.tick_trial_timeout())
+        self.assertFalse(self.controller.tick_trial_timeout())
+        attempt = self.controller.snapshot()["training"]["current_trial"]["attempts"][0]
+        self.assertEqual(attempt["stop_reason"], "trial_timeout")
+        self.assertFalse(self.rosbag.active)
+
     def test_timeout_expires_without_pose_and_retry_resets(self):
         """Expire independently of pose updates, then reset the retry timer."""
         self.configure_trial_timeout("training", 2.5)

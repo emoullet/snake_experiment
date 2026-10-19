@@ -133,6 +133,7 @@ class ProtectionCallbackConcurrencyTest(unittest.TestCase):
             _parameter_list_client=Mock(), _parameter_get_client=Mock(),
             _checkup=checkup, _experiment=experiment, _diagnostics=Mock(),
             _protection=Mock(),
+            _closing=False, _checkup_go_to=Mock(), _experiment_go_to=Mock(),
         )
         node._protection.snapshot.return_value = {"blocked": False}
         for mode in ("baseline", "snake"):
@@ -144,6 +145,7 @@ class ProtectionCallbackConcurrencyTest(unittest.TestCase):
                         locked.set()
                         release.wait(2)
                 def ros_callbacks():
+                    SessionInterfaceNode._supervise_go_to(node)
                     SessionInterfaceNode._refresh_services(node)
                     SessionInterfaceNode._record_ee_pose(node, object())
                     SessionInterfaceNode._record_mapper_local_mode(node, SimpleNamespace(data="b1"))

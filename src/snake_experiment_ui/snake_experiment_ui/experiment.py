@@ -1630,9 +1630,13 @@ class ExperimentController:
         )
 
     def tick_trial_timeout(self) -> bool:
-        """Finish timed-out attempts even when pose feedback stops."""
+        """Check deadlines without blocking the ROS executor on lifecycle work."""
         worker = None
-        with self._lock:
+        if not self._lock.acquire(blocking=False):
+            # Activation/finalisation may hold this lock while waiting for a
+            # process. Keep protection callbacks running; retry next tick.
+            return False
+        try:
             if (
                 self._progress is None
                 or self._progress.get("workflow") != "block_running"
@@ -1650,6 +1654,8 @@ class ExperimentController:
             worker = self._claim_trial_timeout_locked(
                 block, trial, attempt, self._monotonic_clock()
             )
+        finally:
+            self._lock.release()
         if worker is None:
             return False
         worker.start()
