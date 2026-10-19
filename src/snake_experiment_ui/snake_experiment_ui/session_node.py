@@ -410,7 +410,11 @@ class SessionInterfaceNode(Node):
     def _record_protection(self, message):
         # This callback only updates a small status object and enqueues events.
         # No process wait, file I/O or recorder shutdown runs in the ROS executor.
-        state = self._protection.record(message, self.get_clock().now().nanoseconds * 1e-9)
+        # The manager may use simulated ROS time while this UI node uses system
+        # time. Freshness is measured with the monotonic receipt clock in
+        # ProtectionState, so comparing these nodes' ROS stamps can reject
+        # every otherwise valid status during simulation.
+        state = self._protection.record(message)
         identity = (state.get("instance"), state.get("event"), state["state"], state["reason"])
         if identity != self._protection_last_enqueued:
             self._protection_events.put(state)
