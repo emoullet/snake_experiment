@@ -160,6 +160,10 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
 .training-metrics article { padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: #f7f9fc; }
 .training-metrics span, .training-metrics strong { display: block; }
 .training-metrics span { margin-bottom: 4px; color: var(--muted); font-size: .76rem; }
+.trial-countdown { display: flex; align-items: baseline; gap: 12px; margin: 14px 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: 11px; background: #f7f9fc; }
+.trial-countdown[hidden] { display: none; }
+.trial-countdown span { color: var(--muted); font-size: .82rem; font-weight: 700; }
+.trial-countdown strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
 .decision-card { margin-top: 18px; padding: 16px; color: var(--amber); border-radius: 11px; background: var(--amber-soft); }
 .decision-card p { margin: 6px 0 0; }
 .incident-form textarea { flex: 1 1 360px; min-height: 76px; padding: 11px; resize: vertical; color: var(--ink); font: inherit; border: 1px solid #bdcad9; border-radius: 9px; background: white; }

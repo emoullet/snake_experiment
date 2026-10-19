@@ -554,6 +554,9 @@ class SessionInterfaceNode(Node):
         if not self._closing:
             self._checkup_go_to.tick()
             self._experiment_go_to.tick()
+            experiment = getattr(self, "_experiment", None)
+            if experiment is not None:
+                experiment.tick_trial_timeout()
 
     def _dispatch_go_to_finish(self, callback, record):
         # Restoring a mapper waits on process discovery. Never run that wait in

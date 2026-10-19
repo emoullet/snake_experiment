@@ -1,4 +1,10 @@
 const MODE_LABELS = { baseline: "Baseline", snake: "Snake" };
+const formatCountdown = (seconds) => {
+  const wholeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = String(Math.floor(wholeSeconds / 60)).padStart(2, "0");
+  const remainder = String(wholeSeconds % 60).padStart(2, "0");
+  return `${minutes}:${remainder}`;
+};
 
 class SessionInterface {
   constructor() {
@@ -703,6 +709,11 @@ class SessionInterface {
     const recording = workflow === "recording";
     const completed = trials.filter((trial) => ["completed", "completed_with_deviation"].includes(trial.status)).length;
     const currentAttempt = current?.attempts?.length ? current.attempts[current.attempts.length - 1] : null;
+    const timeRemaining = Number.isFinite(training.time_remaining_sec)
+      ? Math.max(0, Math.ceil(training.time_remaining_sec)) : null;
+    const timeRemainingLabel = timeRemaining === null
+      ? ""
+      : formatCountdown(timeRemaining);
     const errorValue = (error, unit) => error ? `${Number(error[unit]).toFixed(2)} ${unit.endsWith("mm") ? "mm" : "deg"}` : "—";
     const trialRows = trials.map((trial) => {
       const statusClass = trial.status === "completed" ? "pill--active" : trial.status === "completed_with_deviation" ? "pill--warning" : trial.status === "decision_required" ? "pill--error" : "pill--neutral";
@@ -749,6 +760,7 @@ class SessionInterface {
           <section class="card"><div class="section-heading"><div><p class="step-number">Current trial</p><h2>${current ? `Trial ${current.id} · cycle ${current.cycle} · target ${current.target_start} → ${current.target_end}` : experiment.can_end ? "All trials resolved" : "Prepare the next trial"}</h2></div><span class="supporting-copy">${current ? this.escape(current.folder) : this.escape(block.folder)}</span></div>
             <div class="training-metrics"><article><span>Start linear error</span><strong>${errorValue(live.start_error, "linear_mm")}</strong></article><article><span>Start angular error</span><strong>${errorValue(live.start_error, "angular_deg")}</strong></article><article><span>Target linear error</span><strong>${errorValue(live.target_error, "linear_mm")}</strong></article><article><span>Target angular error</span><strong>${errorValue(live.target_error, "angular_deg")}</strong></article></div>
             <p class="supporting-copy">${live.error ? this.escape(live.error) : current ? `Place the robot at target_out_${current.target_start}. Arrival success is measured at target_${current.target_end}.` : "The mapper remains active between trials."}</p>
+            <div class="trial-countdown" role="timer" aria-live="off" ${timeRemaining === null ? "hidden" : ""}><span>Time remaining</span><strong>${timeRemainingLabel}</strong></div><p class="inline-warning" role="status" ${training.time_limit_reached ? "" : "hidden"}>Time limit reached. Retry the trial or continue with a deviation.</p>
             <div class="training-actions"><button class="secondary-button" data-block-control="${this.escape(block.id)}" data-active="true" type="button" ${experiment.control_active ? "hidden" : ""} ${this.busy || recording || experiment.go_to?.motion?.active ? "disabled" : ""}>Activate control</button><button class="secondary-button" data-trial-action="prepare" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canPrepare ? "disabled" : ""}>Prepare next trial and move to start</button><button class="primary-button" data-trial-action="start" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !canStart ? "disabled" : ""}>Start recording</button><button class="reject-button" data-trial-action="stop" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || !recording ? "disabled" : ""}>Stop recording</button></div>
             <div class="decision-card" ${workflow === "decision_required" ? "" : "hidden"}><strong>This attempt is invalid.</strong><p>Retry the same trial or continue with a recorded protocol deviation.</p><div class="training-actions"><button class="secondary-button" data-trial-resolve="retry" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Retry trial</button><button class="reject-button" data-trial-resolve="advance_with_deviation" data-trial-phase="${phase}" data-block-id="${this.escape(block.id)}" type="button" ${this.busy || workflow !== "decision_required" ? "disabled" : ""}>Continue with deviation</button></div></div>
             <p class="inline-error" ${block.error ? "" : "hidden"}>${this.escape(block.error || "")}</p></section>

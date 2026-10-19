@@ -17,6 +17,9 @@
   const discoveryPreview = document.getElementById("participant-discovery-preview");
   const trialTitle = document.getElementById("participant-trial-title");
   const trialTask = document.getElementById("participant-task");
+  const trialTimeRemaining = document.getElementById("participant-time-remaining");
+  const trialCountdown = document.getElementById("participant-time-limit");
+  const trialTimeoutMessage = document.getElementById("participant-timeout-message");
   const linearDistance = document.getElementById("participant-linear-distance");
   const angularDistance = document.getElementById("participant-angular-distance");
   const localMode = document.getElementById("participant-local-mode");
@@ -58,6 +61,12 @@
   let lastSuccessEventId = null;
   let receivedWebSocketState = false;
   const setText = (element, value) => { if (element.textContent !== value) element.textContent = value; };
+  const formatCountdown = (seconds) => {
+    const wholeSeconds = Math.max(0, Math.ceil(seconds));
+    const minutes = String(Math.floor(wholeSeconds / 60)).padStart(2, "0");
+    const remainder = String(wholeSeconds % 60).padStart(2, "0");
+    return `${minutes}:${remainder}`;
+  };
   video.addEventListener("error", () => { videoError.hidden = false; });
   video.addEventListener("loadedmetadata", () => { videoError.hidden = true; });
   modeVideo.addEventListener("error", () => { modeVideoError.hidden = false; });
@@ -305,6 +314,12 @@
       const phaseName = state.phase === "recording" ? "recording" : "training";
       setText(trialTitle, `${modeName} ${phaseName}`);
       setText(trialTask, state.task || "Waiting for next trial");
+      const remaining = Number.isFinite(state.time_remaining_sec)
+        ? Math.max(0, Math.ceil(state.time_remaining_sec)) : null;
+      const countdown = remaining === null ? "" : formatCountdown(remaining);
+      setText(trialTimeRemaining, countdown);
+      trialCountdown.hidden = remaining === null;
+      trialTimeoutMessage.hidden = !state.time_limit_reached;
       setText(linearDistance, Number.isFinite(state.linear_mm) ? `${state.linear_mm.toFixed(1)} mm` : "—");
       setText(angularDistance, Number.isFinite(state.angular_deg) ? `${state.angular_deg.toFixed(1)}°` : "—");
       setText(localMode, state.local_mode || "Unknown");

@@ -642,15 +642,35 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
 
 class SessionTemplateTest(unittest.TestCase):
     def test_participant_view_c_has_stable_preview_and_no_robot_controls(self):
+        """Check countdown markup and client bindings for both views."""
         package_root = Path(__file__).parents[1] / "snake_experiment_ui"
-        html = (package_root / "templates/participant_index.html").read_text(encoding="utf-8")
-        script = (package_root / "static/participant_app.js").read_text(encoding="utf-8")
-        style = (package_root / "static/participant_style.css").read_text(encoding="utf-8")
+        html = (package_root / "templates/participant_index.html").read_text(
+            encoding="utf-8"
+        )
+        script = (package_root / "static/participant_app.js").read_text(
+            encoding="utf-8"
+        )
+        style = (package_root / "static/participant_style.css").read_text(
+            encoding="utf-8"
+        )
+        operator_html = (
+            package_root / "templates/session_index.html"
+        ).read_text(
+            encoding="utf-8"
+        )
+        operator_script = (package_root / "static/session_app.js").read_text(
+            encoding="utf-8"
+        )
+        operator_style = (package_root / "static/session_style.css").read_text(
+            encoding="utf-8"
+        )
         for element in (
             "participant-trial", "participant-task", "participant-linear-distance",
             "participant-angular-distance", "participant-local-mode", "participant-horizontal-view",
             "participant-vertical-view", "participant-snake-indicator",
             "participant-camera-video", "participant-camera-retry",
+            "participant-time-limit", "participant-time-remaining",
+            "participant-timeout-message",
         ):
             self.assertIn(f'id="{element}"', html)
         self.assertIn('getUserMedia({ video: true, audio: false })', script)
@@ -665,7 +685,7 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('workspace.classList.toggle("participant-workspace--trial", showC)', script)
         self.assertIn('.participant-workspace--trial { width: min(1540px, calc(100% - 32px)); }', style)
         self.assertIn('grid-template-columns: minmax(0, 1.1fr) minmax(250px, 1fr)', style)
-        self.assertIn('participant_style.css?v=participant-overload-1', html)
+        self.assertIn('participant_style.css?v=participant-timeout-1', html)
         self.assertIn('participant_mapping.bundle.js?v=participant-mapping-7', html)
         self.assertIn('data-mapping-source class="pill pill--neutral"', html)
         self.assertIn('new CustomEvent("participant:state", { detail: state })', script)
@@ -675,7 +695,15 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn('successEventInitialized = true', script)
         self.assertIn('await successSound.play()', script)
         self.assertIn('soundRetry.hidden = false', script)
-        self.assertIn('participant_app.js?v=participant-overload-3', html)
+        self.assertIn('participant_app.js?v=participant-timeout-1', html)
+        self.assertIn('state.time_remaining_sec', script)
+        self.assertIn('state.time_limit_reached', script)
+        self.assertIn('Time limit reached.', html)
+        self.assertIn('trial-countdown', operator_script)
+        self.assertIn('training.time_remaining_sec', operator_script)
+        self.assertIn('training.time_limit_reached', operator_script)
+        self.assertIn('.trial-countdown', operator_style)
+        self.assertIn('session_app.js?v=session-app-timeout-1', operator_html)
         self.assertTrue((package_root / "static/mario_coin_sound.mp3").is_file())
         self.assertTrue((package_root / "static/tarkov_reserve_alarm.mp3").is_file())
         self.assertIn('new Audio("/session-static/tarkov_reserve_alarm.mp3")', script)
@@ -849,8 +877,8 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertIn("successfully reached", script)
         self.assertIn(".goto-grid button.is-complete", style)
         self.assertIn(".goto-grid button.is-timed-out", style)
-        self.assertIn("session_style.css?v=session-style-3", html)
-        self.assertIn("session_app.js?v=session-app-12", html)
+        self.assertIn("session_style.css?v=session-style-timeout-1", html)
+        self.assertIn("session_app.js?v=session-app-timeout-1", html)
         self.assertIn('"Cache-Control": "no-store, max-age=0"', web_app)
         self.assertIn("NoCacheStaticFiles", web_app)
         self.assertLess(

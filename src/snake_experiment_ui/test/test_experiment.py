@@ -430,6 +430,36 @@ class ExperimentControllerTest(unittest.TestCase):
                 self.controller.complete_mode_explanation(block_id)
         return self.controller.set_control(block_id, active)
 
+    def configure_trial_timeout(self, phase, value):
+        """Replace the fixture profile and controller timeout setting."""
+        data = yaml.safe_load(self.source_profile.read_text(encoding="utf-8"))
+        data["phases"][phase]["trial_timeout_sec"] = value
+        self.source_profile = self.root / f"experiment-timeout-{phase}.yaml"
+        self.source_profile.write_text(
+            yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
+        )
+        self.controller = ExperimentController(
+            ExperimentProfile(self.source_profile),
+            self.stack,
+            self.modes,
+            self.rosbag,
+            utc_clock=self.clock,
+            monotonic_clock=lambda: self.monotonic_value,
+            thread_factory=ImmediateThread,
+            go_to_controller=self.go_to,
+            snake_button_provider=lambda: self.snake_held,
+        )
+
+    def start_first_training_attempt(self):
+        """Start a first trial after meeting the experiment prerequisites."""
+        self.prepare_session()
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.complete_go_to("target_out_1")
+        return self.controller.start_training_attempt("mode_1_training")
+
     def complete_training(self, block_id):
         self.complete_trials(block_id, "training")
 
@@ -715,6 +745,42 @@ class ExperimentControllerTest(unittest.TestCase):
         recording_block = profile.blocks("snake->baseline")[3]
         self.assertEqual(len(recording_block["training_trials"]), 9)
 
+    def test_profile_timeout_values_and_legacy_defaults(self):
+        """Normalize disabled values and reject invalid profile deadlines."""
+        source = yaml.safe_load(
+            self.source_profile.read_text(encoding="utf-8")
+        )
+        values = ((None, None), ("none", None), (4, 4.0))
+        for configured, expected in values:
+            with self.subTest(configured=configured):
+                data = json.loads(json.dumps(source))
+                data["phases"]["training"]["trial_timeout_sec"] = configured
+                data["phases"]["recording"]["trial_timeout_sec"] = 7.5
+                path = self.root / f"profile-timeout-{configured}.yaml"
+                path.write_text(yaml.safe_dump(data), encoding="utf-8")
+                profile = ExperimentProfile(path)
+                settings = profile.data["phases"]["training"]
+                self.assertEqual(settings["trial_timeout_sec"], expected)
+                recording = profile.blocks("snake->baseline")[3]
+                recording_settings = recording["settings"]
+                self.assertEqual(recording_settings["trial_timeout_sec"], 7.5)
+
+        legacy_data = json.loads(json.dumps(source))
+        legacy_data["phases"]["training"].pop("trial_timeout_sec")
+        legacy_path = self.root / "profile-timeout-legacy.yaml"
+        legacy_path.write_text(yaml.safe_dump(legacy_data), encoding="utf-8")
+        profile = ExperimentProfile(legacy_path)
+        self.assertIsNone(
+            profile.data["phases"]["training"]["trial_timeout_sec"]
+        )
+
+        invalid_data = json.loads(json.dumps(source))
+        invalid_data["phases"]["recording"]["trial_timeout_sec"] = 0
+        invalid_path = self.root / "profile-timeout-invalid.yaml"
+        invalid_path.write_text(yaml.safe_dump(invalid_data), encoding="utf-8")
+        with self.assertRaisesRegex(ExperimentError, "trial_timeout_sec"):
+            ExperimentProfile(invalid_path)
+
     def test_discovery_bootstrap_starts_stack_without_control_or_recording(self):
         self.mark_as_new_session()
         self.controller.prepare(self.participant)
@@ -875,6 +941,83 @@ class ExperimentControllerTest(unittest.TestCase):
         state = self.controller.start_training_attempt("mode_1_training")
         self.assertEqual(state["training"]["workflow"], "recording")
         self.assertIsNotNone(state["training"]["current_trial"]["ready_at_utc"])
+        self.controller.stop_training_attempt("mode_1_training")
+
+    def test_timeout_expires_without_pose_and_retry_resets(self):
+        """Expire independently of pose updates, then reset the retry timer."""
+        self.configure_trial_timeout("training", 2.5)
+        state = self.start_first_training_attempt()
+        self.assertAlmostEqual(state["training"]["time_remaining_sec"], 2.5)
+        self.assertAlmostEqual(
+            self.controller.participant_snapshot()["time_remaining_sec"], 2.5
+        )
+
+        self.monotonic_value += 1.0
+        state = self.controller.snapshot()
+        self.assertAlmostEqual(state["training"]["time_remaining_sec"], 1.5)
+        self.monotonic_value += 1.5
+        self.assertEqual(
+            self.controller.snapshot()["training"]["time_remaining_sec"], 0.0
+        )
+        self.assertTrue(self.controller.tick_trial_timeout())
+
+        state = self.controller.snapshot()
+        attempt = state["training"]["current_trial"]["attempts"][0]
+        self.assertEqual(state["training"]["workflow"], "decision_required")
+        self.assertEqual(attempt["status"], "invalid")
+        self.assertEqual(attempt["stop_reason"], "trial_timeout")
+        self.assertFalse(attempt["technical_outcome"]["completed"])
+        self.assertFalse(self.rosbag.active)
+        participant = self.controller.participant_snapshot()
+        self.assertTrue(participant["time_limit_reached"])
+
+        self.controller.resolve_training_attempt("mode_1_training", "retry")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.complete_go_to("target_out_1")
+        retry = self.controller.start_training_attempt("mode_1_training")
+        attempts = retry["training"]["current_trial"]["attempts"]
+        self.assertEqual(len(attempts), 2)
+        self.assertAlmostEqual(
+            retry["training"]["time_remaining_sec"], 2.5
+        )
+
+    def test_timeout_allows_early_success_and_fails_at_deadline(self):
+        """Allow earlier success, but let expiry win at the exact deadline."""
+        self.configure_trial_timeout("training", 2.0)
+        self.start_first_training_attempt()
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+        state = self.controller.snapshot()
+        first_attempt = state["training"]["trials"][0]["attempts"][0]
+        self.assertEqual(first_attempt["stop_reason"], "success_threshold")
+        self.assertEqual(state["training"]["trials"][0]["status"], "completed")
+
+        self.controller.prepare_training_trial("mode_1_training")
+        self.complete_go_to("target_out_2")
+        self.controller.start_training_attempt("mode_1_training")
+        self.controller.update_ee_pose(self.pose("target_3"))
+        self.monotonic_value += 2.0
+        self.controller.update_ee_pose(self.pose("target_3"))
+        state = self.controller.snapshot()
+        second_attempt = state["training"]["current_trial"]["attempts"][0]
+        self.assertEqual(state["training"]["workflow"], "decision_required")
+        self.assertEqual(second_attempt["stop_reason"], "trial_timeout")
+
+    def test_none_timeout_disables_deadline_and_countdown(self):
+        """Disable timeout enforcement and countdown with none."""
+        self.configure_trial_timeout("training", "none")
+        state = self.start_first_training_attempt()
+        self.assertIsNone(state["training"]["trial_timeout_sec"])
+        self.assertIsNone(state["training"]["time_remaining_sec"])
+        self.assertIsNone(
+            self.controller.participant_snapshot()["time_remaining_sec"]
+        )
+        self.monotonic_value += 100.0
+        self.assertFalse(self.controller.tick_trial_timeout())
+        self.assertEqual(
+            self.controller.snapshot()["training"]["workflow"], "recording"
+        )
         self.controller.stop_training_attempt("mode_1_training")
 
     def test_participant_view_c_shows_target_only_during_recording(self):

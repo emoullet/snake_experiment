@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Snake experiment · Participant</title>
-    <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-3" />
-    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-overload-1" />
+    <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-timeout-1" />
+    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-timeout-1" />
     <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
-    <script src="/session-static/participant_app.js?v=participant-overload-3" defer></script>
+    <script src="/session-static/participant_app.js?v=participant-timeout-1" defer></script>
     <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-7" defer></script>
   </head>
   <body>
@@ -52,7 +52,7 @@
         <button id="participant-sound-retry" class="secondary-button" type="button" hidden>Enable success sound</button>
         <div class="participant-trial-grid">
           <div class="participant-trial-information">
-            <div class="participant-task"><span>Current task</span><strong id="participant-task">Waiting for next trial</strong></div>
+            <div class="participant-task"><span>Current task</span><strong id="participant-task">Waiting for next trial</strong><div id="participant-time-limit" class="participant-time-limit" role="timer" aria-live="off" hidden><span>Time remaining</span><strong id="participant-time-remaining">--:--</strong></div><p id="participant-timeout-message" class="participant-timeout-message" role="status" hidden>Time limit reached. Please wait for the experimenter.</p></div>
             <div class="participant-metrics">
               <div><span>Linear distance</span><strong id="participant-linear-distance">—</strong></div>
               <div><span>Angular distance</span><strong id="participant-angular-distance">—</strong></div>

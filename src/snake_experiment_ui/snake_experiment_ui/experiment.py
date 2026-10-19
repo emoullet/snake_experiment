@@ -26,6 +26,7 @@ from .training import (
     TrainingError,
     build_trials,
     effective_thresholds,
+    normalise_trial_timeout,
     pose_error,
     validate_thresholds,
     validate_training_settings,
@@ -46,6 +47,7 @@ REQUIRED_SEQUENCE = (
 DEFAULT_TRAINING_SETTINGS = {
     "cycles": 2,
     "target_sequence": [1, 2, 3, 1],
+    "trial_timeout_sec": None,
     "rosbag_topics": ["/joy", "/ee_pose", "/joint_states"],
     "trial_folder_pattern": (
         "{mode}_training_trial_{trial_id:03d}_{cycle:02d}_"
@@ -56,6 +58,7 @@ DEFAULT_TRAINING_SETTINGS = {
 DEFAULT_RECORDING_SETTINGS = {
     "cycles": 10,
     "target_sequence": [1, 2, 3, 1],
+    "trial_timeout_sec": None,
     "rosbag_topics": ["/joy", "/ee_pose", "/joint_states"],
     "trial_folder_pattern": (
         "{mode}_trial_{trial_id:03d}_{cycle:02d}_"
@@ -178,6 +181,15 @@ class ExperimentProfile:
                 phases["training"].setdefault(key, json.loads(json.dumps(value)))
             for key, value in DEFAULT_RECORDING_SETTINGS.items():
                 phases["recording"].setdefault(key, json.loads(json.dumps(value)))
+        for phase in TRIAL_PHASES:
+            try:
+                phases[phase]["trial_timeout_sec"] = normalise_trial_timeout(
+                    phases[phase].get("trial_timeout_sec")
+                )
+            except TrainingError as error:
+                raise ExperimentError(
+                    f"Invalid trial_timeout_sec for phase '{phase}': {error}"
+                ) from error
         try:
             validate_training_settings(phases["training"])
             validate_training_settings(
@@ -342,6 +354,7 @@ class ExperimentController:
         self._latest_pose: Optional[dict] = None
         self._latest_pose_monotonic: Optional[float] = None
         self._video_play_request: Optional[dict] = None
+        self._active_trial_timer: Optional[dict] = None
 
     def prepare(self, participant: dict) -> dict:
         """Load or create durable progress without starting a ROS process."""
@@ -375,6 +388,7 @@ class ExperimentController:
             if late_initialization:
                 self._record_late_initialization(folder, profile_path)
             self._profile = profile
+            self._active_trial_timer = None
             self._calibration = self._load_calibration(folder)
             progress_path = folder / "experiment_progress.json"
             if progress_path.is_file():
@@ -500,8 +514,17 @@ class ExperimentController:
             current = self._progress.get("current_block") if self._progress else None
             if current:
                 block = self._block(current)
-                if (block.get("control_active") or block.get("current_segment")
-                    or block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload")):
+                if (
+                    block.get("control_active")
+                    or block.get("current_segment")
+                    or block.get("training_workflow")
+                    in (
+                        "recording",
+                        "stopping_success",
+                        "stopping_overload",
+                        "stopping_timeout",
+                    )
+                ):
                     return False
             return True
 
@@ -567,7 +590,11 @@ class ExperimentController:
                 )
             )
             self._error = block["error"]
-            if block["phase"] in TRIAL_PHASES and block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload"):
+            workflow = block.get("training_workflow")
+            if block["phase"] in TRIAL_PHASES and workflow in (
+                "recording", "stopping_success", "stopping_overload",
+                "stopping_timeout",
+            ):
                 trial = self._current_training_trial(block)
                 attempt = self._current_training_attempt(trial)
                 attempt["status"] = "interrupted"
@@ -581,7 +608,14 @@ class ExperimentController:
                 block["training_workflow"] = "stopping_overload"
                 # Persist the interruption before any potentially slow recorder call.
                 self._persist_training(folder, block, trial, attempt)
-                self._finish_training_attempt(block, folder, source, successful=False)
+                self._finish_training_attempt(
+                    block,
+                    folder,
+                    "trial_timeout"
+                    if workflow == "stopping_timeout"
+                    else source,
+                    successful=False,
+                )
             elif block["phase"] == "discovery" and block.get("current_segment"):
                 self._deactivate_discovery(block, folder, source)
             else:
@@ -739,6 +773,11 @@ class ExperimentController:
                 )
                 recording = workflow == "recording"
                 live = active.get("training_live", {})
+                current_attempt = (
+                    trial["attempts"][-1]
+                    if trial and trial.get("attempts")
+                    else None
+                )
                 target_error = live.get("target_error") if recording and live.get("pose_fresh") else None
                 latest_completed = max(
                     (
@@ -771,6 +810,12 @@ class ExperimentController:
                         else "Waiting for next trial"
                     ),
                     "state": "Recording" if recording else "Target reached" if reached else "Waiting",
+                    "time_remaining_sec": self._trial_time_remaining_locked(
+                        active, current_attempt
+                    ),
+                    "time_limit_reached": self._trial_timed_out(
+                        active, current_attempt
+                    ),
                     "success_event_id": (
                         f"{active['id']}:{latest_completed['id']}"
                         if latest_completed else None
@@ -881,6 +926,7 @@ class ExperimentController:
             if block.get("training_workflow") in (
                 "recording",
                 "stopping_success",
+                "stopping_timeout",
                 "incident_review_required",
             ):
                 raise ExperimentError(
@@ -1067,10 +1113,20 @@ class ExperimentController:
                 except Exception as error:
                     cleanup_errors.append(f"stack: {error}")
             elif block["phase"] in TRIAL_PHASES:
-                if block.get("training_workflow") in ("recording", "stopping_success"):
+                workflow = block.get("training_workflow")
+                if workflow in (
+                    "recording",
+                    "stopping_success",
+                    "stopping_timeout",
+                ):
                     try:
                         self._finish_training_attempt(
-                            block, folder, "operator_abort", successful=False
+                            block,
+                            folder,
+                            "trial_timeout"
+                            if workflow == "stopping_timeout"
+                            else "operator_abort",
+                            successful=False,
                         )
                     except Exception as error:
                         cleanup_errors.append(str(error))
@@ -1114,7 +1170,10 @@ class ExperimentController:
             if block["phase"] in TRIAL_PHASES:
                 if not active:
                     raise ExperimentError("Stop the acquisition or use the protection stop before disabling trial control.")
-                if block.get("training_workflow") in ("recording", "stopping_success", "stopping_overload") or (self._go_to and self._go_to.active()):
+                if block.get("training_workflow") in (
+                    "recording", "stopping_success", "stopping_overload",
+                    "stopping_timeout",
+                ) or (self._go_to and self._go_to.active()):
                     raise ExperimentError("Wait for the current acquisition or motion to stop.")
                 if self._stack.snapshot().get("status") != "active":
                     raise ExperimentError("Start the stack before activating control.")
@@ -1282,6 +1341,19 @@ class ExperimentController:
             block["training_workflow"] = "recording"
             block["error"] = None
             block["training_live"] = self._empty_training_live()
+            timeout_sec = block["settings"].get("trial_timeout_sec")
+            self._active_trial_timer = (
+                {
+                    "block_id": block["id"],
+                    "trial_id": trial["id"],
+                    "attempt_number": attempt_number,
+                    "deadline_monotonic": (
+                        self._monotonic_clock() + timeout_sec
+                    ),
+                }
+                if timeout_sec is not None
+                else None
+            )
             self._persist_training(folder, block, trial, attempt)
             return self.snapshot()
 
@@ -1473,52 +1545,147 @@ class ExperimentController:
             if block["phase"] not in TRIAL_PHASES:
                 return
             self._refresh_training_live(block)
-            if block["training_workflow"] != "recording" or not self._command_allowed():
+            if block["training_workflow"] != "recording":
                 return
             trial = self._current_training_trial(block)
             attempt = self._current_training_attempt(trial)
-            target_error = block["training_live"].get("target_error")
-            if not target_error:
-                attempt["success_dwell_started_monotonic"] = None
-                attempt["success_dwell_sec"] = 0.0
-                return
-            linear = target_error["linear_m"]
-            angular = target_error["angular_rad"]
-            attempt["final_error"] = dict(target_error)
-            minimum = attempt["minimum_error"]
-            minimum["linear_m"] = (
-                linear if minimum["linear_m"] is None else min(minimum["linear_m"], linear)
+            worker = self._claim_trial_timeout_locked(
+                block, trial, attempt, self._monotonic_clock()
             )
-            minimum["angular_rad"] = (
-                angular
-                if minimum["angular_rad"] is None
-                else min(minimum["angular_rad"], angular)
-            )
-            thresholds = effective_thresholds(block["success_thresholds"])
-            within = (
-                linear <= thresholds["linear_m"]
-                and angular <= thresholds["angular_rad"]
-            )
-            now = self._monotonic_clock()
-            if not within:
-                attempt["success_dwell_started_monotonic"] = None
-                attempt["success_dwell_sec"] = 0.0
-                return
-            if attempt["success_dwell_started_monotonic"] is None:
-                attempt["success_dwell_started_monotonic"] = now
-            attempt["success_dwell_sec"] = max(
-                0.0, now - attempt["success_dwell_started_monotonic"]
-            )
-            if attempt["success_dwell_sec"] >= thresholds["success_dwell_sec"]:
-                block["training_workflow"] = "stopping_success"
-                attempt["status"] = "stopping_success"
-                worker = self._thread_factory(
-                    target=self._finish_training_success_worker,
-                    args=(block["id"], trial["id"], attempt["number"]),
-                    daemon=True,
+            if worker is None:
+                if not self._command_allowed():
+                    return
+                target_error = block["training_live"].get("target_error")
+                if not target_error:
+                    attempt["success_dwell_started_monotonic"] = None
+                    attempt["success_dwell_sec"] = 0.0
+                    return
+                linear = target_error["linear_m"]
+                angular = target_error["angular_rad"]
+                attempt["final_error"] = dict(target_error)
+                minimum = attempt["minimum_error"]
+                minimum["linear_m"] = (
+                    linear
+                    if minimum["linear_m"] is None
+                    else min(minimum["linear_m"], linear)
                 )
+                minimum["angular_rad"] = (
+                    angular
+                    if minimum["angular_rad"] is None
+                    else min(minimum["angular_rad"], angular)
+                )
+                thresholds = effective_thresholds(block["success_thresholds"])
+                within = (
+                    linear <= thresholds["linear_m"]
+                    and angular <= thresholds["angular_rad"]
+                )
+                now = self._monotonic_clock()
+                if not within:
+                    attempt["success_dwell_started_monotonic"] = None
+                    attempt["success_dwell_sec"] = 0.0
+                    return
+                if attempt["success_dwell_started_monotonic"] is None:
+                    attempt["success_dwell_started_monotonic"] = now
+                attempt["success_dwell_sec"] = max(
+                    0.0, now - attempt["success_dwell_started_monotonic"]
+                )
+                if (
+                    attempt["success_dwell_sec"]
+                    >= thresholds["success_dwell_sec"]
+                ):
+                    block["training_workflow"] = "stopping_success"
+                    attempt["status"] = "stopping_success"
+                    worker = self._thread_factory(
+                        target=self._finish_training_success_worker,
+                        args=(block["id"], trial["id"], attempt["number"]),
+                        daemon=True,
+                    )
         if worker is not None:
             worker.start()
+
+    def _claim_trial_timeout_locked(
+        self, block: dict, trial: dict, attempt: dict, now: float
+    ):
+        if not self._trial_timeout_due_locked(block, trial, attempt, now):
+            return None
+        block["training_workflow"] = "stopping_timeout"
+        attempt["status"] = "stopping_timeout"
+        return self._thread_factory(
+            target=self._finish_trial_timeout_worker,
+            args=(block["id"], trial["id"], attempt["number"]),
+            daemon=True,
+        )
+
+    def _trial_timeout_due_locked(
+        self, block: dict, trial: dict, attempt: dict, now: float
+    ) -> bool:
+        timer = self._active_trial_timer
+        return bool(
+            block.get("training_workflow") == "recording"
+            and timer is not None
+            and timer.get("block_id") == block.get("id")
+            and timer.get("trial_id") == trial.get("id")
+            and timer.get("attempt_number") == attempt.get("number")
+            and now >= timer["deadline_monotonic"]
+        )
+
+    def tick_trial_timeout(self) -> bool:
+        """Finish timed-out attempts even when pose feedback stops."""
+        worker = None
+        with self._lock:
+            if (
+                self._progress is None
+                or self._progress.get("workflow") != "block_running"
+                or not self._progress.get("current_block")
+            ):
+                return False
+            block = self._block(self._progress["current_block"])
+            if (
+                block["phase"] not in TRIAL_PHASES
+                or block.get("training_workflow") != "recording"
+            ):
+                return False
+            trial = self._current_training_trial(block)
+            attempt = self._current_training_attempt(trial)
+            worker = self._claim_trial_timeout_locked(
+                block, trial, attempt, self._monotonic_clock()
+            )
+        if worker is None:
+            return False
+        worker.start()
+        return True
+
+    def _finish_trial_timeout_worker(
+        self, block_id: str, trial_id: int, attempt_number: int
+    ) -> None:
+        with self._lock:
+            if (
+                self._progress is None
+                or self._progress.get("current_block") != block_id
+            ):
+                return
+            block = self._block(block_id)
+            if block.get("current_trial_id") != trial_id:
+                return
+            trial = self._current_training_trial(block)
+            attempt = self._current_training_attempt(trial)
+            if (
+                attempt["number"] != attempt_number
+                or block.get("training_workflow") != "stopping_timeout"
+            ):
+                return
+            folder = Path(self._participant["folder"])
+            try:
+                self._finish_training_attempt(
+                    block, folder, "trial_timeout", successful=False
+                )
+            except Exception as error:
+                block["error"] = (
+                    f"Unable to finalise timed-out trial attempt: {error}"
+                )
+                self._error = block["error"]
+                self._persist(folder)
+                self._write_block(folder, block)
 
     def _experiment_stack_permissions(self, stack, mapper, recorder) -> dict:
         idle = (
@@ -1596,12 +1763,19 @@ class ExperimentController:
                     if was_active:
                         self._deactivate_discovery(block, folder, "restart_stack")
                 elif block["phase"] in TRIAL_PHASES:
-                    if block.get("training_workflow") in (
+                    workflow = block.get("training_workflow")
+                    if workflow in (
                         "recording",
                         "stopping_success",
+                        "stopping_timeout",
                     ):
                         self._finish_training_attempt(
-                            block, folder, "restart_stack", successful=False
+                            block,
+                            folder,
+                            "trial_timeout"
+                            if workflow == "stopping_timeout"
+                            else "restart_stack",
+                            successful=False,
                         )
                     active_mode = self._modes.active_mode()
                     if active_mode:
@@ -1681,6 +1855,19 @@ class ExperimentController:
     ) -> None:
         trial = self._current_training_trial(block)
         attempt = self._current_training_attempt(trial)
+        timer = self._active_trial_timer
+        if (
+            timer is not None
+            and timer.get("block_id") == block.get("id")
+            and timer.get("trial_id") == trial.get("id")
+            and timer.get("attempt_number") == attempt.get("number")
+        ):
+            if (
+                not successful
+                and self._monotonic_clock() >= timer["deadline_monotonic"]
+            ):
+                reason = "trial_timeout"
+            self._active_trial_timer = None
         try:
             result = self._rosbag.stop()
         except Exception as error:
@@ -1779,6 +1966,31 @@ class ExperimentController:
             block["error"] = (
                 "The attempt is invalid. Retry it or continue with a deviation."
             )
+
+    def _trial_time_remaining_locked(
+        self, block: dict, attempt: Optional[dict]
+    ) -> Optional[float]:
+        timer = self._active_trial_timer
+        if (
+            timer is None
+            or attempt is None
+            or block.get("training_workflow")
+            not in ("recording", "stopping_timeout")
+            or timer.get("block_id") != block.get("id")
+            or timer.get("trial_id") != block.get("current_trial_id")
+            or timer.get("attempt_number") != attempt.get("number")
+        ):
+            return None
+        return max(0.0, timer["deadline_monotonic"] - self._monotonic_clock())
+
+    @staticmethod
+    def _trial_timed_out(block: dict, attempt: Optional[dict]) -> bool:
+        technical = (attempt or {}).get("technical_outcome") or {}
+        return bool(
+            block.get("training_workflow") == "stopping_timeout"
+            or (attempt and attempt.get("stop_reason") == "trial_timeout")
+            or technical.get("stop_reason") == "trial_timeout"
+        )
 
     def _refresh_training_live(self, block: dict) -> None:
         live = self._empty_training_live()
@@ -2164,12 +2376,16 @@ class ExperimentController:
                         if block.get("training_workflow") in (
                             "recording",
                             "stopping_success",
+                            "stopping_timeout",
                         ):
                             try:
+                                workflow = block.get("training_workflow")
                                 self._finish_training_attempt(
                                     block,
                                     folder,
-                                    "process_failure",
+                                    "trial_timeout"
+                                    if workflow == "stopping_timeout"
+                                    else "process_failure",
                                     successful=False,
                                 )
                             except Exception:
@@ -2254,6 +2470,15 @@ class ExperimentController:
                     "current_trial_id": active_block.get("current_trial_id"),
                     "current_trial": json.loads(json.dumps(current_trial)),
                     "current_attempt": json.loads(json.dumps(current_attempt)),
+                    "trial_timeout_sec": active_block["settings"].get(
+                        "trial_timeout_sec"
+                    ),
+                    "time_remaining_sec": self._trial_time_remaining_locked(
+                        active_block, current_attempt
+                    ),
+                    "time_limit_reached": self._trial_timed_out(
+                        active_block, current_attempt
+                    ),
                     "incident_review_required": bool(
                         active_block.get("training_workflow")
                         == "incident_review_required"
@@ -2299,6 +2524,7 @@ class ExperimentController:
                         not in (
                             "recording",
                             "stopping_success",
+                            "stopping_timeout",
                             "incident_review_required",
                         )
                     ),
@@ -2353,6 +2579,7 @@ class ExperimentController:
                         not in (
                             "recording",
                             "stopping_success",
+                            "stopping_timeout",
                             "incident_review_required",
                         )
                         and stack_state.get("status") == "active"
@@ -2399,10 +2626,16 @@ class ExperimentController:
                         pass
                 if block["phase"] in TRIAL_PHASES and block.get(
                     "training_workflow"
-                ) in ("recording", "stopping_success"):
+                ) in ("recording", "stopping_success", "stopping_timeout"):
                     try:
+                        workflow = block.get("training_workflow")
                         self._finish_training_attempt(
-                            block, folder, "interface_shutdown", successful=False
+                            block,
+                            folder,
+                            "trial_timeout"
+                            if workflow == "stopping_timeout"
+                            else "interface_shutdown",
+                            successful=False,
                         )
                     except Exception:
                         pass
@@ -2572,7 +2805,9 @@ class ExperimentController:
                 self._write_attempt(folder, block, trial, attempt)
                 self._write_trial(folder, block, trial)
                 return
-            if attempt.get("status") in ("starting", "recording", "stopping_success"):
+            if attempt.get("status") in (
+                "starting", "recording", "stopping_success", "stopping_timeout"
+            ):
                 attempt["stopped_at_utc"] = self._utc_clock()
                 attempt["stop_reason"] = reason
                 attempt["valid"] = False

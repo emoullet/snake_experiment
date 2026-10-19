@@ -17,6 +17,11 @@
 .participant-task, .participant-control-state { display: grid; gap: 8px; }
 .participant-task > span, .participant-control-state > span:first-child, .participant-metrics span { color: var(--muted); font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
 .participant-task strong { font-size: clamp(1.4rem, 2.6vw, 2.2rem); }
+.participant-time-limit { display: flex; align-items: baseline; gap: 12px; margin-top: 12px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--background, #f6f9fd); }
+.participant-time-limit[hidden], .participant-timeout-message[hidden] { display: none; }
+.participant-time-limit span { color: var(--muted); font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.participant-time-limit strong { font-size: clamp(1.5rem, 3vw, 2.2rem); font-variant-numeric: tabular-nums; }
+.participant-timeout-message { margin: 10px 0 0; color: var(--danger, #a32727); font-size: 1rem; font-weight: 700; }
 .participant-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .participant-metrics > div { display: grid; gap: 8px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--background, #f6f9fd); }
 .participant-metrics strong { font-size: clamp(1.35rem, 2.5vw, 2rem); }

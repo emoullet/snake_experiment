@@ -10,6 +10,28 @@ class TrainingError(RuntimeError):
     """An operator-correctable training workflow error."""
 
 
+def normalise_trial_timeout(value) -> Optional[float]:
+    """Return an enabled trial timeout in seconds, or None when disabled."""
+    if value is None or (
+        isinstance(value, str) and value.strip().lower() == "none"
+    ):
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError, OverflowError):
+        seconds = math.nan
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(seconds)
+        or seconds <= 0
+    ):
+        raise TrainingError(
+            "Trial timeout must be positive finite seconds, null, or none."
+        )
+    return seconds
+
+
 def build_trials(mode: str, settings: dict) -> list[dict]:
     """Build globally numbered trials from configurable cycles and targets."""
     cycles = int(settings["cycles"])
@@ -48,6 +70,7 @@ def validate_training_settings(
     settings: dict, expected_folder: Optional[str] = None
 ) -> None:
     """Validate configurable trial sequencing and folder patterns."""
+    normalise_trial_timeout(settings.get("trial_timeout_sec"))
     cycles = settings.get("cycles")
     if isinstance(cycles, bool) or not isinstance(cycles, int) or cycles <= 0:
         raise TrainingError("Trial cycles must be a positive integer.")

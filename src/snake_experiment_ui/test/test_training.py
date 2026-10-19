@@ -5,6 +5,7 @@ from snake_experiment_ui.training import (
     TrainingError,
     build_trials,
     effective_thresholds,
+    normalise_trial_timeout,
     pose_error,
     validate_training_settings,
 )
@@ -69,6 +70,26 @@ class TrainingHelpersTest(unittest.TestCase):
         )
         self.assertEqual(thresholds["linear_m"], 0.005)
         self.assertAlmostEqual(thresholds["angular_rad"], math.radians(5.0))
+
+    def test_trial_timeout_accepts_positive_seconds_and_disabled_values(self):
+        """Accept positive durations and both supported disable values."""
+        self.assertEqual(normalise_trial_timeout(2), 2.0)
+        self.assertEqual(normalise_trial_timeout(2.5), 2.5)
+        for value in (None, "none", " NONE "):
+            with self.subTest(value=value):
+                self.assertIsNone(normalise_trial_timeout(value))
+        for value in (
+            0,
+            -1,
+            True,
+            float("nan"),
+            float("inf"),
+            "2",
+            "disabled",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(TrainingError):
+                    normalise_trial_timeout(value)
 
     def test_pose_error_handles_antipodal_quaternions(self):
         observed = self.pose({"x": 0.0, "y": 0.0, "z": 0.0, "w": -1.0})
