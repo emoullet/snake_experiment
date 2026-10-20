@@ -300,6 +300,33 @@ neutral. Check both demo fallback without joint states and live poses with
 fresh joint states. Run only one robot stack at a time.
 
 
+## Recorded topics and acquisition validity
+
+Each phase in `config/experiment.yaml` lists all recorded topics in
+`rosbag_topics`. Its optional `rosbag_optional_topics` list identifies recorded
+topics that may have zero messages without invalidating the acquisition. The
+list must contain unique names drawn from `rosbag_topics`. An omitted list
+means that every recorded topic is required.
+
+The shipped profile makes `/mode_request` optional in discovery, training and
+recording because mode changes are events and may not occur during an
+acquisition. The topic is still recorded whenever messages arrive. All other
+topics remain required, and missing or unreadable metadata still invalidates
+the recorded data.
+
+New attempts (`attempt.json`) and discovery segments (`block.json`) save
+`required_topics`, `optional_topics` and `missing_required_topics` alongside the
+existing diagnostics. `message_counts` and `missing_topics` still cover **all**
+recorded topics: a non-empty `missing_topics` is compatible with valid recorded
+data when only optional topics are absent. An attempt must also satisfy the
+motion and incident-review criteria to become valid. Its experimental mode is
+stored in the parent block's `mode` field.
+
+This default applies to newly created sessions. Existing sessions use their
+snapshotted profile in `experimental_environment/experiment.yaml`; profiles
+without `rosbag_optional_topics` keep requiring every topic. No saved profile,
+hash or historical verdict is rewritten by this change.
+
 ## Go-to progress supervision
 
 Check-up and experiment Go-to motions share the following startup parameters

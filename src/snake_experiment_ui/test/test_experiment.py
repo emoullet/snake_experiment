@@ -1,6 +1,7 @@
 import json
 import hashlib
 from pathlib import Path
+from unittest.mock import patch
 import tempfile
 import threading
 import unittest
@@ -84,11 +85,14 @@ class FakeRosbag:
         self.topics = []
         self.starts = []
         self.valid = True
+        self.absent_topics = set()
+        self.optional_topics = []
 
-    def start(self, output, topics, storage="mcap"):
+    def start(self, output, topics, storage="mcap", optional_topics=None):
         self.active = True
         self.output = Path(output)
         self.topics = list(topics)
+        self.optional_topics = list(optional_topics or [])
         self.starts.append(self.output.name)
         return self.snapshot()
 
@@ -103,13 +107,16 @@ class FakeRosbag:
         return self._result()
 
     def _result(self):
-        counts = {topic: 1 if self.valid else 0 for topic in self.topics}
+        counts = {
+            topic: int(self.valid and topic not in self.absent_topics) for topic in self.topics
+        }
+        missing = [topic for topic, count in counts.items() if not count]
         return {
             "output": str(self.output),
             "storage": "mcap",
             "message_counts": counts,
-            "valid": self.valid,
-            "missing_topics": [] if self.valid else list(self.topics),
+            "valid": self.valid and not any(t not in self.optional_topics for t in missing),
+            "missing_topics": missing,
             "metadata_error": None,
         }
 
@@ -1950,6 +1957,146 @@ class ExperimentControllerTest(unittest.TestCase):
                 self.controller.set_control(block_id, False)
                 self.controller.end(block_id, True)
 
+
+
+
+    def assert_optional_policy(self, acquisition):
+        self.assertIn("/mode_request", acquisition["topics"])
+        self.assertEqual(acquisition["optional_topics"], ["/mode_request"])
+        self.assertNotIn("/mode_request", acquisition["required_topics"])
+        self.assertEqual(acquisition["missing_required_topics"], [])
+        self.assertEqual(acquisition["missing_topics"], ["/mode_request"])
+        self.assertEqual(acquisition["message_counts"]["/mode_request"], 0)
+        self.assertTrue(acquisition["valid"])
+
+    def test_discovery_persists_optional_topic_policy(self):
+        self.prepare_session()
+        block_id = "mode_1_discovery"
+        self.controller.start(block_id)
+        self.controller.show_mode_explanation(block_id)
+        self.controller.complete_mode_explanation(block_id)
+        self.rosbag.absent_topics = {"/mode_request"}
+        self.set_control(block_id, True)
+        state = self.set_control(block_id, False)
+        self.assert_optional_policy(state["segments"][0])
+        saved = json.loads((self.participant_folder / "snake_discovery/block.json").read_text())
+        self.assert_optional_policy(saved["segments"][0])
+        self.assertTrue(state["can_end"])
+
+    def test_discovery_failure_keeps_optional_topic_diagnostics(self):
+        self.prepare_session()
+        block_id = "mode_1_discovery"
+        self.controller.start(block_id)
+        self.controller.show_mode_explanation(block_id)
+        self.controller.complete_mode_explanation(block_id)
+        with patch.object(self.rosbag, "start", side_effect=RuntimeError("start failed")):
+            with self.assertRaises(ExperimentError):
+                self.set_control(block_id, True)
+        saved = json.loads((self.participant_folder / "snake_discovery/block.json").read_text())
+        segment = saved["segments"][0]
+        self.assertFalse(segment["valid"])
+        self.assertEqual(segment["optional_topics"], ["/mode_request"])
+        self.assertEqual(segment["missing_required_topics"], segment["required_topics"])
+        self.set_control(block_id, True)
+        with patch.object(self.rosbag, "stop", side_effect=RuntimeError("stop failed")):
+            with self.assertRaises(ExperimentError):
+                self.set_control(block_id, False)
+        saved = json.loads((self.participant_folder / "snake_discovery/block.json").read_text())
+        segment = saved["segments"][-1]
+        self.assertFalse(segment["valid"])
+        self.assertEqual(segment["optional_topics"], ["/mode_request"])
+        self.assertEqual(segment["missing_required_topics"], segment["required_topics"])
+
+    def test_training_persists_success_with_missing_optional_topic(self):
+        self.start_first_training_attempt()
+        self._finish_and_check_optional_attempt("training")
+
+    def test_recording_persists_success_with_missing_optional_topic(self):
+        self.start_first_recording_block()
+        self.controller.prepare_recording_trial("mode_1_recording")
+        self.complete_go_to("target_out_1")
+        self.controller.start_recording_attempt("mode_1_recording")
+        self._finish_and_check_optional_attempt("recording")
+
+    def _finish_and_check_optional_attempt(self, phase):
+        self.rosbag.absent_topics = {"/mode_request"}
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+        state = self.controller.snapshot()
+        trial = state[phase]["trials"][0]
+        self.assert_optional_policy(trial["attempts"][0])
+        self.assertTrue(trial["attempts"][0]["technical_outcome"]["data_valid"])
+        saved = json.loads((self.participant_folder / f"snake_{phase}" / trial["folder"] / "attempt_001/attempt.json").read_text())
+        self.assert_optional_policy(saved)
+
+    def test_optional_policy_is_kept_on_recorder_start_and_stop_failure(self):
+        self.start_first_training_attempt()
+        with patch.object(self.rosbag, "stop", side_effect=RuntimeError("stop failed")):
+            state = self.controller.stop_training_attempt("mode_1_training")
+        attempt = state["training"]["current_attempt"]
+        self.assertFalse(attempt["valid"])
+        self.assertEqual(attempt["optional_topics"], ["/mode_request"])
+        self.assertEqual(attempt["missing_required_topics"], attempt["required_topics"])
+        self.controller.resolve_training_attempt("mode_1_training", "retry")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.complete_go_to("target_out_1")
+        with patch.object(self.rosbag, "start", side_effect=RuntimeError("start failed")):
+            with self.assertRaises(ExperimentError):
+                self.controller.start_training_attempt("mode_1_training")
+        trial = self.controller.snapshot()["training"]["trials"][0]
+        attempt = trial["attempts"][-1]
+        saved = json.loads((self.participant_folder / "snake_training" / trial["folder"] / "attempt_002/attempt.json").read_text())
+        self.assertEqual(saved, attempt)
+        self.assertEqual(attempt["optional_topics"], ["/mode_request"])
+        self.assertEqual(attempt["missing_required_topics"], attempt["required_topics"])
+
+    def test_invalid_optional_profile_configuration_is_rejected(self):
+        original = yaml.safe_load(self.source_profile.read_text())
+        path = self.root / "bad-profile.yaml"
+        for optional in (["/absent"], ["/joy", "/joy"], "/joy", None, [[]]):
+            for phase in ("discovery", "training", "recording"):
+                with self.subTest(optional=optional, phase=phase):
+                    data = json.loads(json.dumps(original))
+                    data["phases"][phase]["rosbag_optional_topics"] = optional
+                    path.write_text(yaml.safe_dump(data))
+                    with self.assertRaisesRegex(ExperimentError, "rosbag_optional_topics"):
+                        ExperimentProfile(path)
+
+    def test_existing_profile_without_optional_policy_stays_strict(self):
+        self.prepare_session()
+        path = self.participant_folder / "experimental_environment/experiment.yaml"
+        data = yaml.safe_load(path.read_text())
+        for phase in data["phases"].values():
+            phase.pop("rosbag_optional_topics")
+        path.write_text(yaml.safe_dump(data))
+        original_bytes = path.read_bytes()
+        digest = hashlib.sha256(original_bytes).hexdigest()
+        progress_path = self.participant_folder / "experiment_progress.json"
+        progress = json.loads(progress_path.read_text())
+        progress["profile"]["sha256"] = digest
+        for block in progress["blocks"]:
+            block["settings"].pop("rosbag_optional_topics")
+        progress_path.write_text(json.dumps(progress))
+        original_manifest = (self.participant_folder / "manifest.json").read_bytes()
+        self.controller.prepare(self.participant)
+        self.complete_discovery("mode_1_discovery")
+        self.complete_discovery("mode_2_discovery")
+        self.controller.start("mode_1_training")
+        self.controller.prepare_training_trial("mode_1_training")
+        self.complete_go_to("target_out_1")
+        self.controller.start_training_attempt("mode_1_training")
+        self.rosbag.absent_topics = {"/mode_request"}
+        self.controller.update_ee_pose(self.pose("target_2"))
+        self.monotonic_value += 0.6
+        self.controller.update_ee_pose(self.pose("target_2"))
+        attempt = self.controller.snapshot()["training"]["trials"][0]["attempts"][0]
+        self.assertFalse(attempt["valid"])
+        self.assertEqual(attempt["optional_topics"], [])
+        self.assertEqual(attempt["missing_required_topics"], ["/mode_request"])
+        self.assertEqual(path.read_bytes(), original_bytes)
+        self.assertEqual(json.loads(progress_path.read_text())["profile"]["sha256"], digest)
+        self.assertEqual((self.participant_folder / "manifest.json").read_bytes(), original_manifest)
 
 
 if __name__ == "__main__":

@@ -39,6 +39,7 @@ class RosbagManager:
         self._process: Optional[subprocess.Popen] = None
         self._output: Optional[Path] = None
         self._topics: list[str] = []
+        self._optional_topics: list[str] = []
         self._storage = "mcap"
         self._status = "inactive"
         self._error: Optional[str] = None
@@ -71,7 +72,10 @@ class RosbagManager:
                 "owned": self._process is not None,
             }
 
-    def start(self, output: Path, topics: list[str], storage: str = "mcap") -> dict:
+    def start(
+        self, output: Path, topics: list[str], storage: str = "mcap",
+        optional_topics: Optional[list[str]] = None,
+    ) -> dict:
         with self._lock:
             self._refresh_process_state()
             if self._process is not None or self._status == "active":
@@ -87,9 +91,11 @@ class RosbagManager:
                 raise RosbagError("Rosbag topics must be non-empty absolute topic names.")
             if storage not in ("mcap", "sqlite3"):
                 raise RosbagError(f"Unsupported rosbag storage: {storage}")
+            optional_topics = self._validate_optional_topics(topics, optional_topics)
             output.parent.mkdir(parents=True, exist_ok=True)
             self._output = output
             self._topics = list(topics)
+            self._optional_topics = list(optional_topics)
             self._storage = storage
             self._status = "starting"
             self._error = None
@@ -138,9 +144,13 @@ class RosbagManager:
                     self._error = "Owned recorder process disappeared."
                     raise RosbagError(self._error)
                 self._status = "inactive"
-                return self.inspect(self._output, self._topics, self._storage)
+                return self.inspect(
+                    self._output, self._topics, self._storage, self._optional_topics
+                )
             self._stop_locked()
-            return self.inspect(self._output, self._topics, self._storage)
+            return self.inspect(
+                self._output, self._topics, self._storage, self._optional_topics
+            )
 
     def _stop_locked(self, preserve_error: bool = False) -> None:
         process = self._process
@@ -167,7 +177,24 @@ class RosbagManager:
                 self._error = None
 
     @staticmethod
-    def inspect(output: Optional[Path], topics: list[str], storage: str) -> dict:
+    def _validate_optional_topics(topics, optional_topics) -> list[str]:
+        if optional_topics is None:
+            return []
+        if (
+            not isinstance(optional_topics, list)
+            or any(not isinstance(topic, str) or topic not in topics for topic in optional_topics)
+            or len(set(optional_topics)) != len(optional_topics)
+        ):
+            raise RosbagError("Optional topics must be unique recorded topic names.")
+        return list(optional_topics)
+
+    @staticmethod
+    def inspect(
+        output: Optional[Path], topics: list[str], storage: str,
+        optional_topics: Optional[list[str]] = None,
+    ) -> dict:
+        optional_topics = RosbagManager._validate_optional_topics(topics, optional_topics)
+        required_topics = [topic for topic in topics if topic not in optional_topics]
         counts = {topic: 0 for topic in topics}
         metadata_path = Path(output) / "metadata.yaml" if output else None
         metadata_error = None
@@ -185,11 +212,15 @@ class RosbagManager:
         else:
             metadata_error = "Rosbag metadata.yaml was not created."
         missing = [topic for topic, count in counts.items() if count <= 0]
+        missing_required = [topic for topic in missing if topic in required_topics]
         return {
+            "required_topics": required_topics,
+            "optional_topics": optional_topics,
+            "missing_required_topics": missing_required,
             "output": str(output) if output else None,
             "storage": storage,
             "message_counts": counts,
-            "valid": not missing and metadata_error is None,
+            "valid": not missing_required and metadata_error is None,
             "missing_topics": missing,
             "metadata_error": metadata_error,
         }
@@ -200,4 +231,6 @@ class RosbagManager:
             if self._process is None:
                 return None
             self._stop_locked()
-            return self.inspect(self._output, self._topics, self._storage)
+            return self.inspect(
+                self._output, self._topics, self._storage, self._optional_topics
+            )

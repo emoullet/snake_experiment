@@ -118,6 +118,16 @@ def _atomic_json(path: Path, value: dict) -> None:
         raise
 
 
+def _topic_policy(settings: dict) -> dict:
+    optional = list(settings.get("rosbag_optional_topics", []))
+    required = [topic for topic in settings["rosbag_topics"] if topic not in optional]
+    return {
+        "required_topics": required,
+        "optional_topics": optional,
+        "missing_required_topics": list(required),
+    }
+
+
 class ExperimentProfile:
     """Validated, versioned description of the six View D blocks."""
 
@@ -160,6 +170,13 @@ class ExperimentProfile:
                 or len(set(topics)) != len(topics)
             ):
                 raise ExperimentError(f"Invalid rosbag_topics for phase '{phase}'.")
+            optional = settings.get("rosbag_optional_topics", [])
+            if (
+                not isinstance(optional, list)
+                or any(not isinstance(topic, str) or topic not in topics for topic in optional)
+                or len(set(optional)) != len(optional)
+            ):
+                raise ExperimentError(f"Invalid rosbag_optional_topics for phase '{phase}'.")
         default_instructions = {
             "placeholder": True,
             "text": (
@@ -1313,6 +1330,7 @@ class ExperimentController:
                 },
                 "storage": self._profile.data["rosbag"]["storage"],
                 "topics": list(block["settings"]["rosbag_topics"]),
+                **_topic_policy(block["settings"]),
                 "message_counts": {},
                 "missing_topics": list(block["settings"]["rosbag_topics"]),
                 "metadata_error": None,
@@ -1325,6 +1343,7 @@ class ExperimentController:
                     output,
                     list(block["settings"]["rosbag_topics"]),
                     self._profile.data["rosbag"]["storage"],
+                    optional_topics=attempt["optional_topics"],
                 )
             except Exception as error:
                 attempt["status"] = "invalid"
@@ -1898,6 +1917,9 @@ class ExperimentController:
         attempt["missing_topics"] = list(
             result.get("missing_topics", attempt["topics"])
         )
+        attempt["missing_required_topics"] = [
+            topic for topic in attempt["missing_topics"] if topic in attempt["required_topics"]
+        ]
         attempt["metadata_error"] = result.get("metadata_error")
         attempt["valid"] = False
         attempt["success_dwell_started_monotonic"] = None
@@ -2189,7 +2211,10 @@ class ExperimentController:
         topics = list(block["settings"]["rosbag_topics"])
         storage = self._profile.data["rosbag"]["storage"]
         try:
-            self._rosbag.start(folder / block["folder"] / segment["name"], topics, storage)
+            self._rosbag.start(
+                folder / block["folder"] / segment["name"], topics, storage,
+                optional_topics=segment["optional_topics"],
+            )
             self._modes.activate(block["mode"])
         except Exception as error:
             active_mode = self._modes.active_mode()
@@ -2273,6 +2298,7 @@ class ExperimentController:
             "status": "starting",
             "storage": self._profile.data["rosbag"]["storage"],
             "topics": list(block["settings"]["rosbag_topics"]),
+            **_topic_policy(block["settings"]),
             "started_at_utc": None,
             "stopped_at_utc": None,
             "stop_reason": None,
@@ -2293,6 +2319,9 @@ class ExperimentController:
         segment["storage"] = result.get("storage", segment["storage"])
         segment["message_counts"] = dict(result.get("message_counts", {}))
         segment["missing_topics"] = list(result.get("missing_topics", segment["topics"]))
+        segment["missing_required_topics"] = [
+            topic for topic in segment["missing_topics"] if topic in segment["required_topics"]
+        ]
         segment["metadata_error"] = result.get("metadata_error")
         segment["valid"] = bool(result.get("valid")) and reason not in ("effort_overload", "protection_feedback_fault", "protection_status_unavailable")
 

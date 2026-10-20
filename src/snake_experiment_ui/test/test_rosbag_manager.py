@@ -100,5 +100,69 @@ class RosbagManagerTest(unittest.TestCase):
         self.assertEqual(result["missing_topics"], ["/ee_pose", "/joint_states"])
 
 
+    def test_optional_topic_absence_is_diagnostic_only(self):
+        self.create_process([
+            "ros2", "--output", str(self.root / "bag")
+        ], True)
+        topics = ["/joy", "/ee_pose", "/joint_states", "/mode_request"]
+        result = RosbagManager.inspect(self.root / "bag", topics, "mcap", ["/mode_request"])
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["missing_topics"], ["/mode_request"])
+        self.assertEqual(result["message_counts"]["/mode_request"], 0)
+        self.assertEqual(result["missing_required_topics"], [])
+        self.assertEqual(result["required_topics"], topics[:-1])
+        strict = RosbagManager.inspect(self.root / "bag", topics, "mcap")
+        self.assertFalse(strict["valid"])
+        self.assertEqual(strict["missing_required_topics"], ["/mode_request"])
+        required_missing = RosbagManager.inspect(
+            self.root / "bag", topics + ["/required"], "mcap", ["/mode_request"]
+        )
+        self.assertFalse(required_missing["valid"])
+        self.assertEqual(required_missing["missing_required_topics"], ["/required"])
+
+    def test_optional_topics_do_not_allow_missing_or_unreadable_metadata(self):
+        output = self.root / "bag"
+        output.mkdir()
+        for contents in (None, "[invalid yaml"):
+            with self.subTest(contents=contents):
+                if contents is not None:
+                    (output / "metadata.yaml").write_text(contents)
+                result = RosbagManager.inspect(output, ["/mode_request"], "mcap", ["/mode_request"])
+                self.assertFalse(result["valid"])
+                self.assertIsNotNone(result["metadata_error"])
+                self.assertEqual(result["missing_required_topics"], [])
+
+    @patch("snake_experiment_ui.rosbag_manager.os.killpg")
+    def test_optional_policy_reaches_every_finalisation_path(self, killpg):
+        killpg.side_effect = lambda *_: self.names.clear()
+        manager = RosbagManager(node_names=lambda: self.names, popen_factory=self.create_process)
+        topics = ["/joy", "/mode_request"]
+        for action in ("stop", "shutdown", "exited"):
+            with self.subTest(action=action):
+                output = self.root / action
+                manager.start(output, topics, optional_topics=["/mode_request"])
+                self.assertIn("/mode_request", self.processes[-1].command)
+                if action == "exited":
+                    self.processes[-1].return_code = 1
+                    self.names.clear()
+                    result = manager.stop()
+                else:
+                    result = getattr(manager, action)()
+                self.assertTrue(result["valid"])
+                self.assertEqual(result["optional_topics"], ["/mode_request"])
+        manager.start(self.root / "strict", topics)
+        self.assertFalse(manager.stop()["valid"])
+
+    def test_invalid_optional_topic_policy_is_rejected(self):
+        for optional in (["/absent"], ["/joy", "/joy"], "/joy", [None], [[]]):
+            with self.subTest(optional=optional):
+                with self.assertRaises(RosbagError):
+                    RosbagManager.inspect(self.root, ["/joy"], "mcap", optional)
+                manager = RosbagManager(node_names=lambda: [], popen_factory=self.create_process)
+                with self.assertRaises(RosbagError):
+                    manager.start(self.root / "bad", ["/joy"], optional_topics=optional)
+        self.assertFalse(self.processes)
+
+
 if __name__ == "__main__":
     unittest.main()
