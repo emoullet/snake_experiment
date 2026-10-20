@@ -1553,6 +1553,7 @@ class ExperimentController:
                 self._latest_pose = self._pose_document(message)
             except (AttributeError, TypeError, ValueError):
                 self._latest_pose = None
+            previous_pose_monotonic = self._latest_pose_monotonic
             self._latest_pose_monotonic = self._monotonic_clock()
             if (
                 self._progress is None
@@ -1594,6 +1595,15 @@ class ExperimentController:
                     else min(minimum["angular_rad"], angular)
                 )
                 thresholds = effective_thresholds(block["success_thresholds"])
+                # A new sample is fresh, but cannot establish stability across
+                # an interval in which the previous feedback became stale.
+                if (
+                    previous_pose_monotonic is None
+                    or self._latest_pose_monotonic - previous_pose_monotonic
+                    > thresholds["pose_freshness_sec"]
+                ):
+                    attempt["success_dwell_started_monotonic"] = None
+                    attempt["success_dwell_sec"] = 0.0
                 within = (
                     linear <= thresholds["linear_m"]
                     and angular <= thresholds["angular_rad"]
@@ -2031,6 +2041,14 @@ class ExperimentController:
         thresholds = effective_thresholds(block["success_thresholds"])
         live["pose_fresh"] = age <= thresholds["pose_freshness_sec"]
         if not live["pose_fresh"]:
+            if (
+                block.get("training_workflow") == "recording"
+                and block.get("current_trial_id") is not None
+            ):
+                trial = self._current_training_trial(block)
+                attempt = self._current_training_attempt(trial)
+                attempt["success_dwell_started_monotonic"] = None
+                attempt["success_dwell_sec"] = 0.0
             live["error"] = "The end-effector pose is stale."
             block["training_live"] = live
             return

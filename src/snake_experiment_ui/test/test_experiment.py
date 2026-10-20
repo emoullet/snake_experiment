@@ -488,8 +488,9 @@ class ExperimentControllerTest(unittest.TestCase):
             self.complete_go_to(f"target_out_{trial['target_start']}")
             start(block_id)
             self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
-            self.monotonic_value += 0.6
-            self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
+            for _ in range(2):
+                self.monotonic_value += 0.3
+                self.controller.update_ee_pose(self.pose(f"target_{trial['target_end']}"))
 
     def start_first_recording_block(self):
         self.prepare_session()
@@ -1026,8 +1027,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.configure_trial_timeout("training", 2.0)
         self.start_first_training_attempt()
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
         state = self.controller.snapshot()
         first_attempt = state["training"]["trials"][0]["attempts"][0]
         self.assertEqual(first_attempt["stop_reason"], "success_threshold")
@@ -1099,8 +1101,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.monotonic_value += 0.6
         self.assertIsNone(self.controller.participant_snapshot()["linear_mm"])
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
         self.assertEqual(self.controller.participant_snapshot()["state"], "Target reached")
         self.assertEqual(
             self.controller.participant_snapshot()["success_event_id"],
@@ -1110,8 +1113,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.complete_go_to("target_out_2")
         self.controller.start_training_attempt("mode_1_training")
         self.controller.update_ee_pose(self.pose("target_3"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_3"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_3"))
         self.assertEqual(
             self.controller.participant_snapshot()["success_event_id"],
             "mode_1_training:2",
@@ -1317,8 +1321,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(recording_state["training"]["current_attempt"]["number"], 1)
         self.assertEqual(recording_state["training"]["progress"], {"resolved": 0, "total": 6})
         self.assertEqual(recording_state["training"]["stability"]["duration_sec"], 0.0)
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
         state = self.controller.snapshot()
         self.assertFalse(self.rosbag.active)
         self.assertEqual(state["training"]["trials"][0]["status"], "completed")
@@ -1340,8 +1345,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start_training_attempt(block_id)
         self.controller.add_training_incident(block_id)
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
 
         state = self.controller.snapshot()
         training = state["training"]
@@ -1373,8 +1379,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start_training_attempt(block_id)
         self.controller.add_training_incident(block_id)
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
 
         state = self.controller.review_training_incidents(
             block_id,
@@ -1412,8 +1419,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start_training_attempt("mode_1_training")
         self.rosbag.valid = False
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
         state = self.controller.snapshot()
         attempt = state["training"]["trials"][0]["attempts"][0]
         self.assertEqual(state["training"]["workflow"], "decision_required")
@@ -1682,8 +1690,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.complete_go_to("target_out_1")
         self.controller.start_recording_attempt(block_id)
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
         state = self.controller.snapshot()
         trial = state["recording"]["trials"][0]
         self.assertEqual(trial["status"], "completed")
@@ -1722,8 +1731,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.add_recording_incident(block_id)
         self.rosbag.valid = False
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
         state = self.controller.snapshot()
         attempt = state["recording"]["trials"][0]["attempts"][0]
         self.assertEqual(
@@ -2021,8 +2031,9 @@ class ExperimentControllerTest(unittest.TestCase):
     def _finish_and_check_optional_attempt(self, phase):
         self.rosbag.absent_topics = {"/mode_request"}
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
         state = self.controller.snapshot()
         trial = state[phase]["trials"][0]
         self.assert_optional_policy(trial["attempts"][0])
@@ -2088,8 +2099,9 @@ class ExperimentControllerTest(unittest.TestCase):
         self.controller.start_training_attempt("mode_1_training")
         self.rosbag.absent_topics = {"/mode_request"}
         self.controller.update_ee_pose(self.pose("target_2"))
-        self.monotonic_value += 0.6
-        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
         attempt = self.controller.snapshot()["training"]["trials"][0]["attempts"][0]
         self.assertFalse(attempt["valid"])
         self.assertEqual(attempt["optional_topics"], [])
@@ -2097,6 +2109,130 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(path.read_bytes(), original_bytes)
         self.assertEqual(json.loads(progress_path.read_text())["profile"]["sha256"], digest)
         self.assertEqual((self.participant_folder / "manifest.json").read_bytes(), original_manifest)
+
+
+    def _start_feedback_case(self, phase, timeout=None):
+        case = ExperimentControllerTest()
+        case.setUp()
+        self.addCleanup(case.tearDown)
+        if timeout is not None:
+            case.configure_trial_timeout(phase, timeout)
+        if phase == "training":
+            case.start_first_training_attempt()
+        else:
+            case.start_first_recording_block()
+            case.controller.prepare_recording_trial("mode_1_recording")
+            case.complete_go_to("target_out_1")
+            case.controller.start_recording_attempt("mode_1_recording")
+        return case
+
+    def test_feedback_gap_restarts_hold_with_or_without_state_refresh(self):
+        for phase in ("training", "recording"):
+            for refresh in (False, True):
+                with self.subTest(phase=phase, refresh=refresh):
+                    case = self._start_feedback_case(phase)
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    case.monotonic_value += 0.25
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    self.assertAlmostEqual(
+                        case.controller.snapshot()[phase]["stability"]["duration_sec"], 0.25
+                    )
+                    case.monotonic_value += 10.0
+                    if refresh:
+                        stale = case.controller.snapshot()[phase]
+                        self.assertFalse(stale["live"]["pose_fresh"])
+                        self.assertEqual(stale["stability"]["duration_sec"], 0.0)
+                        self.assertIsNone(
+                            stale["current_attempt"]["success_dwell_started_monotonic"]
+                        )
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    resumed = case.controller.snapshot()[phase]
+                    self.assertEqual(resumed["workflow"], "recording")
+                    self.assertTrue(case.rosbag.active)
+                    self.assertEqual(resumed["stability"]["duration_sec"], 0.0)
+                    self.assertIsNone(resumed["current_attempt"]["stop_reason"])
+                    self.assertIsNone(resumed["current_attempt"]["technical_outcome"])
+                    self.assertEqual(
+                        resumed["current_attempt"]["success_dwell_started_monotonic"],
+                        case.monotonic_value,
+                    )
+                    case.monotonic_value += 0.25
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    self.assertTrue(case.rosbag.active)
+                    case.monotonic_value += 0.25
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    attempt = case.controller.snapshot()[phase]["trials"][0]["attempts"][0]
+                    self.assertEqual(attempt["status"], "succeeded")
+                    self.assertAlmostEqual(attempt["success_dwell_sec"], 0.5)
+                    self.assertFalse(case.rosbag.active)
+
+    def test_feedback_freshness_boundary_preserves_only_continuous_hold(self):
+        for phase in ("training", "recording"):
+            for gap in (0.25, 0.5, 0.500001):
+                for refresh in (False, True):
+                    with self.subTest(phase=phase, gap=gap, refresh=refresh):
+                        case = self._start_feedback_case(phase)
+                        # Exactly representable clock values exercise equality.
+                        case.monotonic_value = 100.0
+                        case.controller.update_ee_pose(case.pose("target_2"))
+                        case.monotonic_value += gap
+                        if refresh:
+                            case.controller.snapshot()
+                        case.controller.update_ee_pose(case.pose("target_2"))
+                        state = case.controller.snapshot()[phase]
+                        attempt = state["trials"][0]["attempts"][0]
+                        self.assertEqual(
+                            attempt["status"], "succeeded" if gap == 0.5 else "recording"
+                        )
+                        self.assertAlmostEqual(
+                            attempt["success_dwell_sec"], gap if gap <= 0.5 else 0.0
+                        )
+
+    def test_invalid_or_outside_pose_breaks_hold_in_both_phases(self):
+        for phase in ("training", "recording"):
+            for kind in ("malformed", "nonfinite", "outside"):
+                with self.subTest(phase=phase, kind=kind):
+                    case = self._start_feedback_case(phase)
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    case.monotonic_value += 0.25
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    if kind == "malformed":
+                        message = object()
+                    elif kind == "nonfinite":
+                        message = json.loads(json.dumps(case.pose("target_2")))
+                        message["position"]["x"] = float("nan")
+                    else:
+                        message = case.pose("target_3")
+                    case.monotonic_value += 0.125
+                    case.controller.update_ee_pose(message)
+                    state = case.controller.snapshot()[phase]
+                    self.assertEqual(state["stability"]["duration_sec"], 0.0)
+                    self.assertIsNone(
+                        state["current_attempt"]["success_dwell_started_monotonic"]
+                    )
+                    case.monotonic_value += 0.125
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    state = case.controller.snapshot()[phase]
+                    self.assertEqual(state["stability"]["duration_sec"], 0.0)
+                    self.assertEqual(state["workflow"], "recording")
+                    self.assertTrue(case.rosbag.active)
+
+    def test_timeout_wins_over_hold_or_feedback_gap_in_both_phases(self):
+        for phase in ("training", "recording"):
+            for gap in (0.25, 10.0):
+                with self.subTest(phase=phase, gap=gap):
+                    case = self._start_feedback_case(phase, timeout=0.5)
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    case.monotonic_value += 0.25
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    case.monotonic_value += gap
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                    state = case.controller.snapshot()[phase]
+                    attempt = state["trials"][0]["attempts"][0]
+                    self.assertEqual(attempt["stop_reason"], "trial_timeout")
+                    self.assertEqual(attempt["status"], "invalid")
+                    self.assertEqual(state["workflow"], "decision_required")
+                    self.assertFalse(case.rosbag.active)
 
 
 if __name__ == "__main__":
