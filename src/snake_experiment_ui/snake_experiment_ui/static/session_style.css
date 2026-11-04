@@ -214,3 +214,14 @@ button:focus-visible, summary:focus-visible { outline: 3px solid rgb(23 105 224 
   .trial-process-summary dt { font-size: .62rem; letter-spacing: .03em; }
   .trial-process-summary dd { font-size: .75rem; }
 }
+
+/* Kept outside the inert workflow views and their dynamically patched markup. */
+.finalization-banner {
+  position: sticky;
+  top: 0.75rem;
+  z-index: 20;
+  border-color: var(--amber);
+  background: var(--amber-soft);
+}
+.finalization-banner strong { color: var(--amber); }
+.finalization-banner p { margin-bottom: 0; }

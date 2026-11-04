@@ -114,6 +114,10 @@ class FakeExperiment:
         self.stack_status = "inactive"
         self.stack_operation = None
 
+    def finalization_snapshot(self):
+        from snake_experiment_ui.experiment import idle_finalization
+        return idle_finalization()
+
     def snapshot(self):
         return {
             "workflow": "ready",
@@ -253,6 +257,76 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         transport = httpx.ASGITransport(app=self.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             return await client.request(method, path, json=json)
+
+    async def test_finalization_endpoint_is_independent_and_not_cached(self):
+        from unittest.mock import patch
+        status = {"active": True, "operation_id": 7, "block_id": "mode_1_training",
+                  "phase": "training", "trial_id": 1, "attempt_number": 1}
+        with patch.object(self.experiment, "finalization_snapshot", return_value=status):
+            with patch.object(self.checkup, "snapshot", side_effect=AssertionError("combined state called")):
+                with patch.object(self.experiment, "snapshot", side_effect=AssertionError("workflow snapshot called")):
+                    response = await asyncio.wait_for(
+                        self.request("GET", "/api/experiment/finalization"), timeout=2
+                    )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), status)
+        self.assertIn("no-store", response.headers["cache-control"])
+
+    async def test_finalization_endpoint_responds_during_real_workflow_lock(self):
+        from unittest.mock import patch
+        from test_experiment import ExperimentControllerTest
+        from snake_experiment_ui.session_web_app import create_session_app
+        case = ExperimentControllerTest()
+        case.setUp()
+        self.addCleanup(case.tearDown)
+        case.start_first_training_attempt()
+        root = Path(self.temporary_directory.name)
+        self.app = create_session_app(self.checkup, root / "static", root / "templates",
+                                      self.enrollment, case.controller)
+        entered, release = threading.Event(), threading.Event()
+        errors = []
+        original_stop = case.rosbag.stop
+        def stop():
+            entered.set()
+            if not release.wait(4):
+                raise RuntimeError("test timed out")
+            return original_stop()
+        def finalize():
+            try:
+                case.controller.stop_training_attempt("mode_1_training")
+            except Exception as error:
+                errors.append(error)
+        with patch.object(case.rosbag, "stop", side_effect=stop):
+            worker = threading.Thread(target=finalize)
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(1))
+                response = await asyncio.wait_for(
+                    self.request("GET", "/api/experiment/finalization"), timeout=2
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.json()["active"])
+                self.assertEqual(response.json()["phase"], "training")
+            finally:
+                release.set()
+                worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        response = await asyncio.wait_for(
+            self.request("GET", "/api/experiment/finalization"), timeout=2
+        )
+        self.assertFalse(response.json()["active"])
+
+    async def test_finalization_endpoint_without_experiment_is_idle(self):
+        from snake_experiment_ui.session_web_app import create_session_app
+        from snake_experiment_ui.experiment import idle_finalization
+        self.app = create_session_app(self.checkup, Path(self.temporary_directory.name) / "static",
+                                      Path(self.temporary_directory.name) / "templates")
+        response = await asyncio.wait_for(
+            self.request("GET", "/api/experiment/finalization"), timeout=2
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), idle_finalization())
 
     async def test_preview_config_exposes_configured_camera_without_mutating_mapping(self):
         from snake_experiment_ui.session_web_app import create_session_app

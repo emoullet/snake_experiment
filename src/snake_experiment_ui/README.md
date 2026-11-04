@@ -327,6 +327,69 @@ snapshotted profile in `experimental_environment/experiment.yaml`; profiles
 without `rosbag_optional_topics` keep requiring every topic. No saved profile,
 hash or historical verdict is rewritten by this change.
 
+## Complete bag validation before the verdict
+
+Finalising an acquisition validates `metadata.yaml`, checks every listed bag
+file is regular, non-empty and contained in the output folder, then reads all
+messages across the bag's files with `rosbag2_py`. Both MCAP and SQLite bags
+are supported. Read counts for all topics and their total must match metadata,
+including topics that are optional or not part of the requested topic list.
+Optional topics may be absent, but messages announced in metadata must be found.
+
+The native reader runs in a separate Python process with a **120-second**
+timeout. Finalisation waits for the result before issuing a verdict. Missing
+reader dependencies, crashes, incomplete results and timeouts fail validation;
+there is no fallback to accepting metadata alone. Install the package's
+`rosbag2_py` runtime dependency and source the ROS environment before launching.
+The validator reads bags without repairing, reindexing or modifying them.
+
+Attempts and discovery segments save `data_validation` alongside their other
+diagnostics, with these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `not_run` before inspection, then `passed` or `failed`. |
+| `files` | Relative bag file names involved in validation. |
+| `message_counts` | Counts actually read for all topics, or `null` when reading did not finish. |
+| `error` | `null`, or an object containing a stable `code` and explanatory `message`. |
+
+Error codes are `invalid_metadata`, `missing_file`, `invalid_file`,
+`reader_unavailable`, `read_error`, `count_mismatch` and `read_timeout`.
+`read_timeout` indicates that validation did not finish within the limit;
+it does not establish that the bag is corrupt. A complete read with a count
+mismatch retains the actual counts for diagnosis.
+
+The existing top-level `message_counts` remain metadata-declared counts for the
+requested topics; `metadata_error` retains metadata diagnostics. A passed bag
+validation does not by itself make a trial attempt valid: required topics,
+motion success and incident review still apply. The check does not deserialize
+message payloads or assess signal rates, continuity, scientific quality or
+undetectable storage corruption. Historical results are not re-evaluated.
+
+## Operator feedback during finalisation
+
+The operator interface displays **Vérification en cours…** while a discovery
+segment or trial attempt is being finalised. The message covers recorder
+shutdown, bag checks and saving the result. The workflow views are temporarily
+`inert`; the protection panel is outside this additional interaction block.
+Participant screens and verdict rules are unchanged.
+
+`GET /api/experiment/finalization` is a non-cached lightweight status endpoint,
+polled every 250 ms without overlapping requests. It is independent of workflow
+and ROS lifecycle locks, so the banner also works when the main WebSocket or
+initial page snapshot waits for a recorder operation. It returns `active`, a
+monotonically increasing `operation_id`, `block_id`, `phase`, `trial_id` and
+`attempt_number` (the last two are null for discovery). The same `finalization`
+object appears in normal experiment snapshots. This transient status is never
+saved in acquisition JSON files.
+
+Completion of the lightweight status alone does not unlock the page. The
+interface waits for a fresh complete snapshot confirming completion of that
+operation or a later one, then uses the normal button permissions. Late
+responses cannot hide a newer operation. If status tracking fails during a
+known verification, the banner shows **État de vérification indisponible.
+Reconnexion en cours…** and retains the interaction block while retrying.
+
 ## Go-to progress supervision
 
 Check-up and experiment Go-to motions share the following startup parameters

@@ -15,7 +15,7 @@ from .overload import ParticipantOverloadWarning, ProtectionError
 from .checkup import CheckupError
 from .diagnostics import DiagnosticProfileError
 from .enrollment import EnrollmentError
-from .experiment import ExperimentError
+from .experiment import ExperimentError, idle_finalization
 from .mode_manager import ModeError
 from .participant_profile import video_is_available
 from .rosbag_manager import RosbagError
@@ -207,6 +207,12 @@ def create_session_app(
     @app.get("/api/state")
     async def state():
         return await asyncio.to_thread(combined_snapshot)
+
+    @app.get("/api/experiment/finalization")
+    async def finalization_status():
+        # Deliberately bypass combined_snapshot and every workflow/ROS lock.
+        status = experiment.finalization_snapshot() if experiment is not None else idle_finalization()
+        return JSONResponse(content=status, headers=NO_CACHE_HEADERS)
 
     @app.get("/participant", include_in_schema=False)
     async def participant_interface():

@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Callable, Iterable, Optional
 
-import yaml
+from .bag_validation import inspect_bag
 
 
 class RosbagError(RuntimeError):
@@ -195,22 +195,11 @@ class RosbagManager:
     ) -> dict:
         optional_topics = RosbagManager._validate_optional_topics(topics, optional_topics)
         required_topics = [topic for topic in topics if topic not in optional_topics]
-        counts = {topic: 0 for topic in topics}
-        metadata_path = Path(output) / "metadata.yaml" if output else None
-        metadata_error = None
-        if metadata_path and metadata_path.is_file():
-            try:
-                metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
-                information = metadata.get("rosbag2_bagfile_information", {})
-                storage = information.get("storage_identifier", storage)
-                for item in information.get("topics_with_message_count", []):
-                    topic = item.get("topic_metadata", {}).get("name")
-                    if topic in counts:
-                        counts[topic] = int(item.get("message_count", 0))
-            except (OSError, UnicodeError, ValueError, TypeError, yaml.YAMLError) as error:
-                metadata_error = f"Unable to read rosbag metadata: {error}"
-        else:
-            metadata_error = "Rosbag metadata.yaml was not created."
+        inspection = inspect_bag(output, storage)
+        counts = {topic: inspection["message_counts"].get(topic, 0) for topic in topics}
+        storage = inspection["storage"]
+        metadata_error = inspection["metadata_error"]
+        data_validation = inspection["data_validation"]
         missing = [topic for topic, count in counts.items() if count <= 0]
         missing_required = [topic for topic in missing if topic in required_topics]
         return {
@@ -220,7 +209,8 @@ class RosbagManager:
             "output": str(output) if output else None,
             "storage": storage,
             "message_counts": counts,
-            "valid": not missing_required and metadata_error is None,
+            "valid": not missing_required and data_validation["status"] == "passed",
+            "data_validation": data_validation,
             "missing_topics": missing,
             "metadata_error": metadata_error,
         }

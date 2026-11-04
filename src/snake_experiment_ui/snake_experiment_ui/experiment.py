@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -17,6 +18,7 @@ import uuid
 
 import yaml
 
+from .bag_validation import validation_result
 from .calibration import CalibrationError, validate_calibration_robot
 
 from .go_to import GoToError
@@ -125,6 +127,20 @@ def _topic_policy(settings: dict) -> dict:
         "required_topics": required,
         "optional_topics": optional,
         "missing_required_topics": list(required),
+    }
+
+
+def _recorded_data_valid(result: dict) -> bool:
+    return bool(result.get("valid")) and (
+        result.get("data_validation") or {}
+    ).get("status") == "passed"
+
+
+def idle_finalization() -> dict:
+    """Initial transient operator status; never written to acquisition files."""
+    return {
+        "active": False, "operation_id": 0, "block_id": None,
+        "phase": None, "trial_id": None, "attempt_number": None,
     }
 
 
@@ -360,6 +376,8 @@ class ExperimentController:
         self._mapper_local_mode_lock = threading.Lock()
         self._snake_button_provider = snake_button_provider or (lambda: None)
         self._lock = threading.RLock()
+        self._finalization_lock = threading.Lock()
+        self._finalization = idle_finalization()
         self._stack_operation_lock = threading.Lock()
         self._stack_operation: Optional[dict] = None
         self._stack_shutdown_requested = threading.Event()
@@ -372,6 +390,34 @@ class ExperimentController:
         self._latest_pose_monotonic: Optional[float] = None
         self._video_play_request: Optional[dict] = None
         self._active_trial_timer: Optional[dict] = None
+
+    def finalization_snapshot(self) -> dict:
+        """Read operator status without waiting for workflow or ROS lifecycle locks."""
+        with self._finalization_lock:
+            return dict(self._finalization)
+
+    @contextmanager
+    def _finalizing(self, block: dict):
+        # Callers already own the workflow lock. The dedicated status lock is
+        # held only while copying primitive values, never during lifecycle work.
+        trial = (self._current_training_trial(block)
+                 if block["phase"] in TRIAL_PHASES and block.get("current_trial_id") is not None
+                 else None)
+        attempt = trial["attempts"][-1] if trial and trial.get("attempts") else None
+        with self._finalization_lock:
+            operation_id = self._finalization["operation_id"] + 1
+            self._finalization = {
+                "active": True, "operation_id": operation_id,
+                "block_id": block["id"], "phase": block["phase"],
+                "trial_id": trial["id"] if trial else None,
+                "attempt_number": attempt["number"] if attempt else None,
+            }
+        try:
+            yield
+        finally:
+            with self._finalization_lock:
+                if self._finalization["operation_id"] == operation_id:
+                    self._finalization["active"] = False
 
     def prepare(self, participant: dict) -> dict:
         """Load or create durable progress without starting a ROS process."""
@@ -1334,6 +1380,7 @@ class ExperimentController:
                 "message_counts": {},
                 "missing_topics": list(block["settings"]["rosbag_topics"]),
                 "metadata_error": None,
+                "data_validation": validation_result(),
                 "valid": False,
                 "decision": None,
             }
@@ -1888,6 +1935,12 @@ class ExperimentController:
     def _finish_training_attempt(
         self, block: dict, folder: Path, reason: str, successful: bool
     ) -> None:
+        with self._finalizing(block):
+            self._finalize_training_attempt(block, folder, reason, successful)
+
+    def _finalize_training_attempt(
+        self, block: dict, folder: Path, reason: str, successful: bool
+    ) -> None:
         trial = self._current_training_trial(block)
         attempt = self._current_training_attempt(trial)
         timer = self._active_trial_timer
@@ -1915,7 +1968,7 @@ class ExperimentController:
                 "metadata_error": str(error),
                 "valid": False,
             }
-        data_valid = bool(result.get("valid"))
+        data_valid = _recorded_data_valid(result)
         technical_completed = bool(successful and data_valid)
         attempt["stopped_at_utc"] = self._utc_clock()
         technical_stop_reason = (
@@ -1931,6 +1984,7 @@ class ExperimentController:
             topic for topic in attempt["missing_topics"] if topic in attempt["required_topics"]
         ]
         attempt["metadata_error"] = result.get("metadata_error")
+        attempt["data_validation"] = result.get("data_validation", validation_result())
         attempt["valid"] = False
         attempt["success_dwell_started_monotonic"] = None
         attempt["technical_outcome"] = {
@@ -2235,28 +2289,29 @@ class ExperimentController:
             )
             self._modes.activate(block["mode"])
         except Exception as error:
-            active_mode = self._modes.active_mode()
-            if active_mode:
+            with self._finalizing(block):
+                active_mode = self._modes.active_mode()
+                if active_mode:
+                    try:
+                        self._modes.deactivate(active_mode)
+                    except Exception:
+                        pass
                 try:
-                    self._modes.deactivate(active_mode)
-                except Exception:
-                    pass
-            try:
-                result = self._rosbag.shutdown()
-            except Exception as stop_error:
-                result = {
-                    "valid": False,
-                    "message_counts": {topic: 0 for topic in topics},
-                    "missing_topics": topics,
-                    "metadata_error": str(stop_error),
-                }
-            self._finish_segment(segment, result, "activation_failure", "failed")
-            block["control_active"] = False
-            block["current_segment"] = None
-            block["error"] = f"Unable to activate discovery: {error}"
-            self._persist(folder)
-            self._write_block(folder, block)
-            raise ExperimentError(block["error"]) from error
+                    result = self._rosbag.shutdown()
+                except Exception as stop_error:
+                    result = {
+                        "valid": False,
+                        "message_counts": {topic: 0 for topic in topics},
+                        "missing_topics": topics,
+                        "metadata_error": str(stop_error),
+                    }
+                self._finish_segment(segment, result, "activation_failure", "failed")
+                block["control_active"] = False
+                block["current_segment"] = None
+                block["error"] = f"Unable to activate discovery: {error}"
+                self._persist(folder)
+                self._write_block(folder, block)
+                raise ExperimentError(block["error"]) from error
         segment["status"] = "recording"
         segment["started_at_utc"] = self._utc_clock()
         block["control_active"] = True
@@ -2266,6 +2321,10 @@ class ExperimentController:
         self._write_block(folder, block)
 
     def _deactivate_discovery(self, block: dict, folder: Path, reason: str) -> None:
+        with self._finalizing(block):
+            self._finalize_discovery(block, folder, reason)
+
+    def _finalize_discovery(self, block: dict, folder: Path, reason: str) -> None:
         segment = self._segment(block, block.get("current_segment"))
         errors = []
         try:
@@ -2290,7 +2349,7 @@ class ExperimentController:
             segment,
             result,
             reason,
-            "complete" if result.get("valid") and reason not in ("effort_overload", "protection_feedback_fault", "protection_status_unavailable") else "incomplete",
+            "complete" if _recorded_data_valid(result) and reason not in ("effort_overload", "protection_feedback_fault", "protection_status_unavailable") else "incomplete",
         )
         block["control_active"] = False
         block["current_segment"] = None
@@ -2323,6 +2382,7 @@ class ExperimentController:
             "message_counts": {},
             "missing_topics": list(block["settings"]["rosbag_topics"]),
             "metadata_error": None,
+            "data_validation": validation_result(),
             "valid": False,
         }
         block["segments"].append(segment)
@@ -2341,7 +2401,8 @@ class ExperimentController:
             topic for topic in segment["missing_topics"] if topic in segment["required_topics"]
         ]
         segment["metadata_error"] = result.get("metadata_error")
-        segment["valid"] = bool(result.get("valid")) and reason not in ("effort_overload", "protection_feedback_fault", "protection_status_unavailable")
+        segment["data_validation"] = result.get("data_validation", validation_result())
+        segment["valid"] = _recorded_data_valid(result) and reason not in ("effort_overload", "protection_feedback_fault", "protection_status_unavailable")
 
     @staticmethod
     def _can_end(block: dict) -> bool:
@@ -2355,6 +2416,7 @@ class ExperimentController:
                     "can_start_stack": False, "can_stop_stack": False, "can_restart_stack": False,
                     "stack_operation": None,
                     "current_view": "D",
+                    "finalization": self.finalization_snapshot(),
                     "error": None,
                     "participant": None,
                     "profile": None,
@@ -2587,6 +2649,7 @@ class ExperimentController:
                 **self._experiment_stack_permissions(stack_state, mapper_state, recorder_state),
                 "stack_operation": dict(self._stack_operation) if self._stack_operation else None,
                 "current_view": self._current_view,
+                "finalization": self.finalization_snapshot(),
                 "error": self._error,
                 "participant": {
                     "pseudonym": self._participant["pseudonym"],

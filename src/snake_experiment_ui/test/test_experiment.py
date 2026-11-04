@@ -14,6 +14,7 @@ from snake_experiment_ui.experiment import (
     ExperimentProfile,
 )
 from snake_experiment_ui.go_to import GoToController
+from snake_experiment_ui.bag_validation import validation_result
 
 
 class FakeStack:
@@ -87,6 +88,7 @@ class FakeRosbag:
         self.valid = True
         self.absent_topics = set()
         self.optional_topics = []
+        self.data_validation_failure = None
 
     def start(self, output, topics, storage="mcap", optional_topics=None):
         self.active = True
@@ -115,7 +117,14 @@ class FakeRosbag:
             "output": str(self.output),
             "storage": "mcap",
             "message_counts": counts,
-            "valid": self.valid and not any(t not in self.optional_topics for t in missing),
+            "valid": self.valid and self.data_validation_failure is None
+            and not any(t not in self.optional_topics for t in missing),
+            "data_validation": (
+                validation_result("failed", ["bag_0.mcap"], code=self.data_validation_failure,
+                                  message="Simulated bag read failure")
+                if self.data_validation_failure
+                else validation_result("passed", ["bag_0.mcap"], counts)
+            ),
             "missing_topics": missing,
             "metadata_error": None,
         }
@@ -1978,6 +1987,7 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(acquisition["missing_topics"], ["/mode_request"])
         self.assertEqual(acquisition["message_counts"]["/mode_request"], 0)
         self.assertTrue(acquisition["valid"])
+        self.assertEqual(acquisition["data_validation"]["status"], "passed")
 
     def test_discovery_persists_optional_topic_policy(self):
         self.prepare_session()
@@ -2059,6 +2069,7 @@ class ExperimentControllerTest(unittest.TestCase):
         attempt = trial["attempts"][-1]
         saved = json.loads((self.participant_folder / "snake_training" / trial["folder"] / "attempt_002/attempt.json").read_text())
         self.assertEqual(saved, attempt)
+        self.assertEqual(attempt["data_validation"]["status"], "not_run")
         self.assertEqual(attempt["optional_topics"], ["/mode_request"])
         self.assertEqual(attempt["missing_required_topics"], attempt["required_topics"])
 
@@ -2233,6 +2244,205 @@ class ExperimentControllerTest(unittest.TestCase):
                     self.assertEqual(attempt["status"], "invalid")
                     self.assertEqual(state["workflow"], "decision_required")
                     self.assertFalse(case.rosbag.active)
+
+
+    def test_bag_validation_failure_persists_and_incident_review_cannot_override_it(self):
+        for phase in ("training", "recording"):
+            with self.subTest(phase=phase):
+                case = self._start_feedback_case(phase)
+                state = case.controller.snapshot()[phase]
+                self.assertEqual(state["current_attempt"]["data_validation"]["status"], "not_run")
+                getattr(case.controller, f"add_{phase}_incident")(f"mode_1_{phase}")
+                case.rosbag.data_validation_failure = "read_error"
+                case.controller.update_ee_pose(case.pose("target_2"))
+                for _ in range(2):
+                    case.monotonic_value += 0.3
+                    case.controller.update_ee_pose(case.pose("target_2"))
+                state = case.controller.snapshot()[phase]
+                self.assertEqual(state["workflow"], "incident_review_required")
+                attempt = state["current_attempt"]
+                self.assertFalse(attempt["technical_outcome"]["data_valid"])
+                self.assertEqual(attempt["stop_reason"], "invalid_data")
+                getattr(case.controller, f"review_{phase}_incidents")(
+                    f"mode_1_{phase}", [{"id": 1, "text": "Reviewed incident"}], False
+                )
+                state = case.controller.snapshot()[phase]
+                self.assertEqual(state["workflow"], "decision_required")
+                trial = state["trials"][0]
+                attempt = trial["attempts"][0]
+                self.assertFalse(attempt["valid"])
+                self.assertEqual(attempt["data_validation"]["error"]["code"], "read_error")
+                self.assertIsNone(attempt["metadata_error"])
+                self.assertTrue(all(attempt["message_counts"].values()))
+                saved = json.loads((case.participant_folder / f"snake_{phase}" /
+                                    trial["folder"] / "attempt_001/attempt.json").read_text())
+                self.assertEqual(saved["data_validation"], attempt["data_validation"])
+                progress = json.loads((case.participant_folder / "experiment_progress.json").read_text())
+                block = next(b for b in progress["blocks"] if b["id"] == f"mode_1_{phase}")
+                self.assertEqual(block["training_trials"][0]["attempts"][0]["data_validation"],
+                                 attempt["data_validation"])
+
+    def test_missing_read_diagnostic_cannot_be_accepted(self):
+        self.start_first_training_attempt()
+        result = self.rosbag._result()
+        result.pop("data_validation")
+        with patch.object(self.rosbag, "stop", return_value=result):
+            self.controller.update_ee_pose(self.pose("target_2"))
+            for _ in range(2):
+                self.monotonic_value += 0.3
+                self.controller.update_ee_pose(self.pose("target_2"))
+        attempt = self.controller.snapshot()["training"]["trials"][0]["attempts"][0]
+        self.assertFalse(attempt["valid"])
+        self.assertFalse(attempt["technical_outcome"]["data_valid"])
+        self.assertEqual(attempt["data_validation"]["status"], "not_run")
+        self.assertEqual(attempt["stop_reason"], "invalid_data")
+
+    def test_discovery_bag_read_failure_is_saved_without_metadata_error(self):
+        self.prepare_session()
+        block_id = "mode_1_discovery"
+        self.controller.start(block_id)
+        self.set_control(block_id, True)
+        state = self.controller.snapshot()
+        self.assertEqual(state["segments"][0]["data_validation"]["status"], "not_run")
+        self.rosbag.data_validation_failure = "count_mismatch"
+        state = self.set_control(block_id, False)
+        segment = state["segments"][0]
+        self.assertFalse(segment["valid"])
+        self.assertFalse(state["can_end"])
+        self.assertEqual(segment["data_validation"]["error"]["code"], "count_mismatch")
+        self.assertIsNone(segment["metadata_error"])
+        saved = json.loads((self.participant_folder / "snake_discovery/block.json").read_text())
+        self.assertEqual(saved["segments"][0]["data_validation"], segment["data_validation"])
+
+
+    def test_finalization_status_is_readable_while_recorder_blocks_workflow(self):
+        self.start_first_training_attempt()
+        entered, release, observed = threading.Event(), threading.Event(), threading.Event()
+        errors, status = [], []
+        initial_id = self.controller.finalization_snapshot()["operation_id"]
+        original_stop = self.rosbag.stop
+        def stop():
+            entered.set()
+            if not release.wait(3):
+                raise RuntimeError("test release timed out")
+            return original_stop()
+        def finalize():
+            try:
+                self.controller.stop_training_attempt("mode_1_training")
+            except Exception as error:
+                errors.append(error)
+        def read_status():
+            status.append(self.controller.finalization_snapshot())
+            observed.set()
+        with patch.object(self.rosbag, "stop", side_effect=stop):
+            worker = threading.Thread(target=finalize)
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(1))
+                reader = threading.Thread(target=read_status)
+                reader.start()
+                self.assertTrue(observed.wait(0.3), "Status waited for the workflow lock")
+                self.assertEqual(status[0], {
+                    "active": True, "operation_id": initial_id + 1, "block_id": "mode_1_training",
+                    "phase": "training", "trial_id": 1, "attempt_number": 1,
+                })
+            finally:
+                release.set()
+                worker.join(2)
+                if "reader" in locals():
+                    reader.join(1)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        done = self.controller.finalization_snapshot()
+        self.assertFalse(done["active"])
+        self.assertEqual(done["operation_id"], status[0]["operation_id"])
+        self.assertEqual(self.controller.snapshot()["finalization"], done)
+        saved = json.loads((self.participant_folder / "experiment_progress.json").read_text())
+        self.assertNotIn("finalization", saved)
+
+    def test_finalization_status_clears_after_success_review_and_write_error(self):
+        for phase in ("training", "recording"):
+            for result in ("success", "review", "write_error"):
+                with self.subTest(phase=phase, result=result):
+                    case = self._start_feedback_case(phase)
+                    if result == "review":
+                        getattr(case.controller, f"add_{phase}_incident")(f"mode_1_{phase}")
+                    seen = []
+                    original_persist = case.controller._persist_training
+                    def persist(*args):
+                        seen.append(case.controller.finalization_snapshot())
+                        if result == "write_error":
+                            raise OSError("simulated disk error")
+                        return original_persist(*args)
+                    with patch.object(case.controller, "_persist_training", side_effect=persist):
+                        case.controller.update_ee_pose(case.pose("target_2"))
+                        for _ in range(2):
+                            case.monotonic_value += 0.3
+                            case.controller.update_ee_pose(case.pose("target_2"))
+                    self.assertTrue(seen)
+                    self.assertTrue(all(item["active"] for item in seen))
+                    self.assertTrue(all(item["phase"] == phase for item in seen))
+                    self.assertFalse(case.controller.finalization_snapshot()["active"])
+                    if result != "write_error":
+                        state = case.controller.snapshot()[phase]
+                        self.assertEqual(state["workflow"], "incident_review_required"
+                                         if result == "review" else "awaiting_prepare")
+
+    def test_discovery_finalization_and_activation_cleanup_publish_status(self):
+        self.prepare_session()
+        block_id = "mode_1_discovery"
+        self.controller.start(block_id)
+        self.set_control(block_id, True)
+        seen = []
+        original_stop = self.rosbag.stop
+        def stop():
+            seen.append(self.controller.finalization_snapshot())
+            return original_stop()
+        with patch.object(self.rosbag, "stop", side_effect=stop):
+            self.set_control(block_id, False)
+        self.assertTrue(seen[0]["active"])
+        self.assertEqual(seen[0]["phase"], "discovery")
+        self.assertIsNone(seen[0]["trial_id"])
+        self.assertFalse(self.controller.finalization_snapshot()["active"])
+        previous_id = seen[0]["operation_id"]
+        original_shutdown = self.rosbag.shutdown
+        def shutdown():
+            seen.append(self.controller.finalization_snapshot())
+            return original_shutdown()
+        with patch.object(self.modes, "activate", side_effect=RuntimeError("mapper failed")):
+            with patch.object(self.rosbag, "shutdown", side_effect=shutdown):
+                with self.assertRaises(ExperimentError):
+                    self.set_control(block_id, True)
+        self.assertTrue(seen[-1]["active"])
+        self.assertGreater(seen[-1]["operation_id"], previous_id)
+        self.assertFalse(self.controller.finalization_snapshot()["active"])
+
+    def test_finalization_status_clears_for_every_trial_interruption(self):
+        for action in ("operator", "timeout", "protection", "restart", "shutdown", "abort"):
+            with self.subTest(action=action):
+                case = self._start_feedback_case("training", timeout=0.5 if action == "timeout" else None)
+                seen = []
+                original_stop = case.rosbag.stop
+                def stop():
+                    seen.append(case.controller.finalization_snapshot())
+                    return original_stop()
+                with patch.object(case.rosbag, "stop", side_effect=stop):
+                    if action == "operator":
+                        case.controller.stop_training_attempt("mode_1_training")
+                    elif action == "timeout":
+                        case.monotonic_value += 0.5
+                        case.controller.tick_trial_timeout()
+                    elif action == "protection":
+                        case.controller.interrupt_overload({"event": 1, "reason": "overload"})
+                    elif action == "restart":
+                        case.controller.restart_stack("mode_1_training")
+                    elif action == "shutdown":
+                        case.controller.shutdown()
+                    else:
+                        case.controller.abort("mode_1_training")
+                self.assertTrue(seen)
+                self.assertTrue(seen[0]["active"])
+                self.assertFalse(case.controller.finalization_snapshot()["active"])
 
 
 if __name__ == "__main__":

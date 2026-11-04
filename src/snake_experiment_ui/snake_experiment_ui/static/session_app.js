@@ -13,7 +13,12 @@ class SessionInterface {
     this.reconnectDelay = 500;
     this.toastTimer = null;
     this.browser = null;
+    this.finalizationState = null;
+    this.finalizationPending = false;
+    this.finalizationConnectionLost = false;
+    this.finalizationEpoch = 0;
     this.bindActions();
+    this.pollFinalization();
     this.connect();
   }
 
@@ -200,10 +205,99 @@ class SessionInterface {
     }
   }
 
+  async finalizationFetch(url, timeoutMs) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error("Finalization status unavailable");
+      return await response.json();
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  receiveFinalization(status, fromSnapshot = false) {
+    if (!status || typeof status.active !== "boolean"
+        || !Number.isSafeInteger(status.operation_id) || status.operation_id < 0) {
+      throw new Error("Invalid finalization status");
+    }
+    const previous = this.finalizationState;
+    if (previous && (status.operation_id < previous.operation_id
+        || (status.operation_id === previous.operation_id && !previous.active && status.active))) {
+      return false;
+    }
+    this.finalizationState = status;
+    this.finalizationConnectionLost = false;
+    if (status.active) this.finalizationPending = true;
+    else if (fromSnapshot) this.finalizationPending = false;
+    this.renderFinalization();
+    return true;
+  }
+
+  async pollFinalization() {
+    if (this.finalizationPolling) return;
+    this.finalizationPolling = true;
+    const epoch = this.finalizationEpoch || 0;
+    try {
+      const status = await this.finalizationFetch("/api/experiment/finalization", 3000);
+      if (epoch === (this.finalizationEpoch || 0)) {
+        this.receiveFinalization(status);
+        if (this.finalizationPending && !this.finalizationState.active) {
+          // Do not delay the independent status poll on the workflow snapshot.
+          this.refreshFinalizationState();
+        }
+      }
+    } catch (error) {
+      if (epoch === (this.finalizationEpoch || 0) && this.finalizationPending) {
+        this.finalizationConnectionLost = true;
+        this.renderFinalization();
+      }
+    } finally {
+      this.finalizationPolling = false;
+      window.setTimeout(() => this.pollFinalization(), 250);
+    }
+  }
+
+  async refreshFinalizationState() {
+    if (this.finalizationRefreshing) return;
+    this.finalizationRefreshing = true;
+    const epoch = this.finalizationEpoch || 0;
+    try {
+      const state = await this.finalizationFetch("/api/state", 5000);
+      if (epoch === (this.finalizationEpoch || 0)) this.update(state);
+    } catch (error) {
+      if (epoch === (this.finalizationEpoch || 0) && this.finalizationPending
+          && !this.finalizationState?.active) {
+        this.finalizationConnectionLost = true;
+        this.renderFinalization();
+      }
+    } finally {
+      this.finalizationRefreshing = false;
+    }
+  }
+
+  renderFinalization() {
+    const banner = document.getElementById("acquisition-finalization");
+    if (!banner) return;
+    this.setHidden(banner, !this.finalizationPending);
+    this.setText(document.getElementById("acquisition-finalization-title"),
+      this.finalizationConnectionLost
+        ? "État de vérification indisponible. Reconnexion en cours…"
+        : "Vérification en cours…");
+    for (const view of document.querySelectorAll(".view-page")) {
+      view.inert = Boolean(this.finalizationPending);
+    }
+  }
+
   connect() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
     socket.onopen = () => {
+      // A restarted backend has a new operation counter. Ignore old requests
+      // while retaining the pending latch until a fresh snapshot arrives.
+      this.finalizationEpoch = (this.finalizationEpoch || 0) + 1;
+      this.finalizationState = null;
       this.reconnectDelay = 500;
       this.renderConnection(true);
     };
@@ -296,6 +390,9 @@ class SessionInterface {
 
   update(state) {
     this.state = state;
+    const status = state.experiment?.finalization
+      || (["B", "C"].includes(state.current_view) ? { active: false, operation_id: 0 } : null);
+    if (status) this.receiveFinalization(status, true);
     this.render();
   }
 
@@ -391,6 +488,7 @@ class SessionInterface {
   render() {
     this.renderPage();
     this.renderProtection();
+    this.renderFinalization();
   }
 
   renderProtection() {
