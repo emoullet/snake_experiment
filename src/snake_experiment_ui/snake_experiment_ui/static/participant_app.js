@@ -1,4 +1,6 @@
 (() => {
+  const controllerLabels = { snake: "Controller A", baseline: "Controller B" };
+  const modeLabels = { snake: { b1: "A1", b2: "A2" }, baseline: { b1: "B1", b2: "B2", b3: "B3" } };
   const workspace = document.querySelector(".participant-workspace");
   const waiting = document.getElementById("participant-waiting");
   const presentation = document.getElementById("participant-presentation");
@@ -290,7 +292,7 @@
       videoError.hidden = true;
     }
     if (showB) {
-      const label = state.mode === "baseline" ? "Baseline" : "Snake";
+      const label = controllerLabels[state.mode];
       if (modeTitle.textContent !== `${label} mode explanation`) modeTitle.textContent = `${label} mode explanation`;
       const available = !!state.video_available;
       modeFrame.hidden = !available;
@@ -310,7 +312,7 @@
     presentationPlayback(state.video_play_request_id, showA && state.video_available);
     explanationPlayback(state.video_play_request_id, showB && state.video_available);
     if (showC) {
-      const modeName = state.mode === "baseline" ? "Baseline" : "Snake";
+      const modeName = controllerLabels[state.mode];
       const phaseName = state.phase === "recording" ? "recording" : "training";
       setText(trialTitle, `${modeName} ${phaseName}`);
       setText(trialTask, state.task || "Waiting for next trial");
@@ -322,7 +324,7 @@
       trialTimeoutMessage.hidden = !state.time_limit_reached;
       setText(linearDistance, Number.isFinite(state.linear_mm) ? `${state.linear_mm.toFixed(1)} mm` : "—");
       setText(angularDistance, Number.isFinite(state.angular_deg) ? `${state.angular_deg.toFixed(1)}°` : "—");
-      setText(localMode, state.local_mode || "Unknown");
+      setText(localMode, modeLabels[state.mode]?.[state.local_mode] || "Unknown");
       setText(trialState, state.state || "Waiting");
       const stateClass = state.state === "Target reached" ? "pill pill--active" : state.state === "Recording" ? "pill pill--warning" : "pill pill--neutral";
       if (trialState.className !== stateClass) trialState.className = stateClass;

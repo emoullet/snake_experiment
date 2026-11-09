@@ -83,6 +83,22 @@ const overloadState = (episode = 'episode-1', duration = 3, phase = 'waiting_ret
   view: 'waiting', overload_warning: { episode_id: episode, duration_sec: duration, phase },
 });
 
+test('participant controller and mode labels follow the active controller', async () => {
+  const c = await client();
+  for (const [mode, label, local, expected] of [
+    ['snake', 'Controller A', 'b1', 'A1'], ['snake', 'Controller A', 'b2', 'A2'],
+    ['baseline', 'Controller B', 'b1', 'B1'], ['baseline', 'Controller B', 'b2', 'B2'],
+    ['baseline', 'Controller B', 'b3', 'B3'], ['snake', 'Controller A', 'b3', 'Unknown'],
+    ['baseline', 'Controller B', null, 'Unknown'],
+  ]) {
+    c.send({ view: 'B', mode });
+    assert.equal(c.element('participant-mode-title').textContent, `${label} mode explanation`);
+    c.send({ view: 'C', mode, local_mode: local, phase: 'training' });
+    assert.equal(c.element('participant-trial-title').textContent, `${label} training`);
+    assert.equal(c.element('participant-local-mode').textContent, expected);
+  }
+});
+
 test('alarm plays once per episode across phases, panels, duplicates and reconnection', async () => {
   const c = await client(overloadState('first', 2.25));
   const alarm = c.audio('tarkov_reserve_alarm.mp3');

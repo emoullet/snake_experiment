@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Euler, Group, Quaternion, Vector3 } from 'three';
-import { axisLabels, commandForAxis, cycleBasePose, joystickDisplacement, participantMappingSelection } from '../src/mapping.js';
+import { axisLabels, commandForAxis, cycleBasePose, joystickDisplacement, participantMappingSelection, participantSubmodeLabel } from '../src/mapping.js';
 import { ARM_JOINTS, cyclePose, effectorPose, rotationVector, setArmPose, solveAxisEndpoints } from '../src/kinematics.js';
 
 const component = (index, scale = 1) => ({ index, scale });
+test('illustrative mapping labels follow the controller', () => {
+  for (const [mode, submode, label] of [
+    ['snake', 'b1', 'A1'], ['snake', 'b2', 'A2'],
+    ['baseline', 'b1', 'B1'], ['baseline', 'b2', 'B2'], ['baseline', 'b3', 'B3'],
+    ['snake', 'b3', 'Unknown'], ['baseline', null, 'Unknown'],
+  ]) assert.equal(participantSubmodeLabel(mode, submode), label);
+});
 const axes = (x, y, z, rx, ry, rz) => ({
   linear_x: component(x), linear_y: component(y), linear_z: component(z),
   angular_x: component(rx), angular_y: component(ry), angular_z: component(rz),

@@ -6,6 +6,11 @@ const LINEAR = ['linear_x', 'linear_y', 'linear_z'];
 const ANGULAR = ['angular_x', 'angular_y', 'angular_z'];
 
 /** Keep the participant demonstration moving when live mapper state is unavailable. */
+export function participantSubmodeLabel(mode, submode) {
+  const labels = { snake: { b1: 'A1', b2: 'A2' }, baseline: { b1: 'B1', b2: 'B2', b3: 'B3' } };
+  return labels[mode]?.[submode] || 'Unknown';
+}
+
 export function participantMappingSelection(config, state, lastKnownSubmode = null) {
   const mappings = config.mapper[state?.mode];
   if (!mappings) return null;

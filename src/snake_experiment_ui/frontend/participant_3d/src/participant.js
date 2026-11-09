@@ -1,7 +1,7 @@
 /** Connect the read-only mapping animation to the participant session view. */
 
 import { MappingAnimator } from './animation.js';
-import { participantMappingSelection } from './mapping.js';
+import { participantMappingSelection, participantSubmodeLabel } from './mapping.js';
 
 const message = document.getElementById('participant-mapping-message');
 const snakeIndicator = document.getElementById('participant-snake-indicator');
@@ -67,7 +67,7 @@ function update(state) {
   if (selection?.submodeReported) lastKnownSubmode = selection.submode;
   snakeIndicator.hidden = mode !== 'snake';
   if (mode === 'snake') {
-    snakeIndicator.textContent = selection?.snakeHeld ? 'Snake active · button held' : 'Snake inactive';
+    snakeIndicator.textContent = selection?.snakeHeld ? 'Coupling active · button held' : 'Coupling inactive';
     snakeIndicator.className = `pill ${selection?.snakeHeld ? 'pill--active' : 'pill--neutral'}`;
   }
   if (!selection) {
@@ -76,7 +76,9 @@ function update(state) {
     message.textContent = 'Mapping configuration unavailable · animations cannot start.';
   } else {
     const notes = [];
-    if (!selection.submodeReported) notes.push(`Illustrative ${selection.submode} mapping; mapper sub-mode unavailable.`);
+    if (!selection.submodeReported) {
+      notes.push(`Illustrative ${participantSubmodeLabel(mode, selection.submode)} mapping; mapper sub-mode unavailable.`);
+    }
     illustrationNote = notes.join(' ');
     animator.setSelection(selection.mode, selection.submode, selection.snakeHeld);
     updateMessage();
