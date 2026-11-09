@@ -20,18 +20,18 @@ joystick_mapper:
         axes:
           linear_x: {index: -1, scale: 1.0}
           linear_y: {index: -1, scale: 1.0}
-          linear_z: {index: 1, scale: 1.0}
+          linear_z: {index: 1, scale: -1.0}
           angular_x: {index: -1, scale: 1.0}
           angular_y: {index: -1, scale: 1.0}
-          angular_z: {index: 0, scale: 1.0}
+          angular_z: {index: 0, scale: -1.0}
       b3:
         angular_output_frame_id: end_effector_link
         axes:
           linear_x: {index: -1, scale: 1.0}
           linear_y: {index: -1, scale: 1.0}
           linear_z: {index: -1, scale: 1.0}
-          angular_x: {index: 0, scale: 1.0}
-          angular_y: {index: 1, scale: 1.0}
+          angular_x: {index: 1, scale: 1.0}
+          angular_y: {index: 0, scale: 1.0}
           angular_z: {index: -1, scale: 1.0}
     local_mode_button_index: 11
     local_mode_button_mode: toggle

@@ -32,7 +32,7 @@ qontrol_explorer:
       - effort
     robot_command: position
     # Estimated end-effector force magnitude threshold, in newtons.
-    force_threshold: 10.0
+    force_threshold: 30.0
 
     # Velocity parameters
     command_max_linear_velocity: 0.15
@@ -119,8 +119,8 @@ cartesian_manager:
         positions: [0.6, 0.27, 0.22]
         orientations: [-0.22, 0.85, 0.11, 0.45]
         linear_kp: 25.0
-        angular_kp: 1.0
+        angular_kp: 5.0
         max_linear_velocity: 0.5
-        max_angular_velocity: 0.2
+        max_angular_velocity: 0.4
         position_tolerance: 0.005 # Standalone fallback; session launch overrides this from experiment.yaml.
         orientation_tolerance: 0.08726646259971647 # Standalone fallback; session launch overrides this from experiment.yaml.
