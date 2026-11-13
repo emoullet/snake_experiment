@@ -53,6 +53,7 @@ class CheckupController:
         go_to_controller=None,
         calibration_file: Optional[Path] = None,
         robot: str = "explorer",
+        skip_at_startup: bool = False,
     ) -> None:
         self._robot = robot
         self._stack = stack_manager
@@ -69,6 +70,16 @@ class CheckupController:
         )
         self._lock = threading.RLock()
         self._reset_state()
+        if skip_at_startup:
+            self._workflow = "validated"
+            self._pending_report = {
+                "schema_version": 1,
+                "checkup_id": str(uuid.uuid4()),
+                "completed_at_utc": self._utc_clock(),
+                "status": "SKIPPED",
+                "environment": "simulation" if self._use_simulation else "hardware",
+                "platform": {"ros_distro": self._ros_distro, "operating_system": platform.platform()},
+            }
 
     def _reset_state(self) -> None:
         self._workflow = "idle"

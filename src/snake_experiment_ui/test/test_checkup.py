@@ -151,6 +151,21 @@ class CheckupControllerTest(unittest.TestCase):
                 self.controller.start_stack()
             self.assertEqual(self.stack.status, "inactive")
 
+    def test_skip_at_startup_records_skip_and_reset_restores_checkup(self):
+        controller = CheckupController(
+            self.stack, self.modes, self.diagnostics, lambda: {}, True, "jazzy",
+            utc_clock=lambda: "2026-09-15T10:00:00Z", skip_at_startup=True,
+        )
+        state = controller.snapshot()
+        self.assertEqual(state["current_view"], "C")
+        self.assertEqual(state["pending_report"]["status"], "SKIPPED")
+        self.assertEqual(state["pending_report"]["environment"], "simulation")
+        self.assertTrue(state["pending_report"]["checkup_id"])
+        self.assertEqual(self.stack.status, "inactive")
+        state = controller.reset()
+        self.assertEqual(state["current_view"], "B")
+        self.assertIsNone(state["pending_report"])
+
     def tearDown(self):
         self.temporary_directory.cleanup()
 

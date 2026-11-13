@@ -35,6 +35,12 @@ ros2 launch snake_experiment_ui session_interface.launch.py \
 
 Open the addresses in the table above. Both interfaces select hardware by
 default; pass `stack_use_simulation:=true` to use simulation.
+To start the session interface at participant enrollment without performing the
+system checkup, add `skip_system_checkup:=true` to its launch command. The
+participant's checkup report records `SKIPPED`; the default is `false`. Resetting
+the checkup in the interface starts the normal checkup workflow. Skipping the
+checkup does not skip calibration: enrollment still needs a saved calibration
+for the selected robot, either at the default path or via `calibration_file`.
 Each interface controls only the processes it started. Avoid starting the
 robot stack from both interfaces at the same time. The servers bind to
 `127.0.0.1` and have no authentication.

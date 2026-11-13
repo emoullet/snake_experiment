@@ -56,6 +56,7 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("stack_robot", "explorer")
         self.declare_parameter("stack_robot_ip", "192.168.1.10")
         self.declare_parameter("stack_use_simulation", False)
+        self.declare_parameter("skip_system_checkup", False)
         self.declare_parameter("diagnostic_profile", "")
         self.declare_parameter("experiment_profile", "")
         self.declare_parameter("participant_interface_profile", "")
@@ -292,6 +293,7 @@ class SessionInterfaceNode(Node):
             ros_distro=os.environ.get("ROS_DISTRO", "unknown"),
             go_to_controller=self._checkup_go_to,
             calibration_file=calibration_file,
+            skip_at_startup=self.get_parameter("skip_system_checkup").value,
         )
         configured_sessions_root = str(self.get_parameter("sessions_root").value)
         sessions_root = Path(configured_sessions_root) if configured_sessions_root else Path.cwd()
