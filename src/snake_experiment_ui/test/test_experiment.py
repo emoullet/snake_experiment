@@ -1107,6 +1107,8 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assertEqual(public["state"], "Recording")
         self.assertAlmostEqual(public["linear_mm"], 20.0)
         self.assertAlmostEqual(public["angular_deg"], 0.0)
+        self.assertEqual(public["linear_threshold_mm"], 5.0)
+        self.assertEqual(public["angular_threshold_deg"], 5.0)
         self.monotonic_value += 0.6
         self.assertIsNone(self.controller.participant_snapshot()["linear_mm"])
         self.controller.update_ee_pose(self.pose("target_2"))

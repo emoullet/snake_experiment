@@ -24,6 +24,8 @@
 .participant-timeout-message { margin: 10px 0 0; color: var(--danger, #a32727); font-size: 1rem; font-weight: 700; }
 .participant-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .participant-metrics > div { display: grid; gap: 8px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--background, #f6f9fd); }
+.participant-metrics > .participant-metric--within { color: var(--green); border-color: var(--green); background: var(--green-soft); }
+.participant-metrics > .participant-metric--above { color: var(--red); border-color: var(--red); background: var(--red-soft); }
 .participant-metrics strong { font-size: clamp(1.35rem, 2.5vw, 2rem); }
 .participant-control-state strong { font-size: 1.4rem; }
 .participant-control-state .pill { justify-self: start; }

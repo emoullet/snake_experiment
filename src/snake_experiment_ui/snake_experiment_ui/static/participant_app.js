@@ -63,6 +63,12 @@
   let lastSuccessEventId = null;
   let receivedWebSocketState = false;
   const setText = (element, value) => { if (element.textContent !== value) element.textContent = value; };
+  const setDistance = (element, value, threshold, unit) => {
+    setText(element, Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : "—");
+    const valid = Number.isFinite(value) && Number.isFinite(threshold);
+    element.parentElement.classList.toggle("participant-metric--within", valid && value <= threshold);
+    element.parentElement.classList.toggle("participant-metric--above", valid && value > threshold);
+  };
   const formatCountdown = (seconds) => {
     const wholeSeconds = Math.max(0, Math.ceil(seconds));
     const minutes = String(Math.floor(wholeSeconds / 60)).padStart(2, "0");
@@ -322,8 +328,8 @@
       setText(trialTimeRemaining, countdown);
       trialCountdown.hidden = remaining === null;
       trialTimeoutMessage.hidden = !state.time_limit_reached;
-      setText(linearDistance, Number.isFinite(state.linear_mm) ? `${state.linear_mm.toFixed(1)} mm` : "—");
-      setText(angularDistance, Number.isFinite(state.angular_deg) ? `${state.angular_deg.toFixed(1)}°` : "—");
+      setDistance(linearDistance, state.linear_mm, state.linear_threshold_mm, " mm");
+      setDistance(angularDistance, state.angular_deg, state.angular_threshold_deg, "°");
       setText(localMode, modeLabels[state.mode]?.[state.local_mode] || "Unknown");
       setText(trialState, state.state || "Waiting");
       const stateClass = state.state === "Target reached" ? "pill pill--active" : state.state === "Recording" ? "pill pill--warning" : "pill pill--neutral";

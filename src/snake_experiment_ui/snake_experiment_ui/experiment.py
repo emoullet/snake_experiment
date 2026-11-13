@@ -885,6 +885,8 @@ class ExperimentController:
                     ),
                     "linear_mm": target_error.get("linear_mm") if target_error else None,
                     "angular_deg": target_error.get("angular_deg") if target_error else None,
+                    "linear_threshold_mm": active["success_thresholds"]["linear_mm"],
+                    "angular_threshold_deg": active["success_thresholds"]["angular_deg"],
                     **self._participant_mapper_state(active["mode"]),
                 }
             any_explanation = bool(
