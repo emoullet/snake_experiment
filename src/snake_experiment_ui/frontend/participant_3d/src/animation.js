@@ -10,7 +10,7 @@ import { cameraDirection, combinedCycleBounds, frameCameras } from './camera.js'
 
 const PREFIX = '/participant/3d-preview';
 const ROBOT_MATERIAL = new THREE.MeshStandardMaterial({
-  color: 0x315578, metalness: 0.02, roughness: 0.82, side: THREE.DoubleSide,
+  color: 0x7696b3, metalness: 0.02, roughness: 0.82, side: THREE.DoubleSide,
 });
 
 function setText(element, value) {
@@ -37,16 +37,30 @@ function createView(root, axisIndex, onResize) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x9aacc5, 0.85));
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x9aacc5, 0.55));
   const key = new THREE.DirectionalLight(0xffffff, 1.1);
   key.position.set(2, 3, 4);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.bias = -0.0002;
   scene.add(key);
+  scene.add(key.target);
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.ShadowMaterial({ color: 0x344c66, opacity: 0.32 }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.01;
+  ground.receiveShadow = true;
+  scene.add(ground);
   const fill = new THREE.DirectionalLight(0xffffff, 0.35);
   fill.position.set(-3, 1, -2);
   scene.add(fill);
   const view = {
-    root, container, scene, camera, renderer, axisIndex, robot: null,
+    root, container, scene, camera, renderer, axisIndex, robot: null, ground, key,
     source: root.querySelector('[data-mapping-source]'),
     directionLabel: root.querySelector('[data-mapping-direction]'),
     limit: root.querySelector('[data-mapping-limit]'),
@@ -84,14 +98,19 @@ async function loadModel(view, onModelChange) {
     }
     if (path.endsWith('.stl')) {
       new STLLoader(loadingManager).load(path, geometry => {
-        finishMesh(done, new THREE.Mesh(geometry, ROBOT_MATERIAL));
+        const mesh = new THREE.Mesh(geometry, ROBOT_MATERIAL);
+        mesh.castShadow = true;
+        finishMesh(done, mesh);
       }, undefined, error => finishMesh(done, null, error));
       return;
     }
     new ColladaLoader(loadingManager).load(path, result => {
       const importedLights = [];
       result.scene.traverse(part => {
-        if (part.isMesh) part.material = ROBOT_MATERIAL;
+        if (part.isMesh) {
+          part.material = ROBOT_MATERIAL;
+          part.castShadow = true;
+        }
         if (part.isLight) importedLights.push(part);
       });
       for (const light of importedLights) light.parent.remove(light);
@@ -156,6 +175,21 @@ export class MappingAnimator {
 
   updateFraming() {
     this.cameraBounds = combinedCycleBounds(this.views);
+    if (!this.cameraBounds.isEmpty()) {
+      const center = this.cameraBounds.getCenter(new THREE.Vector3());
+      const radius = Math.max(this.cameraBounds.getSize(new THREE.Vector3()).length(), 0.5);
+      for (const { ground, key } of this.views) {
+        ground.position.set(center.x, -0.01, center.z);
+        ground.scale.setScalar(radius * 8);
+        key.target.position.copy(center);
+        key.position.copy(center).add(new THREE.Vector3(2, 3, 4).normalize().multiplyScalar(radius * 4));
+        Object.assign(key.shadow.camera, {
+          left: -radius * 3, right: radius * 3, top: radius * 3, bottom: -radius * 3,
+          near: 0.01, far: radius * 12,
+        });
+        key.shadow.camera.updateProjectionMatrix();
+      }
+    }
     this.frameCameras();
   }
 
