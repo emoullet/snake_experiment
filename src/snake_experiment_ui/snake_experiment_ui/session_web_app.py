@@ -129,6 +129,7 @@ def create_session_app(
     preview_default_view="view_1",
     stack_snapshot=None,
     overload_sound_duration_sec=3.0,
+    joystick_input_snapshot=None,
 ):
     """Create the View B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
@@ -282,6 +283,7 @@ def create_session_app(
         state = dict(experiment.participant_snapshot()) if experiment is not None else {
             "view": "waiting", "presentation_status": "pending", "video_available": False,
         }
+        state["joystick_input_active"] = bool(joystick_input_snapshot()) if joystick_input_snapshot else False
         state["overload_warning"] = None
         if protection_snapshot is not None:
             protection = protection_snapshot()

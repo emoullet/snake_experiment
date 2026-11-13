@@ -440,7 +440,7 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         response = await self.request("GET", "/participant/api/state")
         self.assertEqual(response.json(), {
             "view": "A", "presentation_status": "showing", "video_available": False,
-            "overload_warning": None,
+            "overload_warning": None, "joystick_input_active": False,
         })
         self.assertNotIn("participant", response.text)
         self.assertEqual((await self.request("GET", "/participant/video")).status_code, 404)
@@ -450,6 +450,24 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request("POST", "/api/experiment/presentation/show")).status_code, 200)
         self.assertEqual((await self.request("POST", "/api/experiment/presentation/complete")).status_code, 200)
         self.assertEqual(self.experiment.calls[-2:], [("presentation", "show"), ("presentation", "complete")])
+
+    async def test_participant_projection_reports_current_joystick_input(self):
+        from unittest.mock import patch
+        from snake_experiment_ui.session_web_app import create_session_app
+        root = Path(self.temporary_directory.name)
+        active = [False]
+        self.app = create_session_app(
+            self.checkup, root / "static", root / "templates",
+            self.enrollment, self.experiment,
+            joystick_input_snapshot=lambda: active[0],
+        )
+        endpoint = next(route.endpoint for route in self.app.routes if route.path == "/participant/api/state")
+        async def inline(function):
+            return function()
+        with patch("snake_experiment_ui.session_web_app.asyncio.to_thread", side_effect=inline):
+            self.assertFalse((await endpoint())["joystick_input_active"])
+            active[0] = True
+            self.assertTrue((await endpoint())["joystick_input_active"])
 
     async def test_unknown_mode_and_stack_action_are_reported(self):
         response = await self.request("POST", "/api/checkup/modes/automatic/start")

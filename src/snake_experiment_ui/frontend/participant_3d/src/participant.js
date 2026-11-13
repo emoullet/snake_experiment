@@ -3,6 +3,7 @@
 import { MappingAnimator } from './animation.js';
 import { participantMappingSelection, participantSubmodeLabel } from './mapping.js';
 
+const preview = document.getElementById('participant-mapping');
 const message = document.getElementById('participant-mapping-message');
 const snakeIndicator = document.getElementById('participant-snake-indicator');
 const animator = new MappingAnimator([
@@ -45,6 +46,7 @@ function updateMessage() {
 
 function update(state) {
   latestState = state;
+  preview.hidden = state?.joystick_input_active === true;
   if (!animator.config) return;
   if (!['B', 'C'].includes(state?.view)) {
     animator.stop();
@@ -83,7 +85,8 @@ function update(state) {
     animator.setSelection(selection.mode, selection.submode, selection.snakeHeld);
     updateMessage();
   }
-  animator.start();
+  if (preview.hidden) animator.stop();
+  else animator.start();
 }
 
 window.addEventListener('participant:state', event => update(event.detail));
