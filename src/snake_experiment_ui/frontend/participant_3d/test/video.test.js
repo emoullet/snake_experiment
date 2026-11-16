@@ -47,7 +47,9 @@ async function client(initial = { view: 'waiting' }, delayedInitial = null, came
     if (!elements.has(id)) elements.set(id, new Element());
     return elements.get(id);
   };
-  element('participant-mapping').parentElement = element('participant-trial');
+  element('participant-mapping').parentElement = element('participant-trial-guidance');
+  element('participant-linear-distance').parentElement = new Element();
+  element('participant-angular-distance').parentElement = new Element();
   let socket;
   const audios = [];
   const timers = new Map();
@@ -81,6 +83,18 @@ const videoState = (id, view = 'A', mode = null, available = true) => ({
 
 const overloadState = (episode = 'episode-1', duration = 3, phase = 'waiting_retreat') => ({
   view: 'waiting', overload_warning: { episode_id: episode, duration_sec: duration, phase },
+});
+
+test('mapping returns to the trial guidance column after mode explanation', async () => {
+  const c = await client({ view: 'C', mode: 'snake', phase: 'training' });
+  const mapping = c.element('participant-mapping');
+  assert.equal(mapping.parentElement, c.element('participant-trial-guidance'));
+  c.send({ view: 'B', mode: 'snake' });
+  assert.equal(mapping.parentElement, c.element('participant-discovery-preview'));
+  c.send({ view: 'C', mode: 'snake', phase: 'training' });
+  assert.equal(mapping.parentElement, c.element('participant-trial-guidance'));
+  c.send({ view: 'C', mode: 'snake', phase: 'training' });
+  assert.equal(mapping.parentElement, c.element('participant-trial-guidance'));
 });
 
 test('participant controller and mode labels follow the active controller', async () => {

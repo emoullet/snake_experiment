@@ -15,6 +15,7 @@
   const modeVideo = document.getElementById("participant-mode-video");
   const modeVideoError = document.getElementById("participant-mode-video-error");
   const trialView = document.getElementById("participant-trial");
+  const trialGuidance = document.getElementById("participant-trial-guidance");
   const mappingPreview = document.getElementById("participant-mapping");
   const discoveryPreview = document.getElementById("participant-discovery-preview");
   const trialTitle = document.getElementById("participant-trial-title");
@@ -281,7 +282,7 @@
     presentation.hidden = !showA;
     modeView.hidden = !showB;
     trialView.hidden = !showC;
-    const previewParent = showB ? discoveryPreview : trialView;
+    const previewParent = showB ? discoveryPreview : trialGuidance;
     if (mappingPreview.parentElement !== previewParent) previewParent.appendChild(mappingPreview);
     if (!showA && !video.paused) video.pause();
     if (!showB && !modeVideo.paused) modeVideo.pause();
