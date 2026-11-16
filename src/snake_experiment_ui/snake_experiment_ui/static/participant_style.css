@@ -15,8 +15,9 @@
 .participant-trial-grid { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr); gap: clamp(24px, 3vw, 48px); align-items: start; }
 .participant-trial-information { display: grid; gap: 28px; }
 .participant-task, .participant-control-state { display: grid; gap: 8px; }
-.participant-task > span, .participant-control-state > span:first-child, .participant-metrics span { color: var(--muted); font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-.participant-task strong { font-size: clamp(1.4rem, 2.6vw, 2.2rem); }
+.participant-task-heading > span:first-child, .participant-control-state > span:first-child, .participant-metrics span { color: var(--muted); font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.participant-task-heading { display: flex; align-items: center; gap: 12px; }
+.participant-task strong, .participant-control-state strong { font-size: clamp(1.4rem, 2.6vw, 2.2rem); }
 .participant-time-limit { display: flex; align-items: baseline; gap: 12px; margin-top: 12px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--background, #f6f9fd); }
 .participant-time-limit[hidden], .participant-timeout-message[hidden] { display: none; }
 .participant-time-limit span { color: var(--muted); font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
@@ -27,13 +28,11 @@
 .participant-metrics > .participant-metric--within { color: var(--green); border-color: var(--green); background: var(--green-soft); }
 .participant-metrics > .participant-metric--above { color: var(--red); border-color: var(--red); background: var(--red-soft); }
 .participant-metrics strong { font-size: clamp(1.35rem, 2.5vw, 2rem); }
-.participant-control-state strong { font-size: 1.4rem; }
-.participant-control-state .pill { justify-self: start; }
 .participant-trial-guidance { min-width: 0; }
 .participant-mapping { margin-top: 28px; }
 .participant-mapping-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .participant-mapping-heading h2 { margin: 0; font-size: clamp(1.15rem, 2vw, 1.5rem); }
-.participant-mapping > .preview-note { min-height: 24px; }
+.participant-mapping > .preview-note:empty { display: none; }
 .participant-camera-views { display: flex; flex-wrap: wrap; gap: 8px; }
 .participant-camera-views button { padding: 8px 14px; }
 .participant-camera-views button[aria-pressed="true"] { background: var(--accent, #176bff); border-color: var(--accent, #176bff); color: #fff; }

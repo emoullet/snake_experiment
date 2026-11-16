@@ -39,9 +39,9 @@ function updateMessage() {
   const poseText = poseSource === 'Demo pose'
     ? 'Demo pose · joint states are unavailable or stale.'
     : poseSource === 'Live pose'
-      ? 'Live pose · schematic joystick inputs, not live joystick movements.'
+      ? ''
       : 'Preparing mapping animation.';
-  message.textContent = illustrationNote ? `${poseText} ${illustrationNote}` : poseText;
+  message.textContent = [poseText, illustrationNote].filter(Boolean).join(' ');
 }
 
 function update(state) {
