@@ -3,6 +3,7 @@
 import { MappingAnimator } from './animation.js';
 import { participantMappingSelection, participantSubmodeLabel } from './mapping.js';
 
+const t = value => window.participantI18n?.t(value) ?? value;
 const preview = document.getElementById('participant-mapping');
 const message = document.getElementById('participant-mapping-message');
 const snakeIndicator = document.getElementById('participant-snake-indicator');
@@ -12,7 +13,7 @@ const animator = new MappingAnimator([
 ], (_state, source) => {
   poseSource = source;
   updateMessage();
-}, error => { message.textContent = `Mapping animation is unavailable: ${error.message || error}`; });
+}, error => { message.textContent = t(`Mapping animation is unavailable: ${error.message || error}`); });
 let latestState = null;
 let lastBlock = null;
 let lastKnownSubmode = null;
@@ -41,7 +42,7 @@ function updateMessage() {
     : poseSource === 'Live pose'
       ? ''
       : 'Preparing mapping animation.';
-  message.textContent = [poseText, illustrationNote].filter(Boolean).join(' ');
+  message.textContent = [poseText, illustrationNote].filter(Boolean).map(t).join(' ');
 }
 
 function update(state) {
@@ -69,13 +70,13 @@ function update(state) {
   if (selection?.submodeReported) lastKnownSubmode = selection.submode;
   snakeIndicator.hidden = mode !== 'snake';
   if (mode === 'snake') {
-    snakeIndicator.textContent = selection?.snakeHeld ? 'Coupling active · button held' : 'Coupling inactive';
+    snakeIndicator.textContent = t(state.snake_button_held == null ? 'Coupling unknown' : selection?.snakeHeld ? 'Coupling active' : 'Coupling inactive');
     snakeIndicator.className = `pill ${selection?.snakeHeld ? 'pill--active' : 'pill--neutral'}`;
   }
   if (!selection) {
     animator.setSelection(null, null);
     illustrationNote = '';
-    message.textContent = 'Mapping configuration unavailable · animations cannot start.';
+    message.textContent = t('Mapping configuration unavailable · animations cannot start.');
   } else {
     const notes = [];
     if (!selection.submodeReported) {
@@ -90,11 +91,15 @@ function update(state) {
 }
 
 window.addEventListener('participant:state', event => update(event.detail));
+window.addEventListener('participant:language', () => {
+  if (animator.config) animator.refreshLanguage();
+  if (latestState) update(latestState);
+});
 animator.initialize().then(() => {
   updateViewButtons();
   if (latestState) update(latestState);
   else fetch('/participant/api/state').then(response => response.json()).then(update).catch(() => {});
 }).catch(error => {
-  message.textContent = `Mapping animation is unavailable: ${error.message || error}`;
+  message.textContent = t(`Mapping animation is unavailable: ${error.message || error}`);
   animator.stop();
 });

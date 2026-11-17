@@ -115,6 +115,9 @@ two-row mapping descriptions during trials. Edit `mapping_text` for each robot,
 mode and sub-mode when joystick mappings change; labels describe commanded axes,
 not physical direction. Mode explanations continue to use animations. Restart
 the session interface after editing the profile.
+During a trial, the participant can switch between text and demonstration;
+the configured setting is restored when the page is reloaded. Profiles without
+`mapping_text` keep the switch disabled until descriptions are configured.
 The current video entries point to machine-local files named
 `*_placeholder.mp4`; replace them with the session videos on the experiment
 computer. When a required video is unavailable, the operator can continue
@@ -463,3 +466,15 @@ Rebuild the package and restart the session interface to apply startup parameter
 changes; refresh the operator page after changing its JavaScript. For example,
 append `go_to_stall_timeout_sec:=10.0` to the usual session launch command to
 allow ten seconds of continuous insufficient progress.
+
+### Participant language
+
+`config/participant_interface.yaml` sets `default_language` to `english` or
+`french` (default: `english`). The language selector at the top right of the
+participant page changes the display immediately; the browser remembers the
+choice across reloads. Clear the browser's site data to restore the configured
+default. The `mapping_text` and `mapping_text_french` sections contain the
+English and French joystick descriptions. Existing profiles without French
+descriptions continue to display their configured English descriptions. Videos
+are shared by both languages. Restart the session interface after changing the
+profile.

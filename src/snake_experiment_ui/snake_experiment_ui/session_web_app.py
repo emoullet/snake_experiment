@@ -132,6 +132,8 @@ def create_session_app(
     joystick_input_snapshot=None,
     mapping_description="demo",
     mapping_text=None,
+    mapping_text_french=None,
+    default_language="english",
 ):
     """Create the View B-G app around injectable workflow controllers."""
     app = FastAPI(title="Snake Experiment Session Interface", version="1.0")
@@ -287,6 +289,8 @@ def create_session_app(
         }
         state["mapping_description"] = mapping_description
         state["mapping_text"] = mapping_text or {}
+        state["mapping_text_french"] = mapping_text_french or {}
+        state["default_language"] = default_language
         state["joystick_input_active"] = bool(joystick_input_snapshot()) if joystick_input_snapshot else False
         state["overload_warning"] = None
         if protection_snapshot is not None:

@@ -1,4 +1,7 @@
 (() => {
+  const t = value => window.participantI18n?.t(value) ?? value;
+  let languageInitialized = false;
+  const dynamicText = new Map();
   const controllerLabels = { snake: "Controller A", baseline: "Controller B" };
   const modeLabels = { snake: { b1: "A1", b2: "A2" }, baseline: { b1: "B1", b2: "B2", b3: "B3" } };
   const workspace = document.querySelector(".participant-workspace");
@@ -16,6 +19,7 @@
   const modeVideoError = document.getElementById("participant-mode-video-error");
   const trialView = document.getElementById("participant-trial");
   const trialGuidance = document.getElementById("participant-trial-guidance");
+  const mappingSwitch = document.getElementById("participant-mapping-switch");
   const mappingText = document.getElementById("participant-mapping-text");
   const mappingTable = document.getElementById("participant-mapping-table");
   const mappingWaiting = document.getElementById("participant-mapping-text-waiting");
@@ -68,7 +72,7 @@
   let successEventInitialized = false;
   let lastSuccessEventId = null;
   let receivedWebSocketState = false;
-  const setText = (element, value) => { if (element.textContent !== value) element.textContent = value; };
+  const setText = (element, value) => { dynamicText.set(element, value); const translated = t(value); if (element.textContent !== translated) element.textContent = translated; };
   const setDistance = (element, value, threshold, unit) => {
     setText(element, Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : "—");
     const valid = Number.isFinite(value) && Number.isFinite(threshold);
@@ -255,7 +259,26 @@
     stopOverloadSound();
   });
 
+  let mappingChoice = null;
+  let lastParticipantState = null;
+  mappingSwitch.addEventListener("click", () => {
+    if (!lastParticipantState) return;
+    const current = mappingChoice || lastParticipantState.mapping_description || "demo";
+    mappingChoice = current === "demo" ? "text" : "demo";
+    render(lastParticipantState);
+  });
+
   function render(state) {
+    if (!languageInitialized) {
+      languageInitialized = true;
+      window.participantI18n?.initialize(state.default_language);
+    }
+    lastParticipantState = state;
+    const selectedMapping = mappingChoice || state.mapping_description || "demo";
+    const textAvailable = !!state.mapping_text && Object.keys(state.mapping_text).length > 0;
+    mappingSwitch.disabled = !textAvailable;
+    setText(mappingSwitch, selectedMapping === "text" ? "Show demo" : "Show text");
+    mappingSwitch.setAttribute("aria-pressed", String(selectedMapping === "text"));
     const warning = overloadMessages[state.overload_warning?.phase] || "";
     setText(overloadMessage, warning);
     overloadBanner.hidden = !warning;
@@ -287,10 +310,11 @@
     presentation.hidden = !showA;
     modeView.hidden = !showB;
     trialView.hidden = !showC;
-    const showText = showC && state.mapping_description === "text" && !state.joystick_input_active;
+    const showText = showC && selectedMapping === "text" && !state.joystick_input_active;
     mappingText.hidden = !showText;
-    mappingPreview.hidden = !!state.joystick_input_active || (showC && state.mapping_description === "text");
-    const labels = showText ? state.mapping_text?.[state.mode]?.[state.local_mode] : null;
+    mappingPreview.hidden = !!state.joystick_input_active || (showC && selectedMapping === "text");
+    const translations = window.participantI18n?.language === "french" ? state.mapping_text_french : null;
+    const labels = showText ? (translations?.[state.mode]?.[state.local_mode] || state.mapping_text?.[state.mode]?.[state.local_mode]) : null;
     mappingTable.hidden = !labels;
     mappingWaiting.hidden = !!labels;
     setText(mappingHorizontal, labels?.[0] || "");
@@ -313,7 +337,7 @@
     }
     if (showB) {
       const label = controllerLabels[state.mode];
-      if (modeTitle.textContent !== `${label} mode explanation`) modeTitle.textContent = `${label} mode explanation`;
+      setText(modeTitle, `${label} mode explanation`);
       const available = !!state.video_available;
       modeFrame.hidden = !available;
       modePlaceholder.hidden = available;
@@ -350,19 +374,24 @@
       if (trialState.className !== stateClass) trialState.className = stateClass;
     }
     if (enteringC) void startCamera();
-    window.dispatchEvent(new CustomEvent("participant:state", { detail: state }));
+    window.dispatchEvent(new CustomEvent("participant:state", { detail: { ...state, mapping_description: selectedMapping } }));
   }
+
+  window.addEventListener("participant:language", () => {
+    for (const [element, value] of dynamicText) setText(element, value);
+    if (lastParticipantState) render(lastParticipantState);
+  });
 
   function connect() {
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${scheme}//${window.location.host}/participant/ws`);
-    socket.onopen = () => { reconnectDelay = 500; connection.textContent = "Connected"; connection.className = "pill pill--active"; };
+    socket.onopen = () => { reconnectDelay = 500; setText(connection, "Connected"); connection.className = "pill pill--active"; };
     socket.onmessage = (event) => {
       receivedWebSocketState = true;
       render(JSON.parse(event.data));
     };
     socket.onclose = () => {
-      connection.textContent = "Reconnecting";
+      setText(connection, "Reconnecting");
       connection.className = "pill pill--warning";
       if (!overloadBanner.hidden) setText(overloadMessage, overloadMessages.unavailable);
       window.setTimeout(connect, reconnectDelay);

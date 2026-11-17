@@ -441,6 +441,8 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json(), {
             "view": "A", "presentation_status": "showing", "video_available": False,
             "overload_warning": None, "joystick_input_active": False,
+            "mapping_description": "demo", "mapping_text": {},
+            "mapping_text_french": {}, "default_language": "english",
         })
         self.assertNotIn("participant", response.text)
         self.assertEqual((await self.request("GET", "/participant/video")).status_code, 404)
@@ -460,12 +462,16 @@ class SessionWebAppTest(unittest.IsolatedAsyncioTestCase):
             self.checkup, root / "static", root / "templates",
             self.enrollment, self.experiment,
             joystick_input_snapshot=lambda: active[0],
+            default_language="french", mapping_text_french={"snake": {"b1": ["un", "deux"]}},
         )
         endpoint = next(route.endpoint for route in self.app.routes if route.path == "/participant/api/state")
         async def inline(function):
             return function()
         with patch("snake_experiment_ui.session_web_app.asyncio.to_thread", side_effect=inline):
-            self.assertFalse((await endpoint())["joystick_input_active"])
+            projection = await endpoint()
+            self.assertFalse(projection["joystick_input_active"])
+            self.assertEqual(projection["default_language"], "french")
+            self.assertEqual(projection["mapping_text_french"]["snake"]["b1"], ["un", "deux"])
             active[0] = True
             self.assertTrue((await endpoint())["joystick_input_active"])
 
@@ -773,23 +779,23 @@ class SessionTemplateTest(unittest.TestCase):
         self.assertNotIn('Enable camera</button>', html)
         self.assertIn('window.addEventListener("pagehide", stopCamera)', script)
         self.assertIn('if (!showC && currentView === "C") stopCamera()', script)
-        self.assertIn('if (element.textContent !== value) element.textContent = value', script)
+        self.assertIn('if (element.textContent !== translated) element.textContent = translated', script)
         self.assertIn('workspace.classList.toggle("participant-workspace--trial", showC)', script)
         self.assertIn('.participant-workspace--trial { width: min(1920px, calc(100% - 32px)); }', style)
         self.assertIn('grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr)', style)
-        self.assertIn('participant_style.css?v=participant-layout-7', html)
+        self.assertIn('participant_style.css?v=participant-layout-language-1', html)
         self.assertIn('.participant-mapping .preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr));', style)
         self.assertIn('@media (max-width: 1200px) { .participant-mapping .preview-grid { grid-template-columns: 1fr; } }', style)
-        self.assertIn('participant_mapping.bundle.js?v=participant-mapping-15', html)
+        self.assertIn('participant_mapping.bundle.js?v=participant-mapping-language-1', html)
         self.assertIn('data-mapping-source class="pill pill--neutral"', html)
-        self.assertIn('new CustomEvent("participant:state", { detail: state })', script)
+        self.assertIn('new CustomEvent("participant:state", { detail: { ...state, mapping_description: selectedMapping } })', script)
         self.assertIn('id="participant-sound-retry"', html)
         self.assertIn('new Audio("/session-static/mario_coin_sound.mp3")', script)
         self.assertIn('state.success_event_id !== lastSuccessEventId', script)
         self.assertIn('successEventInitialized = true', script)
         self.assertIn('await successSound.play()', script)
         self.assertIn('soundRetry.hidden = false', script)
-        self.assertIn('participant_app.js?v=participant-layout-7', html)
+        self.assertIn('participant_app.js?v=participant-layout-language-1', html)
         self.assertIn('state.time_remaining_sec', script)
         self.assertIn('state.time_limit_reached', script)
         self.assertIn('Time limit reached.', html)

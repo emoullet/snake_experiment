@@ -5,12 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Experiment · Participant</title>
     <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-timeout-1" />
-    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-layout-7" />
+    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-layout-language-1" />
     <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
-    <script src="/session-static/participant_app.js?v=participant-layout-7" defer></script>
-    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-15" defer></script>
+    <script src="/session-static/participant_language.js?v=1" defer></script>
+    <script src="/session-static/participant_app.js?v=participant-layout-language-1" defer></script>
+    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-language-1" defer></script>
   </head>
   <body>
+    <div class="participant-language"><label for="participant-language" class="participant-language-label">Language / Langue</label><select id="participant-language"><option value="english">English</option><option value="french">Français</option></select></div>
     <main class="participant-workspace">
       <header class="participant-header"><p class="eyebrow">Experiment</p><span id="participant-connection" class="pill pill--neutral">Connecting</span></header>
       <aside id="participant-overload-warning" class="participant-overload-warning" role="alert" aria-live="assertive" aria-atomic="true" hidden><p id="participant-overload-message"></p><button id="participant-overload-sound-retry" class="secondary-button" type="button" hidden>Play warning sound</button></aside>
@@ -66,8 +68,8 @@
           </div>
           <div id="participant-trial-guidance" class="participant-trial-guidance">
             <div class="participant-control-state"><span>Current control mode</span><strong id="participant-local-mode">Unknown</strong></div>
+            <div class="participant-mapping-switch-heading"><h2>Joystick mapping</h2><button id="participant-mapping-switch" class="secondary-button" type="button" aria-pressed="false">Show text</button></div>
             <section id="participant-mapping-text" class="participant-mapping" aria-label="Current joystick mapping" hidden>
-              <h2>Joystick mapping</h2>
               <p id="participant-mapping-text-waiting" role="status">Waiting for the current control mode.</p>
               <table id="participant-mapping-table" hidden><tbody>
                 <tr><th scope="row">Left/right input</th><td aria-hidden="true">→</td><td id="participant-mapping-horizontal"></td></tr>

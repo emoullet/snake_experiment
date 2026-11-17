@@ -14,6 +14,7 @@ class ParticipantProfileTest(unittest.TestCase):
         import yaml
         packaged = Path(__file__).parents[1] / "config/participant_interface.yaml"
         data = yaml.safe_load(packaged.read_text())
+        data["mapping_description"] = "demo"
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "profile.yaml"
             path.write_text(yaml.safe_dump(data))
@@ -28,6 +29,30 @@ class ParticipantProfileTest(unittest.TestCase):
             data["mapping_description"] = "invalid"
             path.write_text(yaml.safe_dump(data))
             with self.assertRaises(ParticipantProfileError):
+                ParticipantProfile(path)
+
+    def test_language_default_and_french_mapping(self):
+        import yaml
+        packaged = Path(__file__).parents[1] / "config/participant_interface.yaml"
+        data = yaml.safe_load(packaged.read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.yaml"
+            path.write_text(yaml.safe_dump(data))
+            profile = ParticipantProfile(path)
+            self.assertEqual(profile.default_language, "english")
+            self.assertIn("Translation selon", profile.mapping_text_french["explorer"]["snake"]["b1"][0])
+            data["default_language"] = "french"
+            path.write_text(yaml.safe_dump(data))
+            self.assertEqual(ParticipantProfile(path).default_language, "french")
+            del data["default_language"]
+            del data["mapping_text_french"]
+            path.write_text(yaml.safe_dump(data))
+            profile = ParticipantProfile(path)
+            self.assertEqual(profile.default_language, "english")
+            self.assertEqual(profile.mapping_text_french, {})
+            data["default_language"] = "invalid"
+            path.write_text(yaml.safe_dump(data))
+            with self.assertRaisesRegex(ParticipantProfileError, "default_language"):
                 ParticipantProfile(path)
 
     def test_overload_sound_duration_defaults_and_validation(self):

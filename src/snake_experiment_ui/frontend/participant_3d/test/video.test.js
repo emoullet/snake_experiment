@@ -25,6 +25,7 @@ class Element extends EventTarget {
     this.sourceAssignments = 0;
   }
   getAttribute(name) { return this.attributes[name] ?? null; }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
   removeAttribute(name) { delete this.attributes[name]; }
   set src(value) { this.attributes.src = value; this.readyState = 0; this.sourceAssignments++; }
   appendChild(element) { element.parentElement = this; }
@@ -41,7 +42,7 @@ class Element extends EventTarget {
   loaded() { this.readyState = 1; this.dispatchEvent(new Event('loadedmetadata')); }
 }
 
-async function client(initial = { view: 'waiting' }, delayedInitial = null, cameraProvider = null) {
+async function client(initial = { view: 'waiting' }, delayedInitial = null, cameraProvider = null, i18n = null) {
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, new Element());
@@ -55,6 +56,7 @@ async function client(initial = { view: 'waiting' }, delayedInitial = null, came
   const timers = new Map();
   let timerId = 0;
   const window = new EventTarget();
+  window.participantI18n = i18n;
   window.location = { protocol: 'http:', host: 'test' };
   window.setTimeout = (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; };
   window.clearTimeout = id => timers.delete(id);
@@ -72,6 +74,7 @@ async function client(initial = { view: 'waiting' }, delayedInitial = null, came
     disconnect: () => socket.onclose(),
     audio: filename => audios.find(audio => audio.getAttribute('src').endsWith(filename)),
     timers,
+    changeLanguage: () => window.dispatchEvent(new Event('participant:language')),
     runTimer: id => { const timer = timers.get(id); timers.delete(id); timer?.callback(); },
     pagehide: () => window.dispatchEvent(new Event('pagehide')),
   };
@@ -110,6 +113,24 @@ test('text descriptions follow the current trial mode and wait for a known submo
   c.send({ view: 'B', mode: 'snake', mapping_description: 'text', mapping_text });
   assert.equal(c.element('participant-mapping-text').hidden, true);
   assert.equal(c.element('participant-mapping').parentElement, c.element('participant-discovery-preview'));
+});
+
+test('participant can switch mapping display without changing the server setting', async () => {
+  const c = await client();
+  const state = { view: 'C', mode: 'snake', local_mode: 'b1', mapping_description: 'demo', mapping_text: { snake: { b1: ['Horizontal', 'Vertical'] } } };
+  c.send(state);
+  const button = c.element('participant-mapping-switch');
+  assert.equal(button.textContent, 'Show text');
+  button.dispatchEvent(new Event('click'));
+  assert.equal(c.element('participant-mapping-text').hidden, false);
+  assert.equal(c.element('participant-mapping').hidden, true);
+  c.send(state);
+  assert.equal(c.element('participant-mapping-text').hidden, false);
+  button.dispatchEvent(new Event('click'));
+  assert.equal(c.element('participant-mapping-text').hidden, true);
+  assert.equal(c.element('participant-mapping').hidden, false);
+  c.send({ ...state, mapping_text: {} });
+  assert.equal(button.disabled, true);
 });
 
 test('participant controller and mode labels follow the active controller', async () => {
@@ -397,4 +418,15 @@ test('disconnection stops announcing movement only when an overload warning alre
   const normal = await client({ view: 'waiting', overload_warning: null });
   normal.disconnect();
   assert.equal(normal.element('participant-overload-warning').hidden, true);
+});
+
+
+test('language changes update live trial and joystick descriptions', async () => {
+  const i18n = { language: 'english', initialize(value) { this.language = value || 'english'; }, t(value) { return this.language === 'french' ? ({ 'Recording': 'Enregistrement', 'Show demo': 'Afficher la démonstration' }[value] || value) : value; } };
+  const c = await client({ view: 'C', mode: 'snake', phase: 'recording', local_mode: 'b1', state: 'Recording', mapping_description: 'text', mapping_text: { snake: { b1: ['Horizontal', 'Vertical'] } }, mapping_text_french: { snake: { b1: ['Horizontale', 'Verticale'] } } }, null, null, i18n);
+  assert.equal(c.element('participant-mapping-horizontal').textContent, 'Horizontal');
+  i18n.language = 'french'; c.changeLanguage();
+  assert.equal(c.element('participant-mapping-horizontal').textContent, 'Horizontale');
+  assert.equal(c.element('participant-trial-state').textContent, 'Enregistrement');
+  assert.equal(c.element('participant-mapping-switch').textContent, 'Afficher la démonstration');
 });

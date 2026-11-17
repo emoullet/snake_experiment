@@ -14,6 +14,7 @@ const ROBOT_MATERIAL = new THREE.MeshStandardMaterial({
 });
 
 function setText(element, value) {
+  value = window.participantI18n?.t(value) ?? value;
   if (element && element.textContent !== value) element.textContent = value;
 }
 
@@ -151,7 +152,7 @@ export class MappingAnimator {
     this.setCameraView(this.config.camera?.default_view || 'view_1');
     for (const view of this.views) {
       view.config = this.config;
-      view.container.setAttribute('aria-label', `${this.config.robot_label} animated robot, axis ${view.axisIndex}`);
+      view.container.setAttribute('aria-label', window.participantI18n?.t(`${this.config.robot_label} animated robot, axis ${view.axisIndex}`) ?? `${this.config.robot_label} animated robot, axis ${view.axisIndex}`);
     }
     const title = document.getElementById('preview-robot-title');
     if (title) {
@@ -193,6 +194,17 @@ export class MappingAnimator {
     this.frameCameras();
   }
 
+  refreshLanguage() {
+    for (const view of this.views) {
+      const label = `${this.config.robot_label} animated robot, axis ${view.axisIndex}`;
+      view.container.setAttribute('aria-label', window.participantI18n?.t(label) ?? label);
+      const [positive, negative] = axisLabels(this.config, view.axisIndex);
+      setText(view.directionLabel, `Axis ${view.axisIndex} · ${positive} → neutral → ${negative} → neutral`);
+      if (view.source.dataset.source) setText(view.source, view.source.dataset.source);
+      if (view.limit.dataset.message) setText(view.limit, view.limit.dataset.message);
+    }
+  }
+
   setSelection(mode, submode, snakeHeld = false) {
     const valid = this.config && this.config.mapper[mode]?.[submode]
       && (mode !== 'snake' || snakeHeld !== null);
@@ -200,6 +212,7 @@ export class MappingAnimator {
     if (JSON.stringify(next) === JSON.stringify(this.selection)) {
       if (!next) {
         for (const view of this.views) {
+          view.source.dataset.source = 'Unknown';
           setText(view.source, 'Unknown');
           if (view.source.classList.contains('pill')) view.source.className = 'pill pill--neutral';
         }
@@ -214,6 +227,7 @@ export class MappingAnimator {
     this.neutralize();
     if (!next) {
       for (const view of this.views) {
+        view.source.dataset.source = 'Unknown';
         setText(view.source, 'Unknown');
         if (view.source.classList.contains('pill')) view.source.className = 'pill pill--neutral';
         setText(view.limit, '');
@@ -286,14 +300,17 @@ export class MappingAnimator {
       for (const view of this.views) {
         view.endpoints = solveAxisEndpoints(view.robot, pose, this.config,
           this.selection.mode, this.selection.submode, view.axisIndex, this.selection.snakeHeld);
+        view.source.dataset.source = source;
         setText(view.source, source);
         if (view.source.classList.contains('pill')) {
           view.source.className = source === 'Live pose' ? 'pill pill--active' : 'pill pill--warning';
         }
         const fraction = view.endpoints.fraction;
-        setText(view.limit, fraction === 1 ? '' : fraction === 0
+        const limitMessage = fraction === 1 ? '' : fraction === 0
           ? 'No feasible movement from this pose; the view remains neutral.'
-          : `Movement reduced to ${Math.round(fraction * 100)}% due to reachability or joint limits.`);
+          : `Movement reduced to ${Math.round(fraction * 100)}% due to reachability or joint limits.`;
+        view.limit.dataset.message = limitMessage;
+        setText(view.limit, limitMessage);
       }
       this.updateFraming();
       this.cycleStart = performance.now();

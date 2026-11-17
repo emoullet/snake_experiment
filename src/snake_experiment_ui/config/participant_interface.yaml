@@ -1,5 +1,8 @@
 schema_version: 1
 
+# Initial language unless the participant has already chosen one in this browser.
+default_language: english
+
 # Choose demo or text. Texts describe commanded axes; direction depends on the
 # joystick profile and robot frames. Review these labels when mappings change.
 mapping_description: text
@@ -20,6 +23,26 @@ mapping_text:
       b1: ["Translation along base Y", "Translation along base X"]
       b2: ["Rotation around tool Z", "Translation along base Z"]
       b3: ["Rotation around tool Y", "Rotation around tool X"]
+
+
+# French translations; legacy profiles without this section fall back to mapping_text.
+mapping_text_french:
+  explorer:
+    snake:
+      b1: ["Translation selon l’axe Y", "Translation selon l’axe X"]
+      b2: ["Rotation autour de l’axe outil Z", "Translation selon l’axe Z"]
+    baseline:
+      b1: ["Translation selon l’axe Y", "Translation selon l’axe X"]
+      b2: ["Rotation autour de l’axe outil Z", "Translation selon l’axe Z"]
+      b3: ["Rotation autour de l’axe outil X", "Rotation autour de l’axe outil Y"]
+  kinova:
+    snake:
+      b1: ["Translation selon l’axe Y", "Translation selon l’axe X"]
+      b2: ["Rotation autour de l’axe outil Z", "Translation selon l’axe Z"]
+    baseline:
+      b1: ["Translation selon l’axe Y", "Translation selon l’axe X"]
+      b2: ["Rotation autour de l’axe outil Z", "Translation selon l’axe Z"]
+      b3: ["Rotation autour de l’axe outil Y", "Rotation autour de l’axe outil X"]
 
 # Seconds of the local overload alarm to play, once per confirmed episode.
 # Positive finite values only; reload the backend after changing this setting.

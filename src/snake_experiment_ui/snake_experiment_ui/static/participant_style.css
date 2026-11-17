@@ -50,3 +50,13 @@
 #participant-mapping-table { border-collapse: collapse; width: 100%; }
 #participant-mapping-table th, #participant-mapping-table td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; }
 #participant-mapping-table[hidden] { display: none; }
+
+.participant-mapping-switch-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.participant-mapping-switch-heading h2 { margin: 0; font-size: clamp(1.15rem, 2vw, 1.5rem); }
+.participant-trial-guidance > .participant-mapping { margin-top: 12px; }
+.participant-trial-guidance > .participant-mapping .participant-mapping-heading h2 { display: none; }
+
+.participant-language { position: absolute; top: 12px; right: 16px; z-index: 25; display: flex; align-items: center; gap: 8px; }
+.participant-language select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font: inherit; }
+.participant-language-label { font-size: .8rem; }
+@media (max-width: 600px) { .participant-workspace { padding-top: 58px; } }
