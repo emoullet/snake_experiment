@@ -319,21 +319,24 @@ topics that may have zero messages without invalidating the acquisition. The
 list must contain unique names drawn from `rosbag_topics`. An omitted list
 means that every recorded topic is required.
 
-The shipped profile makes `/mode_request` optional in discovery, training and
-recording because mode changes are events and may not occur during an
-acquisition. The topic is still recorded whenever messages arrive. All other
-topics remain required, and missing or unreadable metadata still invalidates
-the recorded data.
+For newly created sessions, each phase also records the Cartesian command topics
+of all enabled sources in the selected robot's `cartesian_manager` profile.
+At least one of these topics must contain messages. `/joy` and `/mode_request`
+are recorded when available but are optional. Other configured topics remain
+required, and missing or unreadable metadata still invalidates recorded data.
+The check-up likewise accepts a valid, active command from any enabled source;
+it does not require activity on the physical joystick.
 
 New attempts (`attempt.json`) and discovery segments (`block.json`) save
-`required_topics`, `optional_topics` and `missing_required_topics` alongside the
+`required_topics`, `optional_topics`, `missing_required_topics`,
+`required_any_topics` and `observed_input_topics` alongside the
 existing diagnostics. `message_counts` and `missing_topics` still cover **all**
 recorded topics: a non-empty `missing_topics` is compatible with valid recorded
 data when only optional topics are absent. An attempt must also satisfy the
 motion and incident-review criteria to become valid. Its experimental mode is
 stored in the parent block's `mode` field.
 
-This default applies to newly created sessions. Existing sessions use their
+This policy applies to newly created sessions. Existing sessions use their
 snapshotted profile in `experimental_environment/experiment.yaml`; profiles
 without `rosbag_optional_topics` keep requiring every topic. No saved profile,
 hash or historical verdict is rewritten by this change.

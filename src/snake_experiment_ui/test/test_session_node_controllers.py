@@ -6,6 +6,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+import rclpy
+from rclpy.node import Node
+
 from snake_experiment_ui.session_node import (
     CONTROLLER_REQUEST_TIMEOUT_SEC,
     SessionInterfaceNode,
@@ -13,6 +16,24 @@ from snake_experiment_ui.session_node import (
 from snake_experiment_ui.checkup import CheckupController
 from snake_experiment_ui.mode_manager import ModeManager
 from snake_experiment_ui.experiment import ExperimentController
+
+
+class SessionStartupTest(unittest.TestCase):
+    def test_kinova_startup_connects_input_topics_and_cleans_subscriptions(self):
+        rclpy.init(args=["--ros-args", "-p", "stack_robot:=kinova", "-p", "skip_system_checkup:=true"])
+        node = None
+        try:
+            with patch("threading.Thread.start"):
+                node = SessionInterfaceNode()
+            self.assertIn("/hand_joystick_cartesian_command", node._experiment._input_topics)
+            self.assertIn("/mouse_joystick_cartesian_command", node._experiment._input_topics)
+            subscriptions = list(node.subscriptions)
+            self.assertEqual(len(subscriptions), len({id(item) for item in subscriptions}))
+        finally:
+            if node is not None:
+                node._go_to_finish_executor.shutdown(wait=True, cancel_futures=True)
+                Node.destroy_node(node)
+            rclpy.shutdown()
 
 
 class ProtectionCallbackConcurrencyTest(unittest.TestCase):

@@ -2005,6 +2005,41 @@ class ExperimentControllerTest(unittest.TestCase):
         self.assert_optional_policy(saved["segments"][0])
         self.assertTrue(state["can_end"])
 
+    def test_allowed_input_policy_persists_and_accepts_hand_without_joy(self):
+        hand = "/hand_joystick_cartesian_command"
+        mouse = "/mouse_joystick_cartesian_command"
+        self.controller._input_topics = (hand, mouse)
+        self.prepare_session()
+        for block in self.controller.snapshot()["progress"]["blocks"]:
+            self.assertEqual(block["settings"]["rosbag_required_any_topics"], [hand, mouse])
+            self.assertIn("/joy", block["settings"]["rosbag_optional_topics"])
+        block_id = "mode_1_discovery"
+        self.controller.start(block_id)
+        self.controller.show_mode_explanation(block_id)
+        self.controller.complete_mode_explanation(block_id)
+        self.rosbag.absent_topics = {"/joy", "/mode_request", mouse, "/joystick_cartesian_command"}
+        self.set_control(block_id, True)
+        state = self.set_control(block_id, False)
+        segment = state["segments"][0]
+        self.assertTrue(segment["valid"])
+        self.assertEqual(segment["observed_input_topics"], [hand])
+        self.controller.prepare(self.participant)
+        self.assertEqual(self.controller.snapshot()["progress"]["blocks"][0]["segments"][0]["required_any_topics"], [hand, mouse])
+
+    def test_discovery_rejects_when_no_allowed_input_is_recorded(self):
+        hand = "/hand_joystick_cartesian_command"
+        self.controller._input_topics = (hand,)
+        self.prepare_session()
+        block_id = "mode_1_discovery"
+        self.controller.start(block_id)
+        self.controller.show_mode_explanation(block_id)
+        self.controller.complete_mode_explanation(block_id)
+        self.rosbag.absent_topics = {hand}
+        self.set_control(block_id, True)
+        state = self.set_control(block_id, False)
+        self.assertFalse(state["segments"][0]["valid"])
+        self.assertTrue(state["segments"][0]["input_topics_error"])
+
     def test_discovery_failure_keeps_optional_topic_diagnostics(self):
         self.prepare_session()
         block_id = "mode_1_discovery"
@@ -2032,6 +2067,29 @@ class ExperimentControllerTest(unittest.TestCase):
     def test_training_persists_success_with_missing_optional_topic(self):
         self.start_first_training_attempt()
         self._finish_and_check_optional_attempt("training")
+
+    def test_training_accepts_hand_without_physical_joystick(self):
+        self.controller._input_topics = ("/joystick_cartesian_command", "/hand_joystick_cartesian_command")
+        self.start_first_training_attempt()
+        self._finish_with_hand_input("training")
+
+    def test_recording_accepts_hand_without_physical_joystick(self):
+        self.controller._input_topics = ("/joystick_cartesian_command", "/hand_joystick_cartesian_command")
+        self.start_first_recording_block()
+        self.controller.prepare_recording_trial("mode_1_recording")
+        self.complete_go_to("target_out_1")
+        self.controller.start_recording_attempt("mode_1_recording")
+        self._finish_with_hand_input("recording")
+
+    def _finish_with_hand_input(self, phase):
+        self.rosbag.absent_topics = {"/joy", "/joystick_cartesian_command", "/mode_request"}
+        self.controller.update_ee_pose(self.pose("target_2"))
+        for _ in range(2):
+            self.monotonic_value += 0.3
+            self.controller.update_ee_pose(self.pose("target_2"))
+        attempt = self.controller.snapshot()[phase]["trials"][0]["attempts"][0]
+        self.assertTrue(attempt["technical_outcome"]["data_valid"])
+        self.assertEqual(attempt["observed_input_topics"], ["/hand_joystick_cartesian_command"])
 
     def test_recording_persists_success_with_missing_optional_topic(self):
         self.start_first_recording_block()

@@ -127,6 +127,7 @@ def _topic_policy(settings: dict) -> dict:
         "required_topics": required,
         "optional_topics": optional,
         "missing_required_topics": list(required),
+        "required_any_topics": list(settings.get("rosbag_required_any_topics", [])),
     }
 
 
@@ -134,6 +135,19 @@ def _recorded_data_valid(result: dict) -> bool:
     return bool(result.get("valid")) and (
         result.get("data_validation") or {}
     ).get("status") == "passed"
+
+
+def _apply_input_topic_policy(result: dict, record: dict) -> dict:
+    """Apply the session's saved any-of policy without changing older verdicts."""
+    result = dict(result)
+    candidates = record.get("required_any_topics", [])
+    if candidates:
+        counts = result.get("message_counts", {})
+        observed = [topic for topic in candidates if counts.get(topic, 0) > 0]
+        record["observed_input_topics"] = observed
+        record["input_topics_error"] = None if observed else "No allowed input command topic contains messages."
+        result["valid"] = bool(result.get("valid")) and bool(observed)
+    return result
 
 
 def idle_finalization() -> dict:
@@ -350,12 +364,14 @@ class ExperimentController:
         command_allowed: Callable[[], bool] = lambda: True,
         wait_for_control: Callable[[], None] = lambda: None,
         stack_command_allowed: Optional[Callable[[], bool]] = None,
+        input_topics: Optional[tuple[str, ...]] = None,
     ) -> None:
         self._command_allowed = command_allowed
         self._wait_for_control = wait_for_control
         self._stack_command_allowed = stack_command_allowed
         self._protection_context_cache = {"folder": None, "block": None, "calibration": None}
         self._robot = robot
+        self._input_topics = tuple(input_topics or ())
         self._source_profile = profile
         self._profile = profile
         self._stack = stack_manager
@@ -516,6 +532,19 @@ class ExperimentController:
                     progress["updated_at_utc"] = self._utc_clock()
                     _atomic_json(progress_path, progress)
             else:
+                if self._input_topics:
+                    for settings in self._profile.data["phases"].values():
+                        topics = settings["rosbag_topics"]
+                        optional = settings.setdefault("rosbag_optional_topics", [])
+                        for topic in ("/joy", *self._input_topics):
+                            if topic not in topics:
+                                topics.append(topic)
+                            if topic not in optional:
+                                optional.append(topic)
+                        # A legacy joystick topic can be configured to a different name.
+                        if "/joystick_cartesian_command" in topics and "/joystick_cartesian_command" not in optional:
+                            optional.append("/joystick_cartesian_command")
+                        settings["rosbag_required_any_topics"] = list(self._input_topics)
                 now = self._utc_clock()
                 progress = {
                     "schema_version": 1,
@@ -1970,6 +1999,7 @@ class ExperimentController:
                 "metadata_error": str(error),
                 "valid": False,
             }
+        result = _apply_input_topic_policy(result, attempt)
         data_valid = _recorded_data_valid(result)
         technical_completed = bool(successful and data_valid)
         attempt["stopped_at_utc"] = self._utc_clock()
@@ -2392,7 +2422,7 @@ class ExperimentController:
         return segment
 
     def _finish_segment(self, segment: dict, result: Optional[dict], reason: str, status: str) -> None:
-        result = result or {}
+        result = _apply_input_topic_policy(result or {}, segment)
         segment["status"] = status
         segment["stopped_at_utc"] = self._utc_clock()
         segment["stop_reason"] = reason

@@ -87,6 +87,8 @@ cartesian_manager:
       sources:
         - joystick
         - tablet
+        - mouse_joystick
+        - hand_joystick
       joystick:
         timeout_sec: 0.2
         enabled: true

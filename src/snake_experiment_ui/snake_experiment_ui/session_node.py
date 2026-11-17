@@ -31,6 +31,7 @@ from .diagnostics import DiagnosticMonitor, DiagnosticProfile, collect_git_prove
 from .enrollment import EnrollmentController
 from .experiment import ExperimentController, ExperimentProfile
 from .go_to import GoToController
+from .input_sources import enabled_input_topics
 from .mode_manager import ModeManager
 from .participant_profile import ParticipantProfile
 from .rosbag_manager import RosbagManager
@@ -78,6 +79,10 @@ class SessionInterfaceNode(Node):
         self.declare_parameter("go_to_feedback_timeout_sec", 2.0)
 
         share = Path(get_package_share_directory("snake_experiment_ui"))
+        robot = str(self.get_parameter("stack_robot").value)
+        input_topics = enabled_input_topics(
+            share / "bringup/cartesian_manager/config" / f"{robot}_params.yaml"
+        )
         configured_experiment = str(self.get_parameter("experiment_profile").value)
         experiment_profile_path = (
             Path(configured_experiment)
@@ -183,7 +188,7 @@ class SessionInterfaceNode(Node):
                 self.get_parameter("rosbag_shutdown_timeout_sec").value
             ),
         )
-        self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot)
+        self._diagnostics = DiagnosticMonitor(self._profile, self._graph_snapshot, input_topics=input_topics)
         preview_robot = str(self.get_parameter("stack_robot").value)
         preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share, robot=preview_robot)
         self._robot_preview = RobotPreview(configuration=preview_configuration, robot=preview_robot)
@@ -231,14 +236,6 @@ class SessionInterfaceNode(Node):
             ),
             self.create_subscription(
                 TwistStamped,
-                "/joystick_cartesian_command",
-                lambda message: self._diagnostics.record(
-                    "/joystick_cartesian_command", message
-                ),
-                50,
-            ),
-            self.create_subscription(
-                TwistStamped,
                 "/cartesian_command",
                 lambda message: self._diagnostics.record("/cartesian_command", message),
                 50,
@@ -260,6 +257,11 @@ class SessionInterfaceNode(Node):
                 ),
             ),
         ]
+        for topic in input_topics:
+            self.create_subscription(
+                TwistStamped, topic,
+                lambda message, topic=topic: self._diagnostics.record(topic, message), 50,
+            )
         self._protection_parameters = self.create_client(SetParametersAtomically, "/cartesian_manager/set_parameters_atomically")
         self._protection_rearm = self.create_client(Trigger, "/cartesian_manager/rearm_overload")
         self._protection_stop = self.create_client(Trigger, "/cartesian_manager/stop_recovery")
@@ -316,6 +318,7 @@ class SessionInterfaceNode(Node):
         }
         self._experiment = ExperimentController(
             robot=preview_robot,
+            input_topics=input_topics,
             command_allowed=lambda: not self._protection.snapshot()["blocked"],
             stack_command_allowed=self._stack_commands_allowed,
             wait_for_control=self._wait_control_configuration,

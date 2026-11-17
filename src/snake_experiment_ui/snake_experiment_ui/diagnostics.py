@@ -130,14 +130,25 @@ class DiagnosticMonitor:
         profile: DiagnosticProfile,
         graph_provider: Callable[[], Mapping],
         monotonic_clock: Callable[[], float] = time.monotonic,
+        input_topics: Optional[tuple[str, ...]] = None,
     ) -> None:
         self.profile = profile
+        self._input_topics = tuple(input_topics or ())
+        if self._input_topics:
+            self.profile.required_nodes = tuple(n for n in self.profile.required_nodes if n != "/joy_node")
+            self._input_requirement = self.profile.mode_topics.pop(
+                "/joystick_cartesian_command",
+                TopicRequirement("geometry_msgs/msg/TwistStamped", 5.0),
+            )
+            self.profile.mode_topics.pop("/joy", None)
+        else:
+            self._input_requirement = None
         self._graph_provider = graph_provider
         self._clock = monotonic_clock
         self._lock = threading.RLock()
         self._samples: Dict[str, deque[float]] = {
             name: deque()
-            for name in set(profile.base_topics) | set(profile.mode_topics)
+            for name in set(profile.base_topics) | set(profile.mode_topics) | set(self._input_topics)
         }
         self._message_validity: Dict[str, tuple[bool, Optional[str]]] = {}
         self._last_joy_axes: Optional[tuple[float, ...]] = None
@@ -151,7 +162,7 @@ class DiagnosticMonitor:
             self._last_joy_axes = None
             self._last_joy_buttons = None
             self._latest_mode_request = None
-            for topic in self.profile.mode_topics:
+            for topic in set(self.profile.mode_topics) | set(self._input_topics):
                 self._samples[topic].clear()
                 self._message_validity.pop(topic, None)
 
@@ -164,7 +175,13 @@ class DiagnosticMonitor:
                 self._prune(topic, now)
             valid, error = self._validate_message(topic, message)
             self._message_validity[topic] = (valid, error)
-            if topic == "/joy":
+            if topic in self._input_topics and valid:
+                twist = message.twist
+                self._joystick_activity |= any(
+                    abs(float(getattr(vector, axis))) > 1e-9
+                    for vector in (twist.linear, twist.angular) for axis in ("x", "y", "z")
+                )
+            elif topic == "/joy" and not self._input_topics:
                 axes = tuple(float(value) for value in getattr(message, "axes", ()))
                 buttons = tuple(int(value) for value in getattr(message, "buttons", ()))
                 moved = any(abs(value) > self.profile.joystick_deadzone for value in axes)
@@ -189,8 +206,7 @@ class DiagnosticMonitor:
         while samples and samples[0] < cutoff:
             samples.popleft()
 
-    @staticmethod
-    def _validate_message(topic: str, message) -> tuple[bool, Optional[str]]:
+    def _validate_message(self, topic: str, message) -> tuple[bool, Optional[str]]:
         if topic == "/joint_states":
             names = tuple(getattr(message, "name", ()))
             positions = tuple(getattr(message, "position", ()))
@@ -213,7 +229,7 @@ class DiagnosticMonitor:
                 return False, "End-effector pose has no frame ID."
             if not _finite(values):
                 return False, "End-effector pose contains a non-finite value."
-        elif topic in ("/joystick_cartesian_command", "/cartesian_command"):
+        elif topic in self._input_topics or topic in ("/joystick_cartesian_command", "/cartesian_command"):
             twist = getattr(message, "twist", None)
             linear = getattr(twist, "linear", None)
             angular = getattr(twist, "angular", None)
@@ -290,6 +306,19 @@ class DiagnosticMonitor:
             checks.append(
                 self._check(f"message:{topic}", valid, "valid", error or "valid")
             )
+
+        if self._input_topics:
+            observed = {}
+            passed = False
+            for topic in self._input_topics:
+                rate = self._rate(topic, now)
+                valid, error = self._message_validity.get(topic, (False, "No message received."))
+                type_ok = self._input_requirement.message_type in topics.get(topic, ())
+                observed[topic] = {"type_ok": type_ok, "rate_hz": round(rate, 3),
+                                   "valid": valid, "error": error}
+                passed |= type_ok and valid and rate >= self._input_requirement.min_rate_hz
+            checks.append(self._check("input_command:any", passed,
+                                      list(self._input_topics), observed))
 
         mode_requirement = self.profile.modes[mode]
         checks.append(

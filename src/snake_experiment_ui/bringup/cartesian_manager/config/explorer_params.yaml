@@ -68,6 +68,8 @@ cartesian_manager:
     inputs:
       sources:
         - joystick
+        - mouse_joystick
+        - hand_joystick
       joystick:
         timeout_sec: 0.2
         enabled: true
