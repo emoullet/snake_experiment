@@ -1,7 +1,7 @@
 /** Display-only inverse kinematics helpers for schematic robot animations. */
 
 import { Matrix4, Quaternion, Vector3 } from 'three';
-import { commandForAxis } from './mapping.js';
+import { commandForAxis, cycleInput } from './mapping.js';
 
 export const ARM_JOINTS = Array.from({ length: 6 }, (_, index) => `joint_${index + 1}`);
 const armJoints = config => config.arm_joints || ARM_JOINTS;
@@ -169,7 +169,7 @@ export function solveAxisEndpoints(robot, startPose, config, mode, submode, axis
 }
 
 export function cyclePose(endpoints, phase) {
-  const sinusoid = Math.sin(2 * Math.PI * phase);
+  const sinusoid = cycleInput(phase);
   const fraction = Math.abs(sinusoid) < 1e-12 ? 0 : sinusoid;
   const target = fraction >= 0 ? endpoints.positive : endpoints.negative;
   const amount = Math.abs(fraction);

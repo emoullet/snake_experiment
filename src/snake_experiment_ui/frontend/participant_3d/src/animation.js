@@ -25,7 +25,7 @@ function createJoystick(view) {
     <path class="joystick-cross" d="M64 20v88M20 64h88" />
     <circle class="joystick-neutral" cx="64" cy="64" r="5" />
     <g data-joystick-stick><circle class="joystick-stick-shadow" cx="64" cy="64" r="19" /><circle class="joystick-stick" cx="64" cy="64" r="15" /></g>
-  </svg><span class="joystick-input" data-joystick-input>Neutral</span>`;
+  </svg><span class="joystick-input" data-joystick-input>+ input</span>`;
   view.stick = holder.querySelector('[data-joystick-stick]');
   view.inputLabel = holder.querySelector('[data-joystick-input]');
 }
@@ -141,6 +141,7 @@ export class MappingAnimator {
     this.active = false;
     this.cycleStart = null;
     this.pending = false;
+    this.preparedCycle = null;
     this.generation = 0;
     this.frame = null;
   }
@@ -240,10 +241,11 @@ export class MappingAnimator {
     this.generation += 1;
     this.cycleStart = null;
     this.pending = false;
+    this.preparedCycle = null;
     for (const view of this.views) {
       if (view.robot && view.endpoints) setArmPose(view.robot, view.endpoints.start, this.config);
       view.stick.setAttribute('transform', 'translate(0 0)');
-      setText(view.inputLabel, 'Neutral');
+      setText(view.inputLabel, '+ input');
     }
   }
 
@@ -253,16 +255,22 @@ export class MappingAnimator {
     const tick = now => {
       if (!this.active) return;
       if (this.cycleStart !== null && this.config) {
-        const phase = (now - this.cycleStart) / (this.config.animation.loop_sec * 1000);
+        const duration = this.config.animation.loop_sec * 1000;
+        let phase = Math.max(0, (now - this.cycleStart) / duration);
         if (phase >= 1) {
-          if (!this.pending) void this.refreshCycle();
-        } else {
-          for (const view of this.views) {
-            if (view.endpoints) setArmPose(view.robot, cyclePose(view.endpoints, phase), this.config);
-            const stick = joystickDisplacement(this.config, view.axisIndex, phase);
-            view.stick.setAttribute('transform', `translate(${stick.x} ${stick.y})`);
-            setText(view.inputLabel, stick.input > 0.02 ? '+ input' : stick.input < -0.02 ? '− input' : 'Neutral');
+          this.cycleStart += Math.floor(phase) * duration;
+          phase %= 1;
+          if (this.preparedCycle) {
+            this.applyCycle(this.preparedCycle);
+            this.preparedCycle = null;
           }
+          if (!this.pending) void this.refreshCycle();
+        }
+        for (const view of this.views) {
+          if (view.endpoints) setArmPose(view.robot, cyclePose(view.endpoints, phase), this.config);
+          const stick = joystickDisplacement(this.config, view.axisIndex, phase);
+          view.stick.setAttribute('transform', `translate(${stick.x} ${stick.y})`);
+          setText(view.inputLabel, stick.input < 0 ? '− input' : '+ input');
         }
       }
       for (const view of this.views) view.renderer.render(view.scene, view.camera);
@@ -279,46 +287,53 @@ export class MappingAnimator {
     this.neutralize();
   }
 
-  async refreshCycle() {
-    if (!this.active || !this.selection || !this.config || this.views.some(view => !view.robot)) return;
-    const generation = ++this.generation;
-    this.pending = true;
-    this.cycleStart = null;
-    for (const view of this.views) {
-      if (view.endpoints) setArmPose(view.robot, view.endpoints.start, this.config);
-      view.stick.setAttribute('transform', 'translate(0 0)');
-    }
-    let state = null;
-    try {
-      const response = await fetch(`${PREFIX}/api/state`, { cache: 'no-store' });
-      if (response.ok) state = await response.json();
-    } catch { /* Explicit demo fallback below. */ }
-    if (generation !== this.generation || !this.active) return;
-    const { pose, source } = cycleBasePose(this.config, state);
-    this.onState(state, source);
-    try {
-      for (const view of this.views) {
-        view.endpoints = solveAxisEndpoints(view.robot, pose, this.config,
-          this.selection.mode, this.selection.submode, view.axisIndex, this.selection.snakeHeld);
-        view.source.dataset.source = source;
-        setText(view.source, source);
-        if (view.source.classList.contains('pill')) {
-          view.source.className = source === 'Live pose' ? 'pill pill--active' : 'pill pill--warning';
-        }
-        const fraction = view.endpoints.fraction;
-        const limitMessage = fraction === 1 ? '' : fraction === 0
-          ? 'No feasible movement from this pose; the view remains neutral.'
-          : `Movement reduced to ${Math.round(fraction * 100)}% due to reachability or joint limits.`;
-        view.limit.dataset.message = limitMessage;
-        setText(view.limit, limitMessage);
+  applyCycle(cycle) {
+    this.onState(cycle.state, cycle.source);
+    for (const [index, view] of this.views.entries()) {
+      view.endpoints = cycle.endpoints[index];
+      view.source.dataset.source = cycle.source;
+      setText(view.source, cycle.source);
+      if (view.source.classList.contains('pill')) {
+        view.source.className = cycle.source === 'Live pose' ? 'pill pill--active' : 'pill pill--warning';
       }
-      this.updateFraming();
-      this.cycleStart = performance.now();
+      const fraction = view.endpoints.fraction;
+      const limitMessage = fraction === 1 ? '' : fraction === 0
+        ? 'No feasible movement from this pose; the view remains neutral.'
+        : `Movement reduced to ${Math.round(fraction * 100)}% due to reachability or joint limits.`;
+      view.limit.dataset.message = limitMessage;
+      setText(view.limit, limitMessage);
+    }
+    this.updateFraming();
+  }
+
+  async refreshCycle() {
+    if (!this.active || !this.selection || !this.config || this.pending || this.views.some(view => !view.robot)) return;
+    const generation = this.generation;
+    this.pending = true;
+    try {
+      let state = null;
+      try {
+        const response = await fetch(`${PREFIX}/api/state`, { cache: 'no-store' });
+        if (response.ok) state = await response.json();
+      } catch { /* Explicit demo fallback below. */ }
+      if (generation !== this.generation || !this.active) return;
+      const { pose, source } = cycleBasePose(this.config, state);
+      const endpoints = this.views.map(view => solveAxisEndpoints(view.robot, pose, this.config,
+        this.selection.mode, this.selection.submode, view.axisIndex, this.selection.snakeHeld));
+      const cycle = { state, source, endpoints };
+      if (this.cycleStart === null) {
+        this.applyCycle(cycle);
+        this.cycleStart = performance.now();
+      } else {
+        this.preparedCycle = cycle;
+        // Solving temporarily moves the model; restore its current animated pose.
+        const phase = Math.max(0, (performance.now() - this.cycleStart) / (this.config.animation.loop_sec * 1000)) % 1;
+        for (const view of this.views) setArmPose(view.robot, cyclePose(view.endpoints, phase), this.config);
+      }
     } catch (error) {
-      this.cycleStart = null;
       this.onError(error);
     } finally {
-      this.pending = false;
+      if (generation === this.generation) this.pending = false;
     }
   }
 }

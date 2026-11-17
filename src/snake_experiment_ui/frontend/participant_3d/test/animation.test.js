@@ -189,17 +189,19 @@ test('schematic sticks share the arm cycle, with right/up positive and exact neu
   const known = { ...config, physical_axis_signs: { right: 1, up: 1 } };
   assert.deepEqual(axisLabels(known, 0), ['Right', 'Left']);
   assert.deepEqual(axisLabels(known, 1), ['Up', 'Down']);
-  for (const phase of [0, 0.5, 1]) {
-    assert.deepEqual(joystickDisplacement(known, 0, phase), { x: 0, y: 0, input: Math.sin(2 * Math.PI * phase) });
+  for (const phase of [0.25, 0.75]) {
+    assert.equal(joystickDisplacement(known, 0, phase).x, 0);
     assert.equal(joystickDisplacement(known, 1, phase).y, 0);
   }
-  assert.equal(joystickDisplacement(known, 0, 0.25).x, 32);
-  assert.equal(joystickDisplacement(known, 0, 0.75).x, -32);
-  assert.equal(joystickDisplacement(known, 1, 0.25).y, -32);
-  assert.equal(joystickDisplacement(known, 1, 0.75).y, 32);
+  for (const phase of [0, 1]) {
+    assert.equal(joystickDisplacement(known, 0, phase).x, 32);
+    assert.equal(joystickDisplacement(known, 1, phase).y, -32);
+  }
+  assert.equal(joystickDisplacement(known, 0, 0.5).x, -32);
+  assert.equal(joystickDisplacement(known, 1, 0.5).y, 32);
   const reversed = { ...known, physical_axis_signs: { right: -1, up: -1 } };
-  assert.equal(joystickDisplacement(reversed, 0, 0.25).x, -32);
-  assert.equal(joystickDisplacement(reversed, 1, 0.25).y, 32);
+  assert.equal(joystickDisplacement(reversed, 0, 0).x, -32);
+  assert.equal(joystickDisplacement(reversed, 1, 0).y, 32);
 });
 
 test('each loop uses a new complete live pose or an explicitly labeled demo pose', () => {
@@ -218,7 +220,7 @@ test('each loop uses a new complete live pose or an explicitly labeled demo pose
   assert.equal(cycleBasePose(config, { robot: 'explorer_poc2', status: 'live', joints: { joint_1: 0 } }).source, 'Demo pose');
 });
 
-test('IK endpoints stay within joint limits and exact neutral returns at half/full cycle', () => {
+test('IK endpoints stay within joint limits and share the joystick cycle', () => {
   const robot = robotFixture();
   const endpoints = solveAxisEndpoints(robot, samplePose, config, 'baseline', 'b1', 1, false);
   assert.ok(endpoints.fraction > 0);
@@ -226,12 +228,12 @@ test('IK endpoints stay within joint limits and exact neutral returns at half/fu
   for (const pose of [endpoints.positive, endpoints.negative]) {
     for (const name of ARM_JOINTS) assert.ok(Math.abs(pose[name]) <= 2.5);
   }
-  assert.deepEqual(cyclePose(endpoints, 0), endpoints.start);
-  assert.deepEqual(cyclePose(endpoints, 0.5), endpoints.start);
-  assert.deepEqual(cyclePose(endpoints, 1), endpoints.start);
-  assert.deepEqual(cyclePose(endpoints, 0.25), endpoints.positive);
-  assert.deepEqual(cyclePose(endpoints, 0.75), endpoints.negative);
-  assert.equal(cyclePose(endpoints, 0.25).right_finger_joint, samplePose.right_finger_joint);
+  assert.deepEqual(cyclePose(endpoints, 0), endpoints.positive);
+  assert.deepEqual(cyclePose(endpoints, 0.25), endpoints.start);
+  assert.deepEqual(cyclePose(endpoints, 0.5), endpoints.negative);
+  assert.deepEqual(cyclePose(endpoints, 0.75), endpoints.start);
+  assert.deepEqual(cyclePose(endpoints, 1), endpoints.positive);
+  assert.equal(cyclePose(endpoints, 0).right_finger_joint, samplePose.right_finger_joint);
 });
 
 test('cycle can start from a newly captured live pose and reduces impossible amplitudes', () => {
@@ -348,8 +350,8 @@ test('Kinova seven-axis IK animates every mapping and Snake state, participates 
           assert.ok(Number.isFinite(pose[name]));
           assert.ok(pose[name] >= robot.joints[name].limit.lower && pose[name] <= robot.joints[name].limit.upper);
         }
-        assert.deepEqual(cyclePose(endpoints, .5), endpoints.start);
-        assert.deepEqual(cyclePose(endpoints, 1), endpoints.start);
+        assert.deepEqual(cyclePose(endpoints, .25), endpoints.start);
+        assert.deepEqual(cyclePose(endpoints, 1), endpoints.positive);
         setArmPose(robot, endpoints.start, kinovaConfig);
         const neutral = effectorPose(robot, kinovaConfig);
         const command = commandForAxis(kinovaConfig, mode, submode, axis, 1, held, neutral.rotation);
