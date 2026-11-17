@@ -110,6 +110,11 @@ approved study instructions, set the placeholder flag to `false`, and configure
 the approved success criteria before enrolling participants.
 
 `config/participant_interface.yaml` contains the participant-facing media paths.
+Set `mapping_description` to `demo` (default) or `text` to show configurable
+two-row mapping descriptions during trials. Edit `mapping_text` for each robot,
+mode and sub-mode when joystick mappings change; labels describe commanded axes,
+not physical direction. Mode explanations continue to use animations. Restart
+the session interface after editing the profile.
 The current video entries point to machine-local files named
 `*_placeholder.mp4`; replace them with the session videos on the experiment
 computer. When a required video is unavailable, the operator can continue

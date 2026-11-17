@@ -1,5 +1,26 @@
 schema_version: 1
 
+# Choose demo or text. Texts describe commanded axes; direction depends on the
+# joystick profile and robot frames. Review these labels when mappings change.
+mapping_description: text
+mapping_text:
+  explorer:
+    snake:
+      b1: ["Translation along base Y", "Translation along base X"]
+      b2: ["Rotation around tool Z", "Translation along base Z"]
+    baseline:
+      b1: ["Translation along base Y", "Translation along base X"]
+      b2: ["Rotation around tool Z", "Translation along base Z"]
+      b3: ["Rotation around tool X", "Rotation around tool Y"]
+  kinova:
+    snake:
+      b1: ["Translation along base Y", "Translation along base X"]
+      b2: ["Rotation around tool Z", "Translation along base Z"]
+    baseline:
+      b1: ["Translation along base Y", "Translation along base X"]
+      b2: ["Rotation around tool Z", "Translation along base Z"]
+      b3: ["Rotation around tool Y", "Rotation around tool X"]
+
 # Seconds of the local overload alarm to play, once per confirmed episode.
 # Positive finite values only; reload the backend after changing this setting.
 sounds:

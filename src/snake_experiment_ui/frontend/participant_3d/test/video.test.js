@@ -97,6 +97,21 @@ test('mapping returns to the trial guidance column after mode explanation', asyn
   assert.equal(mapping.parentElement, c.element('participant-trial-guidance'));
 });
 
+test('text descriptions follow the current trial mode and wait for a known submode', async () => {
+  const c = await client();
+  const mapping_text = { snake: { b1: ['Horizontal', 'Vertical'] } };
+  c.send({ view: 'C', mode: 'snake', local_mode: 'b1', mapping_description: 'text', mapping_text });
+  assert.equal(c.element('participant-mapping-text').hidden, false);
+  assert.equal(c.element('participant-mapping-table').hidden, false);
+  assert.equal(c.element('participant-mapping-horizontal').textContent, 'Horizontal');
+  c.send({ view: 'C', mode: 'snake', local_mode: null, mapping_description: 'text', mapping_text });
+  assert.equal(c.element('participant-mapping-table').hidden, true);
+  assert.equal(c.element('participant-mapping-text-waiting').hidden, false);
+  c.send({ view: 'B', mode: 'snake', mapping_description: 'text', mapping_text });
+  assert.equal(c.element('participant-mapping-text').hidden, true);
+  assert.equal(c.element('participant-mapping').parentElement, c.element('participant-discovery-preview'));
+});
+
 test('participant controller and mode labels follow the active controller', async () => {
   const c = await client();
   for (const [mode, label, local, expected] of [

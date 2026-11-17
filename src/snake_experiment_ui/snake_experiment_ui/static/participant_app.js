@@ -16,6 +16,11 @@
   const modeVideoError = document.getElementById("participant-mode-video-error");
   const trialView = document.getElementById("participant-trial");
   const trialGuidance = document.getElementById("participant-trial-guidance");
+  const mappingText = document.getElementById("participant-mapping-text");
+  const mappingTable = document.getElementById("participant-mapping-table");
+  const mappingWaiting = document.getElementById("participant-mapping-text-waiting");
+  const mappingHorizontal = document.getElementById("participant-mapping-horizontal");
+  const mappingVertical = document.getElementById("participant-mapping-vertical");
   const mappingPreview = document.getElementById("participant-mapping");
   const discoveryPreview = document.getElementById("participant-discovery-preview");
   const trialTitle = document.getElementById("participant-trial-title");
@@ -282,6 +287,14 @@
     presentation.hidden = !showA;
     modeView.hidden = !showB;
     trialView.hidden = !showC;
+    const showText = showC && state.mapping_description === "text" && !state.joystick_input_active;
+    mappingText.hidden = !showText;
+    mappingPreview.hidden = !!state.joystick_input_active || (showC && state.mapping_description === "text");
+    const labels = showText ? state.mapping_text?.[state.mode]?.[state.local_mode] : null;
+    mappingTable.hidden = !labels;
+    mappingWaiting.hidden = !!labels;
+    setText(mappingHorizontal, labels?.[0] || "");
+    setText(mappingVertical, labels?.[1] || "");
     const previewParent = showB ? discoveryPreview : trialGuidance;
     if (mappingPreview.parentElement !== previewParent) previewParent.appendChild(mappingPreview);
     if (!showA && !video.paused) video.pause();

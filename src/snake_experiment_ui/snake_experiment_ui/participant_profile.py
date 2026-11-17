@@ -34,6 +34,20 @@ class ParticipantProfile:
             ) from error
         if not isinstance(data, dict) or data.get("schema_version") != 1:
             raise ParticipantProfileError("Unsupported participant interface profile schema.")
+        self.mapping_description = data.get("mapping_description", "demo")
+        if self.mapping_description not in ("demo", "text"):
+            raise ParticipantProfileError("mapping_description must be demo or text.")
+        self.mapping_text = data.get("mapping_text", {})
+        if self.mapping_description == "text":
+            for robot in ("explorer", "kinova"):
+                for mode, submodes in STATE_NAMES.items():
+                    for submode in submodes:
+                        try:
+                            labels = self.mapping_text[robot][mode][submode]
+                        except (KeyError, TypeError):
+                            raise ParticipantProfileError(f"Missing mapping_text for {robot}/{mode}/{submode}.") from None
+                        if not isinstance(labels, list) or len(labels) != 2 or any(not isinstance(label, str) or not label.strip() for label in labels):
+                            raise ParticipantProfileError(f"mapping_text for {robot}/{mode}/{submode} must contain two nonempty strings.")
         preview = data.get("preview", {})
         if not isinstance(preview, dict) or preview.get("default_view", "view_1") not in (
             "view_1", "view_2", "view_3", "view_4", "view_5", "view_6"

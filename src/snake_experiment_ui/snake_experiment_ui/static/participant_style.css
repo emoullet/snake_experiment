@@ -46,3 +46,7 @@
 @media (max-width: 1200px) { .participant-mapping .preview-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .participant-trial-grid { grid-template-columns: 1fr; } }
 @media (max-width: 520px) { .participant-mapping .mapping-canvas { height: 320px; } }
+
+#participant-mapping-table { border-collapse: collapse; width: 100%; }
+#participant-mapping-table th, #participant-mapping-table td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; }
+#participant-mapping-table[hidden] { display: none; }

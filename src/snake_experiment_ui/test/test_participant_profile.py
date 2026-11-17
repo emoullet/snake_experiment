@@ -10,6 +10,26 @@ from snake_experiment_ui.participant_profile import (
 
 
 class ParticipantProfileTest(unittest.TestCase):
+    def test_mapping_description_and_required_texts(self):
+        import yaml
+        packaged = Path(__file__).parents[1] / "config/participant_interface.yaml"
+        data = yaml.safe_load(packaged.read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profile.yaml"
+            path.write_text(yaml.safe_dump(data))
+            self.assertEqual(ParticipantProfile(path).mapping_description, "demo")
+            data["mapping_description"] = "text"
+            path.write_text(yaml.safe_dump(data))
+            self.assertEqual(ParticipantProfile(path).mapping_text["kinova"]["baseline"]["b3"], ["Rotation around tool Y", "Rotation around tool X"])
+            del data["mapping_text"]["explorer"]["snake"]["b1"]
+            path.write_text(yaml.safe_dump(data))
+            with self.assertRaises(ParticipantProfileError):
+                ParticipantProfile(path)
+            data["mapping_description"] = "invalid"
+            path.write_text(yaml.safe_dump(data))
+            with self.assertRaises(ParticipantProfileError):
+                ParticipantProfile(path)
+
     def test_overload_sound_duration_defaults_and_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "participant_interface.yaml"

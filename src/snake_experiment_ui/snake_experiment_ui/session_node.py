@@ -363,6 +363,8 @@ class SessionInterfaceNode(Node):
             robot_preview=self._robot_preview,
             joystick_input_snapshot=self._joystick_input_monitor.snapshot,
             preview_default_view=self._participant_profile.preview_default_view,
+            mapping_description=self._participant_profile.mapping_description,
+            mapping_text=self._participant_profile.mapping_text.get(preview_robot, {}) if self._participant_profile.mapping_description == "text" else {},
             overload_sound_duration_sec=self._participant_profile.overload_sound_duration_sec,
             protection_snapshot=self._protection_snapshot,
             stack_snapshot=self._stack_manager.snapshot,

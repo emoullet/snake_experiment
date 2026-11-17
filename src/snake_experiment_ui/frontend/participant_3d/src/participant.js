@@ -46,7 +46,7 @@ function updateMessage() {
 
 function update(state) {
   latestState = state;
-  preview.hidden = state?.joystick_input_active === true;
+  preview.hidden = state?.joystick_input_active === true || (state?.view === 'C' && state?.mapping_description === 'text');
   if (!animator.config) return;
   if (!['B', 'C'].includes(state?.view)) {
     animator.stop();
