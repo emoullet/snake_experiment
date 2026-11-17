@@ -11,6 +11,18 @@ REPOSITORY_ROOT = Path(__file__).parents[3]
 
 
 class BringupLayoutTest(unittest.TestCase):
+    def test_session_launch_loads_finalization_debug_setting(self):
+        from launch import LaunchContext
+        from launch.substitutions import TextSubstitution
+
+        module = self._load_launch("session_interface.launch.py")
+        with patch.object(module, "FindPackageShare", return_value=TextSubstitution(text=str(PACKAGE_ROOT))):
+            with patch.object(module, "Node", wraps=module.Node) as node:
+                module.generate_launch_description()
+        config_path = Path(node.call_args.kwargs["parameters"][1].perform(LaunchContext()))
+        parameters = yaml.safe_load(config_path.read_text())
+        self.assertFalse(parameters["snake_experiment_session_interface"]["ros__parameters"]["debug_finalization_requests"])
+
     def test_kinova_launch_uses_local_profile_for_controller_and_manager(self):
         from launch import LaunchContext
         from launch.substitutions import TextSubstitution

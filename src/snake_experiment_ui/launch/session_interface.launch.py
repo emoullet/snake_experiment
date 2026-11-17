@@ -2,8 +2,9 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.parameter_descriptions import ParameterValue
 
 
@@ -87,7 +88,10 @@ def generate_launch_description():
                 "go_to_stall_timeout_sec": LaunchConfiguration("go_to_stall_timeout_sec"),
                 "go_to_progress_window_sec": LaunchConfiguration("go_to_progress_window_sec"),
                 "go_to_feedback_timeout_sec": LaunchConfiguration("go_to_feedback_timeout_sec"),
-            }
+            },
+            PathJoinSubstitution([
+                FindPackageShare("snake_experiment_ui"), "config", "session_interface.yaml"
+            ]),
         ],
     )
     return LaunchDescription(arguments + [node])

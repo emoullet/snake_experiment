@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 import json
+import logging
 import math
 import queue
 from pathlib import Path
@@ -27,6 +28,7 @@ from std_msgs.msg import String
 import uvicorn
 
 from .checkup import CheckupController
+from .access_log import FinalizationAccessFilter
 from .diagnostics import DiagnosticMonitor, DiagnosticProfile, collect_git_provenance
 from .enrollment import EnrollmentController
 from .experiment import ExperimentController, ExperimentProfile
@@ -54,6 +56,7 @@ class SessionInterfaceNode(Node):
         self._closing = False
         self.declare_parameter("host", "127.0.0.1")
         self.declare_parameter("port", 8081)
+        self.declare_parameter("debug_finalization_requests", False)
         self.declare_parameter("stack_robot", "explorer")
         self.declare_parameter("stack_robot_ip", "192.168.1.10")
         self.declare_parameter("stack_use_simulation", False)
@@ -381,6 +384,10 @@ class SessionInterfaceNode(Node):
             port=int(self.get_parameter("port").value),
             log_level="info",
         )
+        self._finalization_access_filter = None
+        if not self.get_parameter("debug_finalization_requests").value:
+            self._finalization_access_filter = FinalizationAccessFilter()
+            logging.getLogger("uvicorn.access").addFilter(self._finalization_access_filter)
         self._server = uvicorn.Server(config)
         self._server_thread = threading.Thread(
             target=self._server.run,
@@ -866,6 +873,8 @@ class SessionInterfaceNode(Node):
                 self._server_thread.join(timeout=3.0)
             except KeyboardInterrupt:
                 pass
+        if self._finalization_access_filter is not None:
+            logging.getLogger("uvicorn.access").removeFilter(self._finalization_access_filter)
         self._go_to_finish_executor.shutdown(wait=True, cancel_futures=True)
         self._experiment.shutdown()
         self._checkup.shutdown()

@@ -397,6 +397,12 @@ monotonically increasing `operation_id`, `block_id`, `phase`, `trial_id` and
 object appears in normal experiment snapshots. This transient status is never
 saved in acquisition JSON files.
 
+Successful requests to this endpoint are hidden from the HTTP access log by
+default; failures and other requests remain logged. To show the polling requests
+for debugging, set `debug_finalization_requests: true` in
+`config/session_interface.yaml`, rebuild the package if necessary, and restart
+the session interface. Set it back to `false` to hide them again.
+
 Completion of the lightweight status alone does not unlock the page. The
 interface waits for a fresh complete snapshot confirming completion of that
 operation or a later one, then uses the normal button permissions. Late
