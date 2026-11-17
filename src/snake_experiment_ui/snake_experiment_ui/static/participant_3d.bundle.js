@@ -1,4 +1,4 @@
-// source-sha256: 3ead07f3b25aee617d8dd748b7248cdff051473ea174ed8d5b4151d39699b2a5
+// source-sha256: 852c89d4bc50529d62ddbc87205ba30a605bd5a3ac3404c4f7fcf5b1c8fcb248
 (()=>{/**
  * @license
  * Copyright 2010-2026 Three.js Authors

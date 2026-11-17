@@ -111,11 +111,11 @@ the approved success criteria before enrolling participants.
 
 `config/participant_interface.yaml` contains the participant-facing media paths.
 Set `mapping_description` to `demo` (default) or `text` to show configurable
-two-row mapping descriptions during trials. Edit `mapping_text` for each robot,
+two-row mapping descriptions during discovery and trials. Edit `mapping_text` for each robot,
 mode and sub-mode when joystick mappings change; labels describe commanded axes,
-not physical direction. Mode explanations continue to use animations. Restart
+not physical direction. Mode explanations use the same text/demo selection as trials. Restart
 the session interface after editing the profile.
-During a trial, the participant can switch between text and demonstration;
+During discovery and trials, the participant can switch between text and demonstration;
 the configured setting is restored when the page is reloaded. Profiles without
 `mapping_text` keep the switch disabled until descriptions are configured.
 The current video entries point to machine-local files named

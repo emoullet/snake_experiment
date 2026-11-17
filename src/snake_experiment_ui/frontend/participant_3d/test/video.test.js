@@ -48,7 +48,8 @@ async function client(initial = { view: 'waiting' }, delayedInitial = null, came
     if (!elements.has(id)) elements.set(id, new Element());
     return elements.get(id);
   };
-  element('participant-mapping').parentElement = element('participant-trial-guidance');
+  element('participant-mapping').parentElement = element('participant-mapping-panel');
+  element('participant-mapping-panel').parentElement = element('participant-trial-guidance');
   element('participant-linear-distance').parentElement = new Element();
   element('participant-angular-distance').parentElement = new Element();
   let socket;
@@ -90,7 +91,7 @@ const overloadState = (episode = 'episode-1', duration = 3, phase = 'waiting_ret
 
 test('mapping returns to the trial guidance column after mode explanation', async () => {
   const c = await client({ view: 'C', mode: 'snake', phase: 'training' });
-  const mapping = c.element('participant-mapping');
+  const mapping = c.element('participant-mapping-panel');
   assert.equal(mapping.parentElement, c.element('participant-trial-guidance'));
   c.send({ view: 'B', mode: 'snake' });
   assert.equal(mapping.parentElement, c.element('participant-discovery-preview'));
@@ -111,8 +112,8 @@ test('text descriptions follow the current trial mode and wait for a known submo
   assert.equal(c.element('participant-mapping-table').hidden, true);
   assert.equal(c.element('participant-mapping-text-waiting').hidden, false);
   c.send({ view: 'B', mode: 'snake', mapping_description: 'text', mapping_text });
-  assert.equal(c.element('participant-mapping-text').hidden, true);
-  assert.equal(c.element('participant-mapping').parentElement, c.element('participant-discovery-preview'));
+  assert.equal(c.element('participant-mapping-text').hidden, false);
+  assert.equal(c.element('participant-mapping-panel').parentElement, c.element('participant-discovery-preview'));
 });
 
 test('participant can switch mapping display without changing the server setting', async () => {
@@ -131,6 +132,28 @@ test('participant can switch mapping display without changing the server setting
   assert.equal(c.element('participant-mapping').hidden, false);
   c.send({ ...state, mapping_text: {} });
   assert.equal(button.disabled, true);
+});
+
+test('discovery mapping switches without restarting video and follows activity', async () => {
+  const mapping_text = { snake: { b1: ['Horizontal', 'Vertical'] } };
+  const state = { view: 'B', mode: 'snake', local_mode: 'b1', mapping_description: 'text', mapping_text, video_available: true, video_play_request_id: 'discovery-1' };
+  const c = await client(state);
+  const video = c.element('participant-mode-video');
+  video.loaded();
+  await flush();
+  const calls = video.playCalls.length;
+  assert.equal(c.element('participant-mapping-text').hidden, false);
+  assert.equal(c.element('participant-mapping').hidden, true);
+  c.element('participant-mapping-switch').dispatchEvent(new Event('click'));
+  assert.equal(c.element('participant-mapping').hidden, false);
+  assert.equal(video.playCalls.length, calls);
+  c.send({ ...state, joystick_input_active: true });
+  assert.equal(c.element('participant-mapping').hidden, true);
+  c.send({ ...state, joystick_input_active: false });
+  assert.equal(c.element('participant-mapping').hidden, false);
+  c.send({ ...state, view: 'C', phase: 'training' });
+  assert.equal(c.element('participant-mapping-panel').parentElement, c.element('participant-trial-guidance'));
+  assert.equal(c.element('participant-mapping').hidden, false);
 });
 
 test('participant controller and mode labels follow the active controller', async () => {
@@ -429,4 +452,7 @@ test('language changes update live trial and joystick descriptions', async () =>
   assert.equal(c.element('participant-mapping-horizontal').textContent, 'Horizontale');
   assert.equal(c.element('participant-trial-state').textContent, 'Enregistrement');
   assert.equal(c.element('participant-mapping-switch').textContent, 'Afficher la démonstration');
+  c.send({ view: 'B', mode: 'snake', local_mode: 'b1', mapping_description: 'text', mapping_text: { snake: { b1: ['Horizontal', 'Vertical'] } }, mapping_text_french: { snake: { b1: ['Horizontale', 'Verticale'] } } });
+  assert.equal(c.element('participant-mapping-horizontal').textContent, 'Horizontale');
+  assert.equal(c.element('participant-mapping-text').hidden, false);
 });

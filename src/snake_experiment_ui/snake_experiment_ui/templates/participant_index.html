@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Experiment · Participant</title>
     <link rel="stylesheet" href="/session-static/session_style.css?v=session-style-timeout-1" />
-    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-layout-language-1" />
+    <link rel="stylesheet" href="/session-static/participant_style.css?v=participant-layout-discovery-3" />
     <link rel="stylesheet" href="/session-static/participant_3d.css?v=participant-3d-3" />
     <script src="/session-static/participant_language.js?v=1" defer></script>
-    <script src="/session-static/participant_app.js?v=participant-layout-language-1" defer></script>
-    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-language-1" defer></script>
+    <script src="/session-static/participant_app.js?v=participant-layout-discovery-1" defer></script>
+    <script src="/session-static/participant_mapping.bundle.js?v=participant-mapping-discovery-1" defer></script>
   </head>
   <body>
     <div class="participant-language"><label for="participant-language" class="participant-language-label">Language / Langue</label><select id="participant-language"><option value="english">English</option><option value="french">Français</option></select></div>
@@ -24,16 +24,20 @@
       <section id="participant-mode-explanation" class="participant-card" hidden>
         <p class="step-number">Mode explanation</p>
         <h1 id="participant-mode-title">Mode explanation</h1>
-        <div id="participant-mode-video-frame" class="participant-video-frame" hidden>
-          <video id="participant-mode-video" controls preload="metadata" playsinline aria-label="Mode explanation video"></video>
+        <div class="participant-discovery-grid">
+          <div class="participant-discovery-video">
+            <div id="participant-mode-video-frame" class="participant-video-frame" hidden>
+              <video id="participant-mode-video" controls preload="metadata" playsinline aria-label="Mode explanation video"></video>
+            </div>
+            <p id="participant-mode-video-error" class="inline-error" role="alert" hidden>The configured mode video could not be prepared for playback. Please notify the experimenter.</p>
+            <p id="participant-mode-video-autoplay-warning" class="inline-warning" role="status" hidden>Automatic playback was blocked. Press Play to start the video with sound.</p>
+            <div id="participant-mode-video-placeholder" class="participant-video-placeholder" hidden>
+              <strong>Mode explanation video unavailable</strong>
+              <p>The experimenter may continue for development only.</p>
+            </div>
+          </div>
+          <div id="participant-discovery-preview" class="participant-mapping-host"></div>
         </div>
-        <p id="participant-mode-video-error" class="inline-error" role="alert" hidden>The configured mode video could not be prepared for playback. Please notify the experimenter.</p>
-        <p id="participant-mode-video-autoplay-warning" class="inline-warning" role="status" hidden>Automatic playback was blocked. Press Play to start the video with sound.</p>
-        <div id="participant-mode-video-placeholder" class="participant-video-placeholder" hidden>
-          <strong>Mode explanation video unavailable</strong>
-          <p>The experimenter may continue for development only.</p>
-        </div>
-        <div id="participant-discovery-preview"></div>
       </section>
       <section id="participant-presentation" class="participant-card" hidden>
         <p class="step-number">Experiment introduction</p>
@@ -68,41 +72,43 @@
           </div>
           <div id="participant-trial-guidance" class="participant-trial-guidance">
             <div class="participant-control-state"><span>Current control mode</span><strong id="participant-local-mode">Unknown</strong></div>
-            <div class="participant-mapping-switch-heading"><h2>Joystick mapping</h2><button id="participant-mapping-switch" class="secondary-button" type="button" aria-pressed="false">Show text</button></div>
-            <section id="participant-mapping-text" class="participant-mapping" aria-label="Current joystick mapping" hidden>
-              <p id="participant-mapping-text-waiting" role="status">Waiting for the current control mode.</p>
-              <table id="participant-mapping-table" hidden><tbody>
-                <tr><th scope="row">Left/right input</th><td aria-hidden="true">→</td><td id="participant-mapping-horizontal"></td></tr>
-                <tr><th scope="row">Forward/backward input</th><td aria-hidden="true">→</td><td id="participant-mapping-vertical"></td></tr>
-              </tbody></table>
-            </section>
-            <section id="participant-mapping" class="participant-mapping" aria-label="Current joystick mapping explanation">
-              <div class="participant-mapping-heading"><h2>Joystick mapping · example inputs</h2><span id="participant-snake-indicator" class="pill pill--neutral" hidden></span>
-              <div class="participant-camera-views" role="group" aria-label="Robot preview viewpoint">
-                <button class="secondary-button" type="button" data-preview-view="view_1" aria-pressed="false" disabled>View 1</button>
-                <button class="secondary-button" type="button" data-preview-view="view_2" aria-pressed="false" disabled>View 2</button>
-                <button class="secondary-button" type="button" data-preview-view="view_3" aria-pressed="false" disabled>View 3</button>
-                <button class="secondary-button" type="button" data-preview-view="view_4" aria-pressed="false" disabled>View 4</button>
-                <button class="secondary-button" type="button" data-preview-view="view_5" aria-pressed="false" disabled>View 5</button>
-                <button class="secondary-button" type="button" data-preview-view="view_6" aria-pressed="false" disabled>View 6</button>
-              </div>
-              </div>
-              <p id="participant-mapping-message" class="preview-note" role="status">Waiting for the current mapper state.</p>
-              <div class="preview-grid">
-                <article class="preview-card mapping-view" id="participant-horizontal-view">
-                  <div class="preview-card-heading"><span class="step-number">01</span><h3>Horizontal input</h3></div>
-                  <div class="mapping-motion"><div class="preview-canvas mapping-canvas" aria-label="Animated robot arm for horizontal input"></div><div class="mapping-joystick" aria-label="Illustrative horizontal joystick input"></div></div>
-                  <p class="preview-caption"><span data-mapping-direction>Axis 0</span> · <span data-mapping-source class="pill pill--neutral">Waiting</span></p>
-                  <p class="preview-limit" data-mapping-limit role="status"></p>
-                </article>
-                <article class="preview-card mapping-view" id="participant-vertical-view">
-                  <div class="preview-card-heading"><span class="step-number">02</span><h3>Vertical input</h3></div>
-                  <div class="mapping-motion"><div class="preview-canvas mapping-canvas" aria-label="Animated robot arm for vertical input"></div><div class="mapping-joystick" aria-label="Illustrative vertical joystick input"></div></div>
-                  <p class="preview-caption"><span data-mapping-direction>Axis 1</span> · <span data-mapping-source class="pill pill--neutral">Waiting</span></p>
-                  <p class="preview-limit" data-mapping-limit role="status"></p>
-                </article>
-              </div>
-            </section>
+            <div id="participant-mapping-panel" class="participant-mapping-host">
+              <div class="participant-mapping-switch-heading"><h2>Joystick mapping</h2><button id="participant-mapping-switch" class="secondary-button" type="button" aria-pressed="false">Show text</button></div>
+              <section id="participant-mapping-text" class="participant-mapping" aria-label="Current joystick mapping" hidden>
+                <p id="participant-mapping-text-waiting" role="status">Waiting for the current control mode.</p>
+                <table id="participant-mapping-table" hidden><tbody>
+                  <tr><th scope="row">Left/right input</th><td aria-hidden="true">→</td><td id="participant-mapping-horizontal"></td></tr>
+                  <tr><th scope="row">Forward/backward input</th><td aria-hidden="true">→</td><td id="participant-mapping-vertical"></td></tr>
+                </tbody></table>
+              </section>
+              <section id="participant-mapping" class="participant-mapping" aria-label="Current joystick mapping explanation">
+                <div class="participant-mapping-heading"><h2>Joystick mapping · example inputs</h2><span id="participant-snake-indicator" class="pill pill--neutral" hidden></span>
+                <div class="participant-camera-views" role="group" aria-label="Robot preview viewpoint">
+                  <button class="secondary-button" type="button" data-preview-view="view_1" aria-pressed="false" disabled>View 1</button>
+                  <button class="secondary-button" type="button" data-preview-view="view_2" aria-pressed="false" disabled>View 2</button>
+                  <button class="secondary-button" type="button" data-preview-view="view_3" aria-pressed="false" disabled>View 3</button>
+                  <button class="secondary-button" type="button" data-preview-view="view_4" aria-pressed="false" disabled>View 4</button>
+                  <button class="secondary-button" type="button" data-preview-view="view_5" aria-pressed="false" disabled>View 5</button>
+                  <button class="secondary-button" type="button" data-preview-view="view_6" aria-pressed="false" disabled>View 6</button>
+                </div>
+                </div>
+                <p id="participant-mapping-message" class="preview-note" role="status">Waiting for the current mapper state.</p>
+                <div class="preview-grid">
+                  <article class="preview-card mapping-view" id="participant-horizontal-view">
+                    <div class="preview-card-heading"><span class="step-number">01</span><h3>Horizontal input</h3></div>
+                    <div class="mapping-motion"><div class="preview-canvas mapping-canvas" aria-label="Animated robot arm for horizontal input"></div><div class="mapping-joystick" aria-label="Illustrative horizontal joystick input"></div></div>
+                    <p class="preview-caption"><span data-mapping-direction>Axis 0</span> · <span data-mapping-source class="pill pill--neutral">Waiting</span></p>
+                    <p class="preview-limit" data-mapping-limit role="status"></p>
+                  </article>
+                  <article class="preview-card mapping-view" id="participant-vertical-view">
+                    <div class="preview-card-heading"><span class="step-number">02</span><h3>Vertical input</h3></div>
+                    <div class="mapping-motion"><div class="preview-canvas mapping-canvas" aria-label="Animated robot arm for vertical input"></div><div class="mapping-joystick" aria-label="Illustrative vertical joystick input"></div></div>
+                    <p class="preview-caption"><span data-mapping-direction>Axis 1</span> · <span data-mapping-source class="pill pill--neutral">Waiting</span></p>
+                    <p class="preview-limit" data-mapping-limit role="status"></p>
+                  </article>
+                </div>
+              </section>
+            </div>
           </div>
         </div>
       </section>

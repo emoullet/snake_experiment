@@ -53,10 +53,17 @@
 
 .participant-mapping-switch-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
 .participant-mapping-switch-heading h2 { margin: 0; font-size: clamp(1.15rem, 2vw, 1.5rem); }
-.participant-trial-guidance > .participant-mapping { margin-top: 12px; }
-.participant-trial-guidance > .participant-mapping .participant-mapping-heading h2 { display: none; }
+.participant-mapping-host > .participant-mapping { margin-top: 12px; }
+.participant-mapping-host > .participant-mapping .participant-mapping-heading h2 { display: none; }
 
 .participant-language { position: absolute; top: 12px; right: 16px; z-index: 25; display: flex; align-items: center; gap: 8px; }
 .participant-language select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font: inherit; }
 .participant-language-label { font-size: .8rem; }
 @media (max-width: 600px) { .participant-workspace { padding-top: 58px; } }
+
+#participant-mode-explanation { padding: clamp(20px, 2.5vw, 40px); }
+.participant-discovery-grid { display: grid; grid-template-columns: minmax(260px, 1.25fr) minmax(0, 1.75fr); gap: clamp(16px, 2vw, 32px); align-items: start; }
+.participant-discovery-video, .participant-mapping-host { min-width: 0; }
+.participant-discovery-video > .participant-video-frame, .participant-discovery-video > .participant-video-placeholder { margin-top: 0; }
+.participant-discovery-grid .participant-mapping-switch-heading { margin-top: 0; }
+@media (max-width: 760px) { .participant-discovery-grid { grid-template-columns: 1fr; } }

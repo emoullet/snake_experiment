@@ -19,6 +19,7 @@
   const modeVideoError = document.getElementById("participant-mode-video-error");
   const trialView = document.getElementById("participant-trial");
   const trialGuidance = document.getElementById("participant-trial-guidance");
+  const mappingPanel = document.getElementById("participant-mapping-panel");
   const mappingSwitch = document.getElementById("participant-mapping-switch");
   const mappingText = document.getElementById("participant-mapping-text");
   const mappingTable = document.getElementById("participant-mapping-table");
@@ -303,16 +304,16 @@
       lastSuccessEventId = state.success_event_id;
       void playSuccessSound();
     }
-    workspace.classList.toggle("participant-workspace--trial", showC);
+    workspace.classList.toggle("participant-workspace--trial", showB || showC);
     if (!showC && currentView === "C") stopCamera();
     currentView = showC ? "C" : state.view;
     waiting.hidden = showA || showB || showC;
     presentation.hidden = !showA;
     modeView.hidden = !showB;
     trialView.hidden = !showC;
-    const showText = showC && selectedMapping === "text" && !state.joystick_input_active;
+    const showText = (showB || showC) && selectedMapping === "text" && !state.joystick_input_active;
     mappingText.hidden = !showText;
-    mappingPreview.hidden = !!state.joystick_input_active || (showC && selectedMapping === "text");
+    mappingPreview.hidden = !!state.joystick_input_active || ((showB || showC) && selectedMapping === "text");
     const translations = window.participantI18n?.language === "french" ? state.mapping_text_french : null;
     const labels = showText ? (translations?.[state.mode]?.[state.local_mode] || state.mapping_text?.[state.mode]?.[state.local_mode]) : null;
     mappingTable.hidden = !labels;
@@ -320,7 +321,7 @@
     setText(mappingHorizontal, labels?.[0] || "");
     setText(mappingVertical, labels?.[1] || "");
     const previewParent = showB ? discoveryPreview : trialGuidance;
-    if (mappingPreview.parentElement !== previewParent) previewParent.appendChild(mappingPreview);
+    if (mappingPanel.parentElement !== previewParent) previewParent.appendChild(mappingPanel);
     if (!showA && !video.paused) video.pause();
     if (!showB && !modeVideo.paused) modeVideo.pause();
     if (showA) {
