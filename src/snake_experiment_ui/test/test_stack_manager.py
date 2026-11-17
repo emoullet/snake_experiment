@@ -22,6 +22,40 @@ class FakeProcess:
 
 
 class StackManagerTest(unittest.TestCase):
+    def test_manual_stop_defers_graph_cleanup_until_next_start(self):
+        graph, processes, waits = [], [], []
+        def create(*args, **kwargs):
+            process = FakeProcess(*args, **kwargs)
+            processes.append(process)
+            graph[:] = ["cartesian_manager"]
+            return process
+        def wait(_):
+            waits.append(True)
+            graph.clear()
+        manager = StackManager(node_names=lambda: graph, popen_factory=create, sleep=wait)
+        manager.start()
+        with patch("snake_experiment_ui.stack_manager.os.killpg"):
+            manager.stop()
+            manager.stop()  # A repeated stop also accepts the stale owned graph.
+        self.assertTrue(manager.start()["owned"])
+        self.assertEqual(len(waits), 1)
+        self.assertEqual(len(processes), 2)
+
+    def test_unexpected_exit_waits_for_graph_before_experiment_restart(self):
+        graph, processes, phases = [], [], []
+        def create(*args, **kwargs):
+            process = FakeProcess(*args, **kwargs)
+            processes.append(process)
+            graph[:] = ["cartesian_manager"]
+            return process
+        manager = StackManager(node_names=lambda: graph, popen_factory=create,
+                               sleep=lambda _: graph.clear())
+        manager.start()
+        processes[0].return_code = 1
+        self.assertEqual(manager.start_for_experiment(phases.append)["status"], "active")
+        self.assertEqual(phases, ["waiting_for_graph", "starting"])
+        self.assertEqual(len(processes), 2)
+
     def test_experiment_stop_returns_before_dds_cleanup_and_start_waits_without_snapshot_lock(self):
         processes, phases = [], []
         entered, release = threading.Event(), threading.Event()

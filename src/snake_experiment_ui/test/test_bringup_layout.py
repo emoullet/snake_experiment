@@ -22,6 +22,7 @@ class BringupLayoutTest(unittest.TestCase):
         config_path = Path(node.call_args.kwargs["parameters"][1].perform(LaunchContext()))
         parameters = yaml.safe_load(config_path.read_text())
         self.assertFalse(parameters["snake_experiment_session_interface"]["ros__parameters"]["debug_finalization_requests"])
+        self.assertEqual(node.call_args.kwargs["sigterm_timeout"], "20")
 
     def test_kinova_launch_uses_local_profile_for_controller_and_manager(self):
         from launch import LaunchContext

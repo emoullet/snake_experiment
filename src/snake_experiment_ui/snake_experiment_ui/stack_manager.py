@@ -91,6 +91,7 @@ class StackManager:
         return_code = self._process.poll()
         if return_code is not None:
             self._process = None
+            self._cleanup_pending = True
             if self._status not in ("stopping", "inactive"):
                 self._status = "error"
                 self._error = f"Experiment stack exited with status {return_code}."
@@ -117,6 +118,10 @@ class StackManager:
                     return self.snapshot()
                 if self._process is not None:
                     raise StackError("The owned stack process is still running; stop it before starting again.")
+            if self._cleanup_pending:
+                self._wait_for_graph_cleanup()
+                self._cleanup_pending = False
+            with self._lock:
                 if self._process is None and self._stack_visible():
                     raise StackError(
                         "A cartesian_manager node is already running outside this interface."
@@ -182,7 +187,7 @@ class StackManager:
             with self._lock:
                 self._refresh_process_state()
                 if self._process is None:
-                    if self._stack_visible():
+                    if not self._cleanup_pending and self._stack_visible():
                         raise StackError(
                             "The running experiment stack was not started by this interface."
                         )
@@ -195,15 +200,14 @@ class StackManager:
     def stop_for_experiment(self) -> dict:
         """Stop owned processes now; defer DDS cleanup to the next start."""
         with self._lifecycle_lock:
-            owned = self.snapshot()["owned"]
             state = self.stop()
-            if owned:
-                self._cleanup_pending = True
             return state
 
     def start_for_experiment(self, phase_changed: Callable[[str], None]) -> dict:
         """Wait for a previously stopped owned graph without holding snapshot locks."""
         with self._lifecycle_lock:
+            with self._lock:
+                self._refresh_process_state()
             if self._cleanup_pending:
                 phase_changed("waiting_for_graph")
                 self._wait_for_graph_cleanup()
@@ -268,6 +272,7 @@ class StackManager:
                 self._monitoring_changed(True)
                 raise StackError(self._error)
             self._process = None
+            self._cleanup_pending = True
             if preserve_error:
                 self._status = "error"
             else:

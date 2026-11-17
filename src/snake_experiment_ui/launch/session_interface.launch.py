@@ -45,6 +45,9 @@ def generate_launch_description():
         executable="session_interface_node",
         name="snake_experiment_session_interface",
         output="screen",
+        # Shutdown can include recording finalization and several owned launches.
+        # Keep the interface alive long enough to stop its separate process groups.
+        sigterm_timeout="20",
         parameters=[
             {
                 "host": LaunchConfiguration("host"),
