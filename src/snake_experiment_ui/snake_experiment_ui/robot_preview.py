@@ -396,30 +396,52 @@ class RobotPoseMonitor:
             }
 
 
-class JoystickInputMonitor:
-    """Track fresh participant inputs independently of robot motion."""
+class CartesianCommandMonitor:
+    """Track fresh, nonzero Cartesian commands."""
 
-    def __init__(self, deadzone=0.2, clock=time.monotonic, max_age_sec=1.0):
-        self._deadzone = deadzone
+    def __init__(self, clock=time.monotonic, max_age_sec=1.0):
         self._clock = clock
         self._max_age_sec = max_age_sec
         self._lock = threading.RLock()
         self._active = False
         self._received_at = None
 
-    def record(self, message):
-        # The mapper uses axes 0 and 1; other axes may rest away from zero.
-        axes = getattr(message, "axes", ())
-        buttons = getattr(message, "buttons", ())
-        active = any(math.isfinite(value) and abs(value) > self._deadzone for value in axes[:2]) or any(buttons)
-        with self._lock:
-            self._active = active
-            self._received_at = self._clock()
-
     def snapshot(self):
         with self._lock:
             return bool(self._active and self._received_at is not None
                         and self._clock() - self._received_at <= self._max_age_sec)
+
+    def record_command(self, message):
+        twist = getattr(message, "twist", None)
+        vectors = (getattr(twist, "linear", None), getattr(twist, "angular", None))
+        values = [getattr(vector, axis, 0.0) for vector in vectors for axis in ("x", "y", "z")]
+        active = any(isinstance(value, (int, float)) and math.isfinite(value) and abs(value) > 1e-9 for value in values)
+        with self._lock:
+            self._active = active
+            self._received_at = self._clock()
+
+
+class CouplingRequestMonitor:
+    """Track the most recent geometric mode request, regardless of its source."""
+
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._active = None
+
+    def record(self, message):
+        request = getattr(message, "data", "").strip().lower()
+        if request not in ("geometric/snake", "geometric/both", "geometric/jaco"):
+            return
+        with self._lock:
+            self._active = request == "geometric/snake"
+
+    def reset(self):
+        with self._lock:
+            self._active = None
+
+    def snapshot(self):
+        with self._lock:
+            return self._active
 
 
 class SnakeButtonMonitor:

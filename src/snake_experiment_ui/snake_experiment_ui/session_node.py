@@ -37,7 +37,7 @@ from .input_sources import enabled_input_topics
 from .mode_manager import ModeManager
 from .participant_profile import ParticipantProfile
 from .rosbag_manager import RosbagManager
-from .robot_preview import PreviewConfiguration, RobotPreview, SnakeButtonMonitor, JoystickInputMonitor
+from .robot_preview import PreviewConfiguration, RobotPreview, CouplingRequestMonitor, CartesianCommandMonitor
 from .session_web_app import create_session_app
 from .stack_manager import StackManager
 from .storage import default_calibration_path
@@ -195,8 +195,8 @@ class SessionInterfaceNode(Node):
         preview_robot = str(self.get_parameter("stack_robot").value)
         preview_configuration = PreviewConfiguration(share / "config/robot_preview.yaml", share, robot=preview_robot)
         self._robot_preview = RobotPreview(configuration=preview_configuration, robot=preview_robot)
-        self._snake_button_monitor = SnakeButtonMonitor(preview_configuration.snake_button_index)
-        self._joystick_input_monitor = JoystickInputMonitor(deadzone=self._profile.joystick_deadzone)
+        self._coupling_request_monitor = CouplingRequestMonitor()
+        self._cartesian_command_monitor = CartesianCommandMonitor()
         self._go_to_finish_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="go-to-finish")
         go_to_options = {
             "publish_target": self._publish_pose_target,
@@ -240,13 +240,13 @@ class SessionInterfaceNode(Node):
             self.create_subscription(
                 TwistStamped,
                 "/cartesian_command",
-                lambda message: self._diagnostics.record("/cartesian_command", message),
+                self._record_cartesian_command,
                 50,
             ),
             self.create_subscription(
                 String,
                 "/mode_request",
-                lambda message: self._diagnostics.record("/mode_request", message),
+                self._record_mode_request,
                 10,
             ),
             self.create_subscription(
@@ -332,7 +332,7 @@ class SessionInterfaceNode(Node):
             go_to_controller=self._experiment_go_to,
             presentation_video=presentation_video,
             mode_explanation_videos=mode_explanation_videos,
-            snake_button_provider=self._snake_button_monitor.snapshot,
+            snake_button_provider=self._coupling_request_monitor.snapshot,
         )
         self._enrollment = EnrollmentController(
             sessions_root=sessions_root,
@@ -367,7 +367,7 @@ class SessionInterfaceNode(Node):
             presentation_video=str(presentation_video or ""),
             mode_explanation_videos=mode_explanation_videos,
             robot_preview=self._robot_preview,
-            joystick_input_snapshot=self._joystick_input_monitor.snapshot,
+            joystick_input_snapshot=self._cartesian_command_monitor.snapshot,
             preview_default_view=self._participant_profile.preview_default_view,
             mapping_description=self._participant_profile.mapping_description,
             mapping_text=self._participant_profile.mapping_text.get(preview_robot, {}),
@@ -608,8 +608,14 @@ class SessionInterfaceNode(Node):
 
     def _record_joy(self, message: Joy) -> None:
         self._diagnostics.record("/joy", message)
-        self._snake_button_monitor.record(message)
-        self._joystick_input_monitor.record(message)
+
+    def _record_mode_request(self, message: String) -> None:
+        self._diagnostics.record("/mode_request", message)
+        self._coupling_request_monitor.record(message)
+
+    def _record_cartesian_command(self, message: TwistStamped) -> None:
+        self._diagnostics.record("/cartesian_command", message)
+        self._cartesian_command_monitor.record_command(message)
 
     def _node_names(self):
         if self._closing:
@@ -729,7 +735,7 @@ class SessionInterfaceNode(Node):
             self._graph["controllers"] = {}
 
     def _request_mapper_client_reset(self) -> None:
-        self._snake_button_monitor.reset()
+        self._coupling_request_monitor.reset()
         if hasattr(self, "_experiment"):
             self._experiment.clear_mapper_local_mode()
         with self._graph_lock:

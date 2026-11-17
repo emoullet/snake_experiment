@@ -15,7 +15,7 @@ from snake_experiment_ui.robot_preview import (
     PreviewConfiguration,
     RobotPoseMonitor,
     RobotPreviewError,
-    SnakeButtonMonitor,
+    SnakeButtonMonitor, CouplingRequestMonitor,
 )
 
 
@@ -334,6 +334,19 @@ class SnakeButtonMonitorTest(unittest.TestCase):
         monitor.record(types.SimpleNamespace(buttons=[0] * 10 + [2]))
         self.assertIsNone(monitor.snapshot())
         monitor.record(types.SimpleNamespace(buttons=[0] * 10 + [1]))
+        monitor.reset()
+        self.assertIsNone(monitor.snapshot())
+
+
+class CouplingRequestMonitorTest(unittest.TestCase):
+    def test_requests_from_any_source_and_reset(self):
+        monitor = CouplingRequestMonitor()
+        self.assertIsNone(monitor.snapshot())
+        for request, expected in (("geometric/snake", True), ("behaviour/passthrough", True),
+                                  ("geometric/both", False), ("geometric/snake", True),
+                                  ("geometric/jaco", False)):
+            monitor.record(types.SimpleNamespace(data=request))
+            self.assertIs(monitor.snapshot(), expected)
         monitor.reset()
         self.assertIsNone(monitor.snapshot())
 
